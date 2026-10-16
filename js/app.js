@@ -26,7 +26,7 @@ import {
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
 } from './cardio.js';
-import { buildMealPlan, buildDailyTips } from './recommend.js';
+import { buildMealPlan, buildDailyTips, convergePlan } from './recommend.js';
 import {
   emptyState, migrate, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   addExercise, removeExercise, addWeight, addCustomFood, weightTrend, analyzeProgress,
@@ -73,9 +73,23 @@ function save() {
   }
 }
 
+/**
+ * 她的每日目标。
+ *
+ * 注意这里做了一次「对账」：先用公式算出目标，再生成一份餐单看实际能做到多少，
+ * 然后让脂肪目标落回可达范围（否则会出现「该吃 46 克脂肪、餐单只给 39 克」这种自相矛盾）。
+ * 只调脂肪，蛋白和总热量不动 —— 蛋白保肌肉，热量决定速度。
+ */
 function targets() {
   if (!state.profile) return null;
-  return calcTargets(state.profile);
+  const raw = calcTargets(state.profile);
+  if (!raw) return null;
+  try {
+    return convergePlan(raw, { seed: planSeed }).targets;
+  } catch (err) {
+    console.warn('目标对账失败，用原始目标：', err);
+    return raw;
+  }
 }
 
 /* ── 小工具 ──────────────────────────────── */
@@ -1017,7 +1031,10 @@ function renderProgress() {
       <hr class="sep">
       <div class="small">
         目标体重约 ${t.targetWeightKg} kg，还要减约 ${t.toLoseKg} kg。<br>
-        按现在的节奏大约每周减 ${t.weeklyLossKg} kg${t.estimatedWeeks ? `，大概 ${t.estimatedWeeks} 周达到目标` : ''}。<br>
+        ${t.deficit > 0
+          ? `按现在的节奏大约每周减 ${t.weeklyLossKg} kg${t.estimatedWeeks ? `，大概 ${t.estimatedWeeks} 周达到目标` : ''}。<br>`
+          : '<b>当前是维持状态</b>：按这个体型，安全下限已经不低于总消耗，暂时没有减脂空间。<br>'}
+
         蛋白质约 ${Math.round(t.proteinG)} g · 脂肪约 ${Math.round(t.fatG)} g · 碳水约 ${Math.round(t.carbG)} g。
       </div>
       ${t.warnings.map((w) => `<div class="warn" style="margin-top:10px">${esc(w)}</div>`).join('')}
@@ -1821,7 +1838,10 @@ function openProfileSheet() {
           const t = calcTargets({ ...f, targetWeightKg: f.targetWeightKg });
           const tw = f.targetWeightKg || defaultTargetWeight(f);
           preview.className = 'warn info';
-          preview.innerHTML = `每天大约吃 <b>${Math.round(t.targetCalories / 10) * 10} kcal</b>（消耗约 ${Math.round(t.tdee / 10) * 10} − 缺口约 ${Math.round(t.deficit / 10) * 10}）·
+          const gapText = t.deficit > 0
+            ? `消耗约 ${Math.round(t.tdee / 10) * 10} − 缺口约 ${Math.round(t.deficit / 10) * 10}`
+            : `消耗约 ${Math.round(t.tdee / 10) * 10}，已经是维持（安全下限不低于消耗）`;
+          preview.innerHTML = `每天大约吃 <b>${Math.round(t.targetCalories / 10) * 10} kcal</b>（${gapText}）·
             蛋白约 ${Math.round(t.proteinG)} g / 脂肪约 ${Math.round(t.fatG)} g / 碳水约 ${Math.round(t.carbG)} g<br>
             BMI ${t.bmi}（${t.bmiClass.label}）· 目标 ${round(tw, 1)} kg ·
             ${t.weeklyLossKg > 0 ? `预计每周减 ${t.weeklyLossKg} kg` : '维持体重'}

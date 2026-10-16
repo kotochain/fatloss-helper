@@ -29,6 +29,34 @@ export const MAX_DAILY_OIL_G = 30;
 /** 配餐时给烹调油预留的剩余热量比例（早餐鸡蛋、午晚炒菜都要用油） */
 const DAILY_OIL_KCAL_SHARE = 0.18;
 
+/**
+ * 单个食物最多给几份。
+ * 没有这条限制时，热量目标高的人会被配出「鸡蛋 4.5 个当早餐」这种不现实的量 ——
+ * 真实场景里没人一顿吃五个鸡蛋。
+ *
+ * 上限按当日热量动态定：吃得少的人一顿一碗饭，吃 2500 kcal 的人一顿三碗饭也正常。
+ * 固定值不行 —— 取小了会让大体重的人凑不够热量（实测偏差从 6% 反弹到 18%），
+ * 取大了又会给出「4.5 个鸡蛋」。
+ */
+/**
+ * 个别食物自己的份量上限。
+ * 燕麦是干货：45 克冲一碗，135 克（4.5 份）泡出来是一大盆，没人这么吃。
+ * 米饭按碗吃所以能放宽，燕麦不行。
+ */
+const FOOD_SERVING_OVERRIDE = { oats: 3 };
+
+function maxServingsFor(targetCalories, role) {
+  const perMealKcal = (targetCalories || 1800) * 0.3; // 一顿大约占三成
+  // 300 kcal/份 这个系数是试出来的：再紧就装不下 2200 kcal 的维持期目标（实测偏差 19%），
+  // 再松又会出现「一顿 4.5 个鸡蛋」。超过 2400 kcal 的目标本来就不是这个结构能覆盖的，
+  // 那种情况由 deviationNote 如实说明。
+  const raw = role === 'carb' ? perMealKcal / 300 : perMealKcal / 380;
+  return Math.min(role === 'carb' ? 6 : 5, Math.max(2, raw));
+}
+
+/** 配角（牛奶/酸奶）最多几份，同样是为了不给出「500 克酸奶」这种量 */
+const MAX_SIDE_SERVINGS = 2;
+
 import { FOODS } from './foods.js';
 import { round } from './calc.js';
 
@@ -258,6 +286,110 @@ export function trimMeal(items, budgetKcal, tolerance = 0.04) {
 }
 
 /**
+ * 让「目标」和「餐单能做到的量」对齐。
+ *
+ * 为什么需要这一步：目标里的脂肪是按体重算的（0.8~0.9 g/kg），但餐单是先保蛋白质和总热量、
+ * 脂肪靠补烹调油（有 30 克上限）。两边各算各的，就会出现「你该吃 46 克脂肪，餐单只给你 35 克」
+ * 这种自相矛盾 —— 实测下来脂肪普遍只达成 70%。
+ *
+ * 这里把脂肪目标拉回「餐单实际能给的范围」，并把差额补给碳水，
+ * 保证四项加起来仍然等于目标热量。**只调脂肪，不动蛋白和总热量**：
+ * 蛋白是保肌肉的关键，热量是决定减脂速度的关键，脂肪有安全下限兜底。
+ */
+export function reconcileFatTarget(targets, plan) {
+  if (!plan?.meals?.length || !(targets.fatG > 0)) return targets;
+
+  // 先对账蛋白质：餐单结构自带不少蛋白（燕麦、酸奶、米饭、蔬菜都含），
+  // 当餐单给的蛋白明显高于目标时，多出来的那部分会挤占碳水的热量，
+  // 让总热量怎么都追不上目标（实测 58 kg 维持期会差 19%）。
+  // 处理：既然她实际会吃到这么多蛋白（是好事），就把目标更新成实际值，
+  // 然后把差额从碳水里扣掉 —— 总热量保持不变。
+  const proteinDiff = plan.planProteinG - targets.proteinG;
+  if (proteinDiff > 5) {
+    const kcalShift = proteinDiff * 4;
+    const newCarb = Math.max(80, Math.round((targets.carbG - kcalShift / 4) * 10) / 10);
+    targets = {
+      ...targets,
+      proteinG: Math.round(plan.planProteinG * 10) / 10,
+      carbG: newCarb,
+      proteinNote: `蛋白质目标从 ${Math.round(targets.proteinG)} 克上调到 ${Math.round(plan.planProteinG)} 克 —— 这份餐单本来就含这么多蛋白（燕麦、酸奶、米饭里都有）。多吃蛋白对减脂是好事，多出来的热量从主食里扣掉。`,
+    };
+  }
+  const oilMax = plan.cookingOilG > 0 ? plan.cookingOilG : 25;
+  const achievable = plan.planFatG + oilMax;      // 这份餐单最多能给到多少脂肪
+  const safeFloor = Math.max(targets.weightKg * 0.6 || 0, achievable * 0.75);
+
+  // 目标在可达范围内就不用动
+  if (targets.fatG <= achievable * 1.02 && targets.fatG >= achievable * 0.8) return targets;
+
+  const newFat = Math.round(Math.min(Math.max(targets.fatG, safeFloor), achievable) * 10) / 10;
+  const deltaKcal = (targets.fatG - newFat) * 9;  // 脂肪少吃了，热量补给碳水
+  const adjusted = {
+    ...targets,
+    fatG: newFat,
+    carbG: Math.max(80, Math.round((targets.carbG + deltaKcal / 4) * 10) / 10),
+    fatNote: newFat < targets.fatG - 0.5
+      ? `脂肪目标从 ${Math.round(targets.fatG)} 克调整为 ${Math.round(newFat)} 克 —— 这是这份餐单实际能给到的量（再高就只能靠多放油了）。少掉的热量加到了主食上。`
+      : `脂肪目标从 ${Math.round(targets.fatG)} 克调整为 ${Math.round(newFat)} 克 —— 按体重算的理想值偏低，这里补到正常饮食的水平，热量从主食里扣。`,
+  };
+  // 保证四项加起来仍然等于目标热量
+  const sum = adjusted.proteinG * 4 + adjusted.fatG * 9 + adjusted.carbG * 4;
+  if (Math.abs(sum - adjusted.targetCalories) > 15) {
+    adjusted.carbG = Math.max(80, Math.round(((adjusted.targetCalories - adjusted.proteinG * 4 - adjusted.fatG * 9) / 4) * 10) / 10);
+  }
+  return adjusted;
+}
+
+/**
+ * 迭代到收敛：反复「定目标 → 配餐单 → 用实际可达值修目标」，直到两边对上。
+ *
+ * 为什么不能只做一次：烹调油是按「脂肪缺口」算的，脂肪目标一降油也跟着降，
+ * 于是第二遍的餐单又达不到第一遍算出来的目标（实测 100 kg 那组会差 20%）。
+ * 迭代三四次就能稳定，代价是几毫秒的纯计算。
+ *
+ * @returns {{targets:object, plan:object, converged:boolean, rounds:number}}
+ */
+export function convergePlan(rawTargets, options = {}) {
+  const seed = options.seed ?? 0;
+  const maxRounds = options.maxRounds ?? 6;
+  const kcalGap = (p, t) => Math.abs(p.planKcalWithOil - t.targetCalories) / t.targetCalories;
+
+  let targets = rawTargets;
+  let plan = buildMealPlan(targets, { seed });
+  let best = { targets, plan, gap: kcalGap(plan, targets) };
+  let rounds = 0;
+
+  for (let i = 0; i < maxRounds; i++) {
+    rounds = i + 1;
+    const ratio = plan.planFatWithOilG / targets.fatG;
+    if (ratio >= 0.95 && ratio <= 1.05) break;
+
+    const next = reconcileFatTarget(targets, plan);
+    if (Math.abs(next.fatG - targets.fatG) < 0.6) break;  // 目标已经稳定
+
+    const nextPlan = buildMealPlan(next, { seed });
+    const nextGap = kcalGap(nextPlan, next);
+    // 保险：只有「确实更接近热量目标」才接受新方案。
+    // 否则说明在震荡（脂肪目标一改、主食预算跟着变、热量反而偏离更多），就用当前最好的那份。
+    if (nextGap > best.gap + 0.02 && nextGap > 0.05) break;
+
+    targets = next;
+    plan = nextPlan;
+    if (nextGap < best.gap) best = { targets: next, plan: nextPlan, gap: nextGap };
+  }
+
+  const ratio = plan.planFatWithOilG / targets.fatG;
+  return {
+    targets,
+    plan,
+    fatRatio: ratio,
+    /** 收敛 = 脂肪目标与餐单基本一致（差距 5% 以内） */
+    converged: ratio >= 0.95 && ratio <= 1.05,
+    rounds,
+  };
+}
+
+/**
  * 生成一天的餐单
  * @param {{targetCalories:number, proteinG:number}} targets
  * @param {{seed?:number}} options seed 换一天就换一批菜
@@ -307,6 +439,12 @@ function composeMeals(targets, seed, carbBudgets) {
         grams = kcalCap;
         clampedBy = '热量额度';
       }
+      // 单个食物不超过 3 份（避免「4.5 个鸡蛋」这种不现实的量）
+      const maxServingsG = (food.servings?.[0]?.[1] || 100) * maxServingsFor(targets.targetCalories, 'protein');
+      if (grams > maxServingsG) {
+        grams = maxServingsG;
+        clampedBy = clampedBy || '份量上限';
+      }
       const floorG = Math.min(gByProtein * MAIN_PROTEIN_MIN_FACTOR, grams);
       if (grams < floorG) grams = floorG;
       const item = snapToServing(food, grams);
@@ -314,8 +452,10 @@ function composeMeals(targets, seed, carbBudgets) {
       item.targetGrams = Math.round(grams);
       item.targetProteinG = round(proteinTarget, 1);
       item.clampedBy = clampedBy;
-      if (clampedBy) {
-        item.desc += `，这已经是给当餐留出主食后的上限`;
+      if (clampedBy === '热量额度') {
+        item.desc += '，这已经是给当餐留出主食后的上限';
+      } else if (clampedBy === '份量上限') {
+        item.desc += `（一份指 ${food.servings[0][1]} 克，一顿吃 ${item.grams} 克已经不少了）`;
       }
       item.proteinGiven = round((food.protein * item.grams) / 100, 1);
       items.push(item);
@@ -329,6 +469,24 @@ function composeMeals(targets, seed, carbBudgets) {
       const carbKcal = tpl.key === 'snack' ? left : left * (1 - DAILY_OIL_KCAL_SHARE);
       if (carbFood.kcal <= 0) throw new Error(`${carbFood.name} 没有热量，不能当主食`);
       let grams = (carbKcal * 100) / carbFood.kcal;
+      // 主食也封顶，但上限按「她一天的碳水目标」放大：
+      // 碳水目标 320 克的人（维持期、活动量大）本来就该多吃主食，
+      // 用固定的「几碗饭」去卡会让她怎么都吃不到目标热量（实测差 19%）。
+      const carbFoodPer100 = carbFood.carb > 0 ? carbFood.carb : 25;
+      const carbsPerMealTarget = (targets.carbG || 180) / 4;
+      const capByCarbTarget = (carbsPerMealTarget / carbFoodPer100) * 100 * 1.35;
+      const carbCap = FOOD_SERVING_OVERRIDE[carbFood.id]
+        ? (carbFood.servings[0][1] * FOOD_SERVING_OVERRIDE[carbFood.id])
+        : Math.min(
+          // 两个上限取小：
+          //  ① 按热量估的份数（吃得多的人可以到 4 份）
+          //  ② 按她的碳水目标估的份数
+          // 上限 4 份是有意的：一顿 585 克米饭（4.5 份）看着就不像人吃的。
+          Math.min(4, Math.max(2, maxServingsFor(targets.targetCalories, 'carb'))) * (carbFood.servings?.[0]?.[1] || 100),
+          capByCarbTarget,
+        );
+      const carbMaxG = carbCap;
+      if (grams > carbMaxG) grams = carbMaxG;
       const carbItem = { role: 'carb', food: carbFood, grams: 0 };
       if (carbBudgetG !== undefined && carbFood.carb > 0) {
         const otherCarb = items.reduce((a, it) => a + (it.food.carb * it.grams) / 100, 0);
@@ -357,8 +515,9 @@ function composeMeals(targets, seed, carbBudgets) {
         // 配角最多三份，同时不能超过当餐剩下的热量额度（否则会把整餐顶爆）
         const kcalLeft = Math.max(0, mealBudget * 1.04 - caloriesOf(items));
         const capByKcal = sideFood.kcal > 0 ? (kcalLeft * 100) / sideFood.kcal : Infinity;
-        const grams = Math.min(servingG * 3, capByKcal, gramsForProtein(sideFood, need));
-        if (grams >= 20) items.push({ role: 'side', ...snapToServing(sideFood, grams) });
+        const grams = Math.min(servingG * MAX_SIDE_SERVINGS, capByKcal, gramsForProtein(sideFood, need));
+        // 配角要么给到差不多一份，要么就别出现 —— 「33 克酸奶」这种量没有意义
+        if (grams >= servingG * 0.8) items.push({ role: 'side', ...snapToServing(sideFood, Math.max(grams, servingG)) });
       }
     }
 
@@ -432,7 +591,7 @@ function finishPlan(meals, targets) {
       deviation > 0.1
         ? '这份餐单比目标热量高一些，可以把主食减掉三分之一到一半。'
         : deviation < -0.1
-          ? '这份餐单比目标热量低一些，主食可以多加一点。'
+          ? `这份餐单按「三餐 + 加餐」的常规吃法只能给到约 ${planKcal + oilKcal} kcal，比目标少 ${Math.abs(Math.round(deviation * 100))}%。原因是目标热量偏高，三餐装不下。两个办法：① 把缺的部分用加餐补（例如一份酸奶+一把坚果约 250 kcal）；② 直接把每餐份量加一半。`
           : '这份餐单和你的目标基本对得上（误差 10% 以内），可以照这个吃。',
   };
 }

@@ -146,6 +146,16 @@ test('偏瘦的人不给减脂缺口，并且明确劝退', () => {
   assert.ok(t.warnings.some((w) => w.includes('偏瘦')), 'BMI 偏瘦时必须提示');
 });
 
+test('体型很小时缺口会变负：必须给出说明，且界面不能显示「每周减 -0.03 kg」', () => {
+  // 核验员实测到的案例：150cm/50kg/60岁/久坐 → 总消耗 1172，被 1200 的安全下限锁住，
+  // 缺口变成 -28（等于要多吃）。这种情况必须明确说是「维持」，不能让负数直接露在界面上。
+  const t = calcTargets({ sex: 'female', weightKg: 50, heightCm: 150, age: 60, activity: 'sedentary', pace: 'standard', goal: 'lose' });
+  assert.ok(t.deficit < 0, `这组资料的缺口应当是负的（实际 ${t.deficit}），说明测试前提变了`);
+  assert.ok(t.targetCalories >= t.tdee, '目标热量应当不低于总消耗（否则就是「减脂」变「增重」）');
+  assert.ok(t.warnings.some((w) => w.includes('维持')), '必须明确告诉用户现在是维持状态，而不是显示一个负的减重速度');
+  assert.ok(t.weeklyLossKg <= 0, '负缺口对应的每周变化是负数 —— 界面据此判断不要显示「每周减」');
+});
+
 test('维持体重模式：缺口为 0', () => {
   const t = calcTargets({
     sex: 'female', weightKg: 55, heightCm: 163, age: 28, activity: 'light', pace: 'standard', goal: 'maintain',

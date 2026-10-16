@@ -22,11 +22,11 @@ const root = sandbox;
 const MUTATIONS = [
   { file: 'js/calc.js', from: "const bmr = sex === 'female' ? base - 161 : base + 5;", to: "const bmr = sex === 'female' ? base - 100 : base + 5;", why: '女性基础代谢常数（应为 161）' },
   { file: 'js/calc.js', from: "const floorBySex = sex === 'female' ? 1200 : 1500;", to: 'const floorBySex = 800;', why: '女生 1200 kcal 安全下限' },
-  // 下面两条是「有意测不出来」的护栏，不是测试太弱（详见 tests/calc.test.mjs 的说明）：
-  //  - 缺口上限 75%：按内置三档节奏，250 kg 的人也到不了，真实兜底是「每周 ≤1% 体重」那条不变量
-  //  - 碳水 80 克下限：脂肪上限已经先给碳水留了位置，这个常量不会在实际输入下被触发
+  // 这条仍然是有意测不出来的护栏（详见 tests/calc.test.mjs 的说明）：
+  // 缺口上限 75% 按内置三档节奏到不了，真实兜底是「每周 ≤1% 体重」那条不变量。
+  // 碳水 80 克下限原来也测不出来，但加了「脂肪按热量可达值下调」之后会被触发，所以现在应当能抓到。
   { file: 'js/calc.js', from: 'const deficitCap = tdee * 0.75;', to: 'const deficitCap = tdee * 5;', why: '缺口上限（理论护栏，测不到）', expectCaught: false },
-  { file: 'js/calc.js', from: 'const MIN_CARB_G = 80;', to: 'const MIN_CARB_G = 0;', why: '碳水 80 克下限（结构性成立，测不到）', expectCaught: false },
+  { file: 'js/calc.js', from: 'const MIN_CARB_G = 80;', to: 'const MIN_CARB_G = 0;', why: '碳水 80 克下限（兜底，正常输入走不到）', expectCaught: false },
   { file: 'js/calc.js', from: 'const idealFatG = weightKg * (goalMode === ', to: 'const idealFatG = weightKg * 0.1 * (goalMode === ', why: '脂肪 0.8~0.9 g/kg 的目标' },
   { file: 'js/foods.js', from: 'kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9', to: 'kcal: 316, protein: 2.6, fat: 0.3, carb: 25.9', why: '熟米饭每 100 克 116 kcal' },
   { file: 'js/foods.js', from: 'if (/斤/.test(unit)) return round1(qty * 500);', to: 'if (/斤/.test(unit)) return round1(qty * 50);', why: '一斤 = 500 克' },
@@ -48,6 +48,11 @@ const MUTATIONS = [
   { file: 'js/achievements.js', from: "const level = PLANT_STAGES.reduce((acc, s, i) => (total >= s.min ? i : acc), 0);", to: "const level = PLANT_STAGES.reduce((acc, s, i) => (streak >= s.min ? i : acc), 0);", why: '小植物按累计天数生长（断档不该倒退）' },
   { file: 'js/achievements.js', from: "  const seen = new Set(state?.achievements?.seen || []);", to: '  const seen = new Set();', why: '庆祝过的徽章不该重复弹' },
   { file: 'js/achievements.js', from: "  if (!isMonday) return false;", to: '  if (isMonday) return false;', why: '周报只在周一弹，不是每天打扰' },
+  // ── 第四轮：份量上限与脂肪目标对账 ──
+  { file: 'js/recommend.js', from: 'const MAX_SERVINGS_PER_FOOD = 3;', to: 'const MAX_SERVINGS_PER_FOOD = 99;', why: '单个食物最多 3 份（别给「一顿 4.5 个鸡蛋」这种方案）' },
+  { file: 'js/recommend.js', from: 'if (grams >= servingG * 0.8)', to: 'if (grams >= 0)', why: '配角要么给一份，要么别出现（不要「33 克酸奶」）' },
+  { file: 'js/recommend.js', from: 'const achievable = plan.planFatG + oilMax;      // 这份餐单最多能给到多少脂肪', to: 'const achievable = 9999;', why: '脂肪目标要对齐餐单实际可达值' },
+  { file: 'js/recommend.js', from: 'if (proteinDiff > 5) {', to: 'if (false) {', why: '蛋白目标要跟着餐单实际上调（否则总热量永远追不上目标）' },
 ];
 
 let caught = 0;

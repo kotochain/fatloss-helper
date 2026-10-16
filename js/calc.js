@@ -184,11 +184,14 @@ export function calcTargets(profile) {
   const proteinG = Math.min(proteinWanted, proteinCapKcal / KCAL_PER_G.protein);
   const proteinCapped = proteinWanted > proteinCapKcal / KCAL_PER_G.protein;
 
-  // 2) 脂肪：安全下限 0.6 g/kg，理想值 0.8~0.9 g/kg，但不能挤掉碳水的 80 克底线
+  // 2) 脂肪：安全下限 0.6 g/kg，理想值 0.8~0.9 g/kg。
+  // 但一个常识约束：家常饮食里脂肪供能一般不超过总热量 40%（再多就是顿顿油汤了）。
+  // 体重很大的人按 0.8~0.9 g/kg 会要 90~110 克脂肪，既放不下、也不现实，
+  // 所以取「理想值」和「总热量 40%」中的小者。剩下的热量交给碳水。
   const minFatG = weightKg * 0.6;
   const idealFatG = weightKg * (goalMode === 'lose' ? 0.8 : 0.9);
-  const fatCapKcal = targetCalories - proteinG * KCAL_PER_G.protein - MIN_CARB_G * KCAL_PER_G.carb;
-  let fatG = Math.min(idealFatG, Math.max(fatCapKcal / KCAL_PER_G.fat, minFatG));
+  const fatEnergyCap = (targetCalories * 0.4) / KCAL_PER_G.fat;
+  let fatG = Math.min(idealFatG, fatEnergyCap);
   let fatClamped = false;
   if (fatG < minFatG) {
     // 只有「矮 + 极重」（BMI 70 上下）才会走到这里，属于该就医的情况
@@ -198,21 +201,26 @@ export function calcTargets(profile) {
     fatClamped = true;
   }
 
-  // 3) 碳水：剩下的热量全给它，但不低于 80 克
+  // 3) 碳水：剩下的热量全给它。
+  // 顺序是「热量达标优先」：蛋白质和脂肪定好之后，碳水吸收剩余热量，
+  // 所以不会出现四项加起来对不上总热量、或某个营养素被挤到不可能的情况。
   let carbG = (targetCalories - proteinG * KCAL_PER_G.protein - fatG * KCAL_PER_G.fat) / KCAL_PER_G.carb;
   if (carbG < MIN_CARB_G) {
-    // 理论上不该发生（第 2 步已经给碳水留了底线），留个兜底并如实提示
+    // 兜底：把脂肪压到下限来给碳水腾地方（极端体型才会走到，走不到就说明设计没问题）
     const need = (MIN_CARB_G - carbG) * KCAL_PER_G.carb;
     const cut = Math.min(need / KCAL_PER_G.fat, Math.max(0, fatG - minFatG));
     fatG -= cut;
     carbG = (targetCalories - proteinG * KCAL_PER_G.protein - fatG * KCAL_PER_G.fat) / KCAL_PER_G.carb;
-    warnings.push('蛋白质和脂肪都已压到下限，碳水才凑够 80 克。这个热量水平对当前体重来说偏紧了。');
+    if (carbG < MIN_CARB_G) {
+      carbG = MIN_CARB_G;
+      warnings.push('这个体型下，蛋白质、脂肪、碳水的目标互相挤，已经不好同时满足了，建议找营养师给一份针对性的方案。');
+    }
   }
   if (proteinCapped) {
     warnings.push('蛋白质目标受总热量限制做了下调（最多占总热量 35%），否则脂肪和主食就没地方放了。');
   }
   if (fatClamped) {
-    warnings.push(`脂肪目标按热量可达值定为约 ${round(fatG)} 克（理想值 ${round(idealFatG)} 克，安全下限 ${round(minFatG)} 克）。`);
+    warnings.push(`脂肪目标定为约 ${round(fatG)} 克（理想值 ${round(idealFatG)} 克，安全下限 ${round(minFatG)} 克）。因为家常菜里脂肪供能一般不超过四成，再多就不现实了。`);
   }
   if (method === 'mifflin') {
     warnings.push('基础代谢用的是身高体重公式（Mifflin-St Jeor），误差一般在 ±10% 左右。有条件测一次体脂率会更准。');
