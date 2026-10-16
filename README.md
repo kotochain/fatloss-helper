@@ -1,5 +1,11 @@
 # 减脂小助手
 
+[![测试](https://github.com/kotochain/fatloss-helper/actions/workflows/ci.yml/badge.svg)](https://github.com/kotochain/fatloss-helper/actions/workflows/ci.yml)
+
+**线上地址（她手机上用这个）**：https://kotochain.github.io/fatloss-helper/
+
+---
+
 一个只给一个人用的减脂助手：说一句话就能记饮食，自动算热量和碳蛋脂，并给出「今天接下来怎么吃」和「今天练什么」。
 
 **它就是一个网页应用**：不需要服务器、不需要注册、不需要电脑常开。
