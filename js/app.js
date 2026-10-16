@@ -14,7 +14,11 @@ import {
   parseDescription, normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
   gramsFromText, portionGrams,
 } from './mealparse.js';
-import { askAi, aiStatus, loadAiConfig, saveAiConfig, clearAiConfig, testAiConnection } from './ai.js';
+import {
+  askAi, aiStatus, currentAiConfig, saveAiConfigLocal, clearAiConfig,
+  testConnection, fetchModels, relayStatus, presetDirectCall,
+} from './ai.js';
+import { PRESETS, findPreset } from './providers.js';
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
 } from './cardio.js';
@@ -37,6 +41,8 @@ let pendingFood = null;
 let draft = null;
 /** AI 是否可用（进界面时问一次服务端） */
 let ai = { configured: false, checked: false, reason: null };
+/** 「说一句」是从哪一餐点进来的（界面上的餐次提示，默认按时间猜） */
+let quickMealHint = null;
 /** 有氧推荐的选择 */
 let cardioPick = { equipment: ['treadmill', 'elliptical', 'bike', 'bodyweight'], goal: 'fat_burn', minutes: 30 };
 const app = $('#app');
@@ -131,7 +137,7 @@ $('.sheet-mask').addEventListener('click', closeSheet);
 
 $('#prevDay').addEventListener('click', () => { dateKey = shiftDate(dateKey, -1); render(); });
 $('#nextDay').addEventListener('click', () => { dateKey = shiftDate(dateKey, 1); render(); });
-$('#dateLabel').addEventListener('click', () => { dateKey = todayKey(); render(); });
+$('#dateLabel').addEventListener('click', openCalendarSheet);
 $('#profileBtn').addEventListener('click', openProfileSheet);
 
 document.querySelectorAll('.tab').forEach((btn) => {
@@ -156,6 +162,10 @@ function render() {
   else if (view === 'plan') renderPlan();
   else renderProgress();
   bindCommon();
+  if (view === 'today') {
+    bindQuickLog();
+    $('#aiSettingsBtn')?.addEventListener('click', openAiSettingsSheet);
+  }
 }
 
 function bindCommon() {
@@ -167,6 +177,20 @@ function bindCommon() {
 function handleAction(act, data) {
   switch (act) {
     case 'add-food': return openFoodSheet(data.meal);
+    case 'go-log':
+      view = 'log';
+      document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
+      render();
+      return;
+    case 'quick-fill': {
+      quickMealHint = data.meal || null;
+      view = 'log';
+      document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
+      render();
+      const ta = $('#quickText');
+      if (ta) { ta.focus(); toast('在这里写一句，会自动记到她那一餐。'); }
+      return;
+    }
     case 'del-food': {
       const day = getDay(state, dateKey);
       const entry = Object.values(day.meals).flat().find((e) => e.id === data.id);
@@ -289,6 +313,20 @@ function renderToday() {
     </div>
 
     ${tip ? `<div class="warn info">${tip}</div>` : ''}
+
+    <div class="card">
+      <div class="card-title">说一句就记上
+        <button class="btn ghost" id="aiSettingsBtn" style="padding:3px 10px;font-size:12px">
+          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已启用 ⚙' : 'AI 设置 ⚙'}
+        </button>
+      </div>
+      <textarea id="quickText" rows="2" placeholder="今天中午在食堂吃了碗牛肉面，加了个蛋"></textarea>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn grow" id="quickParse">解析这一句</button>
+        <button class="btn ghost" data-act="go-log">搜索食物</button>
+      </div>
+      <div id="quickResult"></div>
+    </div>
     ${t.warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join('')}
 
     ${MEAL_SLOTS.map((slot) => {
@@ -308,7 +346,10 @@ function renderToday() {
             <button class="del" data-act="del-food" data-id="${e.id}" aria-label="删除">✕</button>
           </div>`;
         }).join('') || '<div class="tiny muted">还没记</div>'}
-        <button class="add-line" data-act="add-food" data-meal="${slot.key}">＋ 加食物</button>
+        <div class="row" style="gap:6px;margin-top:8px">
+          <button class="add-line grow" data-act="add-food" data-meal="${slot.key}" style="margin-top:0">＋ 加食物</button>
+          <button class="add-line grow" data-act="quick-fill" data-meal="${slot.key}" style="margin-top:0">💬 说一句</button>
+        </div>
       </div>`;
     }).join('')}
 
@@ -327,15 +368,7 @@ function renderToday() {
       <p class="tiny muted" style="margin:8px 0 0">手环给的消耗通常偏高，所以这里只把估算值的一半算进「可以多吃」的额度。</p>
     </div>
 
-    <div class="card">
-      <div class="btn-row">
-        <button class="btn ghost grow" data-act="demo">载入示例数据</button>
-        <button class="btn ghost grow" data-act="reset-today">清空这一天</button>
-      </div>
-      <p class="tiny muted" style="margin:10px 0 0">
-        载入示例会用一份 26 岁女性（163cm / 58kg）的资料覆盖当前记录，用来先看看长什么样。
-      </p>
-    </div>`;
+`;
 }
 
 /** 根据已吃的，给一句「接下来怎么吃」 */
@@ -368,14 +401,9 @@ function renderLog() {
           ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已启用 ⚙' : 'AI 设置 ⚙'}
         </button>
       </div>
-      <p class="small muted" style="margin:0 0 8px">
-        像跟人说话一样写就行，例如「今天中午在食堂吃了碗牛肉面，加了个蛋」「晚上吃了半份麻辣烫」。
-        ${ai.configured ? '' : '电脑上的解析服务没开或没配 AI 密钥时，用内置的常见说法识别，认不准会反问你。'}
-      </p>
-      <textarea id="quickText" rows="3" placeholder="今天吃了什么？"></textarea>
+      <textarea id="quickText" rows="3" placeholder="今天吃了什么？例如：中午吃了碗牛肉面，加了个蛋"></textarea>
       <div class="btn-row" style="margin-top:8px">
         <button class="btn grow" id="quickParse">解析这一句</button>
-        <button class="btn ghost" id="quickVoice" title="用手机键盘上的话筒说话">🎤</button>
       </div>
       <div id="quickResult"></div>
     </div>
@@ -473,11 +501,12 @@ function bindQuickLog() {
 }
 
 async function runQuickParse(text) {
-  const meal = guessMeal();
+  const meal = quickMealHint || guessMeal();
   let items = [];
   let questions = [];
   let source = 'offline';
   let aiError = null;
+  let aiNote = null;
 
   if (ai.configured) {
     const res = await askAi(text, { meal });
@@ -489,6 +518,7 @@ async function runQuickParse(text) {
       items = norm.items;
       questions = norm.questions;
       source = 'ai';
+      if (res.note) aiNote = res.note;
     } else {
       aiError = res.error || 'AI 没解析出内容';
     }
@@ -514,6 +544,7 @@ async function runQuickParse(text) {
     questions: [...new Set(questions)].slice(0, 4),
     source,
     aiError,
+    note: aiNote,
   };
   drawDraft();
 }
@@ -532,6 +563,7 @@ function drawDraft() {
     <div class="warn ${draft.source === 'ai' ? 'info' : ''}" style="margin-top:10px">
       解析方式：${draft.source === 'ai' ? 'AI 识别' : '离线识别（常见说法）'}
       ${draft.aiError ? `｜AI 这次没成功：${esc(draft.aiError)}` : ''}
+      ${draft.note ? `<br>${esc(draft.note)}` : ''}
     </div>
     ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
     <div style="margin-top:8px">
@@ -1167,94 +1199,228 @@ function openCustomFoodSheet() {
   });
 }
 
-/* ── 弹层：AI 设置 ─────────────────────────
-   设计要点：密钥从手机发到「你这台电脑上的服务」，由电脑保存（权限 600）。
-   手机自己不保存密钥，服务端也从不把密钥回传给手机 —— 手机丢了也不会泄露账号。
+/* ── 弹层：日历 ─────────────────────────────
+   点顶部日期打开。有记录的日期会标出来（点 + 记录条数），一眼能看出「哪几天没记」。
+   另外给了「连续记录天数」——比单看某一天更能反映坚持情况。
    ─────────────────────────────────────────── */
 
-async function openAiSettingsSheet() {
-  openSheet({
-    title: 'AI 设置',
-    body: '<div class="empty">正在读取当前设置…</div>',
-    onMount: async () => {
-      const res = await loadAiConfig();
-      if (!res.ok) {
-        openSheet({
-          title: 'AI 设置',
-          body: `<div class="warn">${esc(res.error)}</div>
-            <p class="small muted">AI 设置需要电脑上的服务在运行（就是启动 <code>node tools/serve.mjs</code> 的那个窗口），
-            并且手机和电脑连同一个 Wi-Fi。没配也能用，记录时会走内置的离线识别。</p>`,
-        });
-        return;
-      }
-      drawAiSettings(res.data);
-    },
-  });
+/** 某天的记录概况 */
+export function dayStats(state, key) {
+  const day = state.days?.[key];
+  if (!day) return { entries: 0, kcal: 0, exercises: 0, hasWeight: false };
+  const entries = Object.values(day.meals || {}).flat();
+  const kcal = entries.reduce((a, e) => a + calcEntry(e.food, e.grams).kcal, 0);
+  return {
+    entries: entries.length,
+    kcal: Math.round(kcal),
+    exercises: (day.exercises || []).length,
+    hasWeight: (state.weights || []).some((w) => w.date === key),
+  };
 }
 
-function drawAiSettings(data) {
-  const saved = data.saved || {};
-  const current = saved.configured ? saved : null;
-  const body = `
-    <div class="warn info">
-      密钥保存在<b>你这台电脑</b>上（文件权限 600），<b>不保存在她手机里、也不在网页里</b>。
-      之后她手机只把「吃了什么」发给电脑，由电脑去问 AI。
-    </div>
+/** 连续记录天数（从今天往前数，允许今天还没记） */
+export function streakDays(state, today = todayKey()) {
+  let streak = 0;
+  let cursor = today;
+  if (dayStats(state, cursor).entries === 0) cursor = shiftDate(cursor, -1); // 今天还没记不算断
+  for (let i = 0; i < 400; i++) {
+    if (dayStats(state, cursor).entries === 0) break;
+    streak += 1;
+    cursor = shiftDate(cursor, -1);
+  }
+  return streak;
+}
 
+function openCalendarSheet() {
+  let month = dateKey.slice(0, 7); // YYYY-MM
+  const draw = () => {
+    const [y, m] = month.split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const startWeekday = first.getDay(); // 0=周日
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const today = todayKey();
+    const cells = [];
+    for (let i = 0; i < startWeekday; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(`${month}-${String(d).padStart(2, '0')}`);
+
+    const streak = streakDays(state);
+    const monthStats = cells.filter(Boolean).map((k) => dayStats(state, k));
+    const logged = monthStats.filter((s) => s.entries > 0).length;
+
+    openSheet({
+      title: `${y} 年 ${m} 月`,
+      body: `
+        <div class="row between" style="margin-bottom:10px">
+          <button class="btn ghost" id="calPrev">‹ 上个月</button>
+          <button class="btn ghost" id="calToday">回到今天</button>
+          <button class="btn ghost" id="calNext">下个月 ›</button>
+        </div>
+        <div class="warn info" style="margin-bottom:10px">
+          本月记了 <b>${logged}</b> 天${streak ? `｜当前连续记录 <b>${streak}</b> 天` : ''}
+        </div>
+        <div class="cal-week">${['日', '一', '二', '三', '四', '五', '六'].map((w) => `<span>${w}</span>`).join('')}</div>
+        <div class="cal-grid">
+          ${cells.map((k) => {
+            if (!k) return '<span class="cal-cell empty"></span>';
+            const st = dayStats(state, k);
+            const d = Number(k.slice(-2));
+            const cls = [
+              'cal-cell',
+              k === dateKey ? 'selected' : '',
+              k === today ? 'today' : '',
+              st.entries ? 'has-data' : '',
+            ].filter(Boolean).join(' ');
+            return `<button class="${cls}" data-date="${k}">
+              <span class="d">${d}</span>
+              ${st.entries ? `<span class="mark">${st.entries}</span>` : ''}
+            </button>`;
+          }).join('')}
+        </div>
+        <p class="tiny muted" style="margin-top:10px">
+          格子里的数字是当天记了几条。没记的日子一眼能看出来 —— 漏记比记错更影响判断。
+        </p>`,
+      onMount: (body) => {
+        body.querySelectorAll('[data-date]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            dateKey = btn.dataset.date;
+            closeSheet();
+            render();
+          });
+        });
+        $('#calPrev', body).addEventListener('click', () => {
+          const [yy, mm] = month.split('-').map(Number);
+          const d = new Date(yy, mm - 2, 1);
+          month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          draw();
+        });
+        $('#calNext', body).addEventListener('click', () => {
+          const [yy, mm] = month.split('-').map(Number);
+          const d = new Date(yy, mm, 1);
+          month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          draw();
+        });
+        $('#calToday', body).addEventListener('click', () => {
+          dateKey = todayKey();
+          closeSheet();
+          render();
+        });
+      },
+    });
+  };
+  draw();
+}
+
+/* ── 弹层：AI 设置 ─────────────────────────
+   默认「直连」：密钥存在这台手机上，手机直接调服务商，不需要电脑、不需要服务器。
+   想更保险的人可以切到「走电脑中转」，那样密钥存在电脑上（但要开着电脑、同一个 Wi-Fi）。
+   ─────────────────────────────────────────── */
+
+let lastModels = [];
+
+async function openAiSettingsSheet() {
+  const cfg = currentAiConfig();
+  const relay = await relayStatus(1200);
+  drawAiSettings(cfg, relay);
+}
+
+function drawAiSettings(cfg, relay) {
+  const presetId = cfg.presetId || 'deepseek';
+  const preset = findPreset(presetId);
+  const mode = cfg.mode || (preset.directCall === false ? 'relay' : 'direct');
+  const directOk = preset.directCall !== false;
+
+  const body = `
     <label class="field"><span>选一个服务商</span>
       <div class="chips" id="presetChips">
-        ${data.presets.map((p) => `
-          <button class="chip ${((saved.presetId || 'deepseek') === p.id) ? 'on' : ''}" data-preset="${p.id}">
-            ${esc(p.name)}${p.recommended ? ' ★' : ''}
+        ${PRESETS.map((p) => `
+          <button class="chip ${presetId === p.id ? 'on' : ''}" data-preset="${p.id}">
+            ${esc(p.name)}${p.recommended ? ' ★' : ''}${p.directCall === false ? ' ⚠' : ''}
           </button>`).join('')}
       </div>
     </label>
-
     <div id="presetNote" class="small muted" style="margin:-4px 0 12px"></div>
 
     <label class="field"><span>接口地址</span>
-      <input type="text" id="aiBaseUrl" value="${esc(saved.baseUrl || '')}" placeholder="https://api.deepseek.com">
+      <input type="text" id="aiBaseUrl" value="${esc(cfg.baseUrl || preset.baseUrl || '')}" placeholder="https://api.deepseek.com">
     </label>
-    <label class="field"><span>模型名</span>
-      <input type="text" id="aiModel" value="${esc(saved.model || '')}" placeholder="deepseek-chat">
+
+    <label class="field"><span>模型名 <button class="btn ghost" id="aiFetchModels" style="padding:2px 8px;font-size:12px;float:right">获取模型列表</button></span>
+      <input type="text" id="aiModel" value="${esc(cfg.model || preset.model || '')}" placeholder="deepseek-chat" list="aiModelList" autocomplete="off">
+      <datalist id="aiModelList">${lastModels.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
+      <div id="modelPick" class="chips" style="margin-top:6px"></div>
     </label>
-    <label class="field"><span>密钥${current ? '（已保存，留空则不改）' : ''}</span>
-      <input type="text" id="aiKey" placeholder="${current ? esc(current.keyMasked) : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
+
+    <label class="field"><span>密钥（只存在这台手机上）</span>
+      <input type="text" id="aiKey" placeholder="${cfg.keyMasked ? `已保存：${esc(cfg.keyMasked)}（留空则不改）` : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
     </label>
+
+    <label class="field"><span>用哪种方式连接</span>
+      <div class="chips" id="modeChips">
+        <button class="chip ${mode === 'direct' ? 'on' : ''}" data-mode="direct">手机直连（推荐）</button>
+        <button class="chip ${mode === 'relay' ? 'on' : ''}" data-mode="relay">走电脑中转</button>
+      </div>
+    </label>
+    <div id="modeNote" class="tiny muted" style="margin:-6px 0 12px"></div>
 
     <div id="aiSettingsMsg"></div>
-
-    ${current ? `<div class="small muted">当前生效：${esc(current.presetName || '')} · ${esc(current.model || '')} · 密钥 ${esc(current.keyMasked || '')}
-      ${current.updatedAt ? `<br>更新于 ${esc(String(current.updatedAt).slice(0, 16).replace('T', ' '))}` : ''}</div>` : ''}
-    ${data.source === 'env' ? '<div class="warn">注意：现在生效的是命令行里配置的密钥，不是这里保存的。在这里保存一份会优先使用这里的。</div>' : ''}
-    <p class="tiny muted" style="margin-top:8px">
-      配置文件：${esc(data.configFile || '')}（在项目目录之外，不会被提交到版本库）
+    ${cfg.configured ? `<div class="small muted">当前生效：${esc(cfg.presetName || '')} · ${esc(cfg.model || '')} · 密钥 ${esc(cfg.keyMasked || '')}</div>` : ''}
+    <div class="tiny muted" style="margin-top:8px" id="relayInfo">
+      本机中转服务：${relay.available ? (relay.configured ? '在运行且已配置' : '在运行但没配密钥') : '没在运行（不影响手机直连）'}
+    </div>
+    <p class="tiny muted">
+      直连说明：密钥保存在这台手机的浏览器里，只发给上面这个服务商。手机上点「清除密钥」可以随时删掉。
+      换手机或清缓存会丢设置，重新填一次即可（记录本身也有导出备份）。
     </p>`;
 
   const foot = `
     <button class="btn block" id="aiSave">保存并测试连通</button>
     <div class="btn-row">
       <button class="btn ghost grow" id="aiTest">只测当前连通</button>
-      ${current ? '<button class="btn ghost grow" id="aiClear">清除密钥</button>' : ''}
+      ${cfg.configured ? '<button class="btn ghost grow" id="aiClear">清除密钥</button>' : ''}
     </div>`;
 
   openSheet({ title: 'AI 设置', body, foot });
   const bodyEl = $('#sheetBody');
   const msg = $('#aiSettingsMsg');
+  const show = (html, kind = 'info') => { msg.className = `warn ${kind}`; msg.innerHTML = html; };
 
-  // 预设文案与自动填地址/模型
+  let pickedMode = mode;
+
+  const renderModeNote = () => {
+    $('#modeNote').textContent = pickedMode === 'relay'
+      ? '走电脑中转：密钥保存在电脑上（不会发到手机），但必须开着电脑、且手机连同一个 Wi-Fi。'
+      : (directOk
+        ? '手机直连：不需要电脑，走到哪都能用。密钥存在这台手机上，只发给服务商。'
+        : `注意：${preset.name} 不允许网页直接调用，这一家请选「走电脑中转」。`);
+  };
+  renderModeNote();
+
   const applyPreset = (id, { overwrite = true } = {}) => {
-    const p = data.presets.find((x) => x.id === id);
-    if (!p) return;
+    const p = findPreset(id);
     $('#presetNote').innerHTML = `${esc(p.note)}${p.keyUrl ? ` <a href="${esc(p.keyUrl)}" target="_blank" rel="noopener">去拿密钥 →</a>` : ''}`;
     if (overwrite) {
       if (p.baseUrl) $('#aiBaseUrl').value = p.baseUrl;
       if (p.model) $('#aiModel').value = p.model;
       $('#aiKey').placeholder = p.allowEmptyKey ? '本地模型随便填，例如 ollama' : '粘贴服务商的 API Key';
+      if (p.directCall === false) {
+        pickedMode = 'relay';
+      } else if (pickedMode === 'relay' && !relay.configured) {
+        pickedMode = 'direct';
+      }
+      bodyEl.querySelectorAll('#modeChips .chip').forEach((c) => c.classList.toggle('on', c.dataset.mode === pickedMode));
+      renderModeNote();
     }
+    updateModelChips();
   };
-  const initialPreset = saved.presetId || 'deepseek';
-  applyPreset(initialPreset, { overwrite: false });
+
+  const updateModelChips = () => {
+    const box = $('#modelPick');
+    if (!box) return;
+    box.innerHTML = lastModels.slice(0, 8).map((m) => `
+      <button class="chip ${$('#aiModel').value.trim() === m ? 'on' : ''}" data-model="${esc(m)}">${esc(m)}</button>`).join('');
+  };
+
+  applyPreset(presetId, { overwrite: false });
 
   bodyEl.querySelectorAll('#presetChips .chip').forEach((chip) => {
     chip.addEventListener('click', () => {
@@ -1262,52 +1428,90 @@ function drawAiSettings(data) {
       applyPreset(chip.dataset.preset);
     });
   });
+  bodyEl.querySelectorAll('#modeChips .chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      pickedMode = chip.dataset.mode;
+      bodyEl.querySelectorAll('#modeChips .chip').forEach((c) => c.classList.toggle('on', c === chip));
+      renderModeNote();
+    });
+  });
+  $('#modelPick').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-model]');
+    if (!b) return;
+    $('#aiModel').value = b.dataset.model;
+    updateModelChips();
+  });
+
+  // 获取模型列表：直接问服务商（问不到就走本机中转）
+  $('#aiFetchModels').addEventListener('click', async () => {
+    const baseUrl = $('#aiBaseUrl').value.trim();
+    const key = $('#aiKey').value.trim() || readLocalKey();
+    if (!baseUrl) return show('先填接口地址。', '');
+    show('正在向服务商查询模型列表…', 'info');
+    const r = await fetchModels({ baseUrl, apiKey: key });
+    if (!r.ok) {
+      return show(`没拿到模型列表：${esc(r.error)}<br>可以直接手填模型名，或者点服务商说明里的「去拿密钥」页面查看可用模型。`, '');
+    }
+    lastModels = r.models;
+    const dl = $('#aiModelList');
+    dl.innerHTML = r.models.map((m) => `<option value="${esc(m)}"></option>`).join('');
+    // 当前模型不在列表里时，自动选第一个（这就是「默认模型过时」的解法）
+    if (!$('#aiModel').value.trim() || !r.models.includes($('#aiModel').value.trim())) {
+      $('#aiModel').value = r.models[0];
+    }
+    updateModelChips();
+    show(`拿到 ${r.models.length} 个模型${r.via === 'relay' ? '（经电脑中转查询）' : ''}，已选「${esc($('#aiModel').value)}」。下面列的是前 8 个，也可以直接在输入框里挑。`, 'info');
+  });
+
+  function readLocalKey() {
+    const c = currentAiConfig();
+    return c.configured ? (readAiConfigRaw()?.apiKey || '') : '';
+  }
+  function readAiConfigRaw() {
+    try { return JSON.parse(localStorage.getItem('fatloss.ai.v1') || 'null'); } catch { return null; }
+  }
 
   const collect = () => ({
     presetId: bodyEl.querySelector('#presetChips .chip.on')?.dataset.preset || 'custom',
     baseUrl: $('#aiBaseUrl').value.trim(),
     model: $('#aiModel').value.trim(),
     apiKey: $('#aiKey').value.trim(),
+    mode: pickedMode,
   });
-
-  const show = (html, kind = 'info') => {
-    msg.className = `warn ${kind}`;
-    msg.innerHTML = html;
-  };
 
   $('#aiSave').addEventListener('click', async () => {
     const input = collect();
-    if (!input.baseUrl || !input.model) return show('接口地址和模型名要填。', '');
-    if (!input.apiKey && !current) return show('密钥还没填。', '');
-    show('正在保存并测试…', 'info');
-    const saveRes = await saveAiConfig(input);
-    if (!saveRes.ok) return show(esc(saveRes.error), '');
-    const testRes = await testAiConnection();
-    if (testRes.ok) {
-      show(`✅ 保存成功，连通正常（${esc(testRes.model)} 回复：${esc(testRes.reply || '正常')}）<br>现在她可以随便怎么描述都行了。`, 'info');
-      ai = { configured: true, checked: true, reason: null };
-      render();
+    if (!input.baseUrl) return show('接口地址要填。', '');
+    if (!input.model) return show('模型名要填 —— 可以点「获取模型列表」自动带出来。', '');
+    if (!input.apiKey && !cfg.configured) return show('密钥还没填。', '');
+    const saved = saveAiConfigLocal(input);
+    if (!saved.ok) return show(esc(saved.problems.join('；')), '');
+    show('已保存，正在测试连通…', 'info');
+    const t = await testConnection();
+    if (t.ok) {
+      show(`✅ 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>现在她怎么写都能听懂了。`, 'info');
+      ai = { configured: true, checked: true, mode: currentAiConfig().mode };
     } else {
-      show(`设置已保存，但连通测试失败：<b>${esc(testRes.error)}</b><br>请检查密钥、模型名、接口地址。在修好之前会继续用离线识别。`, '');
-      ai = { configured: false, checked: true, reason: testRes.error };
-      render();
+      show(`设置已保存，但连通测试失败：<b>${esc(t.error)}</b><br>修好之前会用离线识别记录（常见说法也能认）。`, '');
+      ai = { configured: false, checked: true, reason: t.error };
     }
+    render();
   });
 
   $('#aiTest')?.addEventListener('click', async () => {
     show('正在测试…（最多 20 秒）', 'info');
-    const r = await testAiConnection();
-    if (r.ok) show(`✅ 连通正常（${esc(r.model)} 回复：${esc(r.reply || '正常')}）`, 'info');
+    const r = await testConnection();
+    if (r.ok) show(`✅ 连通正常（${esc(r.model || '')} 回复：${esc(r.reply || '正常')}）${r.via === 'relay' ? '（走电脑中转）' : ''}`, 'info');
     else show(`❌ ${esc(r.error)}`, '');
   });
 
-  $('#aiClear')?.addEventListener('click', async () => {
-    if (!confirm('清除在这台电脑上保存的 AI 密钥？清除后会退回离线识别。')) return;
-    const r = await clearAiConfig();
-    if (!r.ok) return show(esc(r.error), '');
-    ai = { configured: Boolean(r.data.configured), checked: true, reason: null };
-    show('已清除。现在走离线识别。', 'info');
-    setTimeout(() => { closeSheet(); render(); }, 800);
+  $('#aiClear')?.addEventListener('click', () => {
+    if (!confirm('清除这台手机上保存的 AI 密钥？清除后会退回离线识别，随时可以重新填。')) return;
+    clearAiConfig();
+    ai = { configured: false, checked: true };
+    closeSheet();
+    render();
+    toast('已清除。现在走离线识别。');
   });
 }
 
@@ -1596,8 +1800,19 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // 问一次服务端「AI 配好了没」。没配也不影响使用，只是走离线解析。
 aiStatus().then((st) => { ai = { ...st, checked: true }; if (view === 'log') render(); }).catch(() => {});
 
-if (new URLSearchParams(location.search).has('__selfcheck')) {
+const bootParams = new URLSearchParams(location.search);
+if (bootParams.has('__selfcheck')) {
   selfCheck();
+} else if (bootParams.get('demo') === '1') {
+  // ?demo=1：一键进演示（GitHub Pages 上可以直接把链接发人看）
+  state = emptyState();
+  state.profile = demoProfile();
+  const demoToday = todayKey();
+  demoEntries(state, demoToday, calcTargets(state.profile));
+  addWeight(state, shiftDate(demoToday, -14), 59.4);
+  addWeight(state, demoToday, 58);
+  save();
+  render();
 } else if (!state) {
   state = emptyState();
   renderWelcome();

@@ -42,7 +42,7 @@ const MUTATIONS = [
   { file: 'js/mealparse.js', from: 'const perUnit = food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || portion.perUnit || 100;', to: 'const perUnit = portion.perUnit || 100;', why: '「一个」要按食物自己的份量换算（鸡蛋 50 克 ≠ 通用 100 克）' },
   { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
   { file: 'js/cardio.js', from: "    .filter((e) => e.equipment.some((q) => avail.has(q)))\n    .map((e) => {", to: "    .filter(() => true)\n    .map((e) => {", why: '替代动作必须是她今天能用的器械' },
-  { file: 'tools/ai-proxy.mjs', from: "    if (!name) continue;\n    if (!(grams > 0) || grams > 5000) continue;", to: "    if (!name) continue;", why: 'AI 返回的离谱份量要被丢掉' },
+  { file: 'js/ai-core.js', from: "    if (!(grams > 0) || grams > 5000) continue;", to: "    if (!(grams > -1)) continue;", why: 'AI 返回的离谱份量要被丢掉' },
 ];
 
 let caught = 0;

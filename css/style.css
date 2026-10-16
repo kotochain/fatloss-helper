@@ -338,6 +338,38 @@ input:focus, select:focus { outline: 2px solid var(--green-soft); border-color: 
 details summary { outline: none; }
 details[open] summary { margin-bottom: 4px; }
 
+/* 日历 */
+.cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
+.cal-week span { text-align: center; font-size: 11px; color: var(--ink-3); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border: 1px solid transparent;
+  background: #f9fafb;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--ink-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cal-cell.empty { background: transparent; cursor: default; }
+.cal-cell.has-data { background: var(--green-soft); color: var(--green-dark); font-weight: 600; }
+.cal-cell.today { border-color: var(--green); }
+.cal-cell.selected { background: var(--green); color: #fff; }
+.cal-cell.selected .mark { background: rgba(255,255,255,.3); color: #fff; }
+.cal-cell .mark {
+  position: absolute;
+  top: 2px; right: 3px;
+  font-size: 9px; line-height: 1;
+  background: rgba(22,163,74,.16);
+  color: var(--green-dark);
+  border-radius: 99px;
+  padding: 2px 4px;
+}
+
 /* 训练计划 */
 .session { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
 .session h4 { margin: 0 0 6px; font-size: 14px; }

@@ -1,110 +1,173 @@
 /**
- * 饮食描述的解析接口（客户端侧）
+ * AI 门面：界面只跟这个文件打交道
  *
- * 分工：
- *  - AI 负责「听懂她说的是什么、大概多少量」；
- *  - 热量一律由本地食物库算（ai-parse 服务端只返回名字和克数，不返回热量），
- *    这样数字能核对、能离线复算，也不会出现模型随口编一个热量。
- *
- * AI 不可用时（没配密钥、断网、手机不在同一个 Wi-Fi）自动退回离线解析。
+ * 三条路径，按可用性和设置自动选：
+ *   1) 直连：密钥存在这台手机上，浏览器直接调服务商（默认，不需要电脑）
+ *   2) 中转：如果你自己起了 tools/serve.mjs，可以把密钥交给它保管，手机只发内容
+ *   3) 都没有：走离线规则解析（js/mealparse.js）
  */
 
-const AI_ENDPOINT = '/api/parse-meal';
+import { publicAiConfig, normalizeAiConfigInput, findPreset } from './providers.js';
+import { readAiConfig, writeAiConfig, clearAiConfig, defaultStorage } from './ai-config.js';
+import { requestParse, requestPing, requestModels } from './ai-core.js';
 
-/** 问服务端「AI 到底配好了没」，失败就当没配 */
-export async function aiStatus(timeoutMs = 2500) {
+export { readAiConfig, writeAiConfig, clearAiConfig };
+
+/** 当前配置「给界面看」的版本（只有掩码，没有密钥） */
+export function currentAiConfig() {
+  return publicAiConfig(readAiConfig());
+}
+
+/** 把设置保存到这台手机，返回给界面看的版本 */
+export function saveAiConfigLocal(input) {
+  const existing = readAiConfig();
+  const { config, problems } = normalizeAiConfigInput(input, existing);
+  if (problems.length) return { ok: false, problems };
+  writeAiConfig(config);
+  return { ok: true, config: publicAiConfig(readAiConfig()) };
+}
+
+/** 本机服务（中转）在不在、配没配。没起服务时立刻返回，不卡界面 */
+export async function relayStatus(timeoutMs = 2000) {
   try {
     const res = await fetch('/api/ai-status', { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return { configured: false, reason: `服务返回 ${res.status}` };
-    return await res.json();
-  } catch (err) {
-    return { configured: false, reason: '连不上解析服务（可能没开着，或者手机不在同一个 Wi-Fi）' };
+    if (!res.ok) return { available: false, configured: false };
+    const data = await res.json();
+    return { available: true, configured: Boolean(data.configured), model: data.model || null };
+  } catch {
+    return { available: false, configured: false };
   }
+}
+
+/** 给界面用的状态汇总 */
+export async function aiStatus() {
+  const local = currentAiConfig();
+  if (local.configured && local.mode === 'direct') {
+    return { configured: true, mode: 'direct', model: local.model, presetName: local.presetName };
+  }
+  if (local.mode === 'relay') {
+    const relay = await relayStatus();
+    return relay.configured
+      ? { configured: true, mode: 'relay', model: relay.model }
+      : { configured: false, mode: 'relay', model: local.model || null, reason: '设置成「走中转服务」，但电脑上的服务没开或没配密钥' };
+  }
+  return { configured: false, mode: local.mode || null, reason: '还没配置 AI' };
 }
 
 /**
- * 把一句话交给 AI 解析
- * @param {string} text 她说的话
- * @param {{meal?:string, hour?:number}} ctx
- * @returns {Promise<{ok:boolean, items?:Array, meal?:string, questions?:string[], error?:string}>}
+ * 解析一句话。
+ * @returns {Promise<{ok:boolean, items?:Array, meal?:string|null, questions?:string[], source?:string, error?:string, note?:string}>}
  */
-export async function askAi(text, ctx = {}, timeoutMs = 25000) {
+export async function askAi(text, ctx = {}, timeoutMs = 30000) {
+  const local = readAiConfig();
+  const hour = ctx.hour ?? new Date().getHours();
+  const mode = local?.mode || 'direct';
+
+  // 路径 1：直连（默认）
+  if (mode === 'direct' && local?.baseUrl && local?.model) {
+    try {
+      const r = await requestParse({
+        text,
+        meal: ctx.meal || null,
+        hour,
+        config: { baseUrl: local.baseUrl, model: local.model, apiKey: local.apiKey },
+      });
+      return { ok: true, source: 'direct', ...r };
+    } catch (err) {
+      // 直连失败时，如果本机碰巧有中转服务，就兜一次（例如这家不允许浏览器直连）
+      const relay = await relayStatus(1500);
+      if (relay.available && relay.configured) {
+        const viaRelay = await askViaRelay(text, { meal: ctx.meal, hour }, timeoutMs);
+        if (viaRelay.ok) return { ...viaRelay, note: `直连没成功（${err.message}），这次走了电脑上的中转服务` };
+      }
+      return { ok: false, error: err.message };
+    }
+  }
+
+  // 路径 2：中转
+  if (mode === 'relay') {
+    const viaRelay = await askViaRelay(text, { meal: ctx.meal, hour }, timeoutMs);
+    return viaRelay.ok ? viaRelay : { ok: false, error: viaRelay.error };
+  }
+
+  return { ok: false, error: '还没配置 AI' };
+}
+
+async function askViaRelay(text, ctx, timeoutMs = 30000) {
   try {
-    const res = await fetch(AI_ENDPOINT, {
+    const res = await fetch('/api/parse-meal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, meal: ctx.meal || null, hour: ctx.hour ?? new Date().getHours() }),
+      body: JSON.stringify({ text, meal: ctx.meal || null, hour: ctx.hour }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      return { ok: false, error: data?.error || `解析服务返回 ${res.status}` };
-    }
-    if (!data || !Array.isArray(data.items)) {
-      return { ok: false, error: '解析结果格式不对' };
-    }
-    return { ok: true, items: data.items, meal: data.meal || null, questions: data.questions || [] };
+    if (!res.ok) return { ok: false, error: data?.error || `中转服务返回 ${res.status}` };
+    if (!data || !Array.isArray(data.items)) return { ok: false, error: '中转服务返回的格式不对' };
+    return { ok: true, source: 'relay', items: data.items, meal: data.meal || null, questions: data.questions || [] };
   } catch (err) {
     const msg = err?.name === 'TimeoutError' || err?.name === 'AbortError'
-      ? 'AI 响应太慢（超过 25 秒）'
-      : '连不上解析服务（检查电脑上是否开着服务、手机是否在同一个 Wi-Fi）';
+      ? 'AI 响应太慢（超过 30 秒）'
+      : '连不上中转服务';
     return { ok: false, error: msg };
   }
 }
 
-/** 读设置页需要的信息（当前状态 + 服务商预设；服务端只回掩码，不回密钥） */
-export async function loadAiConfig(timeoutMs = 4000) {
-  try {
-    const res = await fetch('/api/ai-config', { signal: AbortSignal.timeout(timeoutMs) });
-    if (!res.ok) return { ok: false, error: `服务返回 ${res.status}` };
-    return { ok: true, data: await res.json() };
-  } catch {
-    return { ok: false, error: '连不上解析服务（电脑上的服务没开，或者手机不在同一个 Wi-Fi）' };
+/** 测试连通：直连就直接测；走中转时让电脑代测 */
+export async function testConnection() {
+  const local = readAiConfig();
+  const mode = local?.mode || 'direct';
+  if (mode === 'direct' && local?.baseUrl && local?.model) {
+    try {
+      const r = await requestPing({ config: { baseUrl: local.baseUrl, model: local.model, apiKey: local.apiKey } });
+      return { ok: true, via: 'direct', model: local.model, baseUrl: local.baseUrl, reply: r.reply };
+    } catch (err) {
+      const relay = await relayStatus(1500);
+      if (relay.available && relay.configured) {
+        const viaRelay = await fetch('/api/ai-config/test', { method: 'POST' }).then((r) => r.json()).catch(() => null);
+        if (viaRelay?.ok) return { ...viaRelay, via: 'relay', note: `直连没成功（${err.message}），但电脑上的中转服务是通的` };
+      }
+      return { ok: false, error: err.message };
+    }
   }
+  const res = await fetch('/api/ai-config/test', { method: 'POST' }).catch(() => null);
+  if (!res) return { ok: false, error: '连不上中转服务（电脑上的服务没开）' };
+  const data = await res.json().catch(() => ({}));
+  return res.ok ? { ok: true, via: 'relay', ...data } : { ok: false, error: data.error || `测试失败（${res.status}）` };
 }
 
-/** 保存设置。密钥只发给本机服务，不发给 AI 厂商，也不留在手机里 */
-export async function saveAiConfig(input, timeoutMs = 8000) {
+/**
+ * 获取这家服务商的模型列表。
+ * 直连模式直接问服务商；问不到时交给中转（有些服务不允许浏览器读模型列表）。
+ */
+export async function fetchModels({ baseUrl, apiKey } = {}) {
+  const local = readAiConfig();
+  const useBase = String(baseUrl || local?.baseUrl || '').trim();
+  const useKey = apiKey !== undefined ? apiKey : (local?.apiKey || '');
+  if (!useBase) return { ok: false, error: '先填接口地址' };
   try {
-    const res = await fetch('/api/ai-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: data.error || `保存失败（${res.status}）` };
-    return { ok: true, data };
-  } catch {
-    return { ok: false, error: '保存失败：连不上电脑上的服务' };
-  }
-}
-
-/** 清空设置在电脑上保存的密钥 */
-export async function clearAiConfig(timeoutMs = 8000) {
-  try {
-    const res = await fetch('/api/ai-config', { method: 'DELETE', signal: AbortSignal.timeout(timeoutMs) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: data.error || `清除失败（${res.status}）` };
-    return { ok: true, data };
-  } catch {
-    return { ok: false, error: '清除失败：连不上电脑上的服务' };
-  }
-}
-
-/** 让电脑代测一下能不能连上服务商 */
-export async function testAiConnection(timeoutMs = 30000) {
-  try {
-    const res = await fetch('/api/ai-config/test', { method: 'POST', signal: AbortSignal.timeout(timeoutMs) });
-    const data = await res.json().catch(() => ({}));
-    return res.ok ? { ok: true, ...data } : { ok: false, error: data.error || `测试失败（${res.status}）` };
+    const models = await requestModels({ baseUrl: useBase, apiKey: useKey });
+    return { ok: true, models, via: 'direct' };
   } catch (err) {
-    const msg = err?.name === 'TimeoutError' ? '测试超时（等了 30 秒）' : '连不上电脑上的服务';
-    return { ok: false, error: msg };
+    try {
+      const res = await fetch('/api/ai-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ baseUrl: useBase, apiKey: useKey }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.models) && data.models.length) return { ok: true, models: data.models, via: 'relay' };
+      }
+    } catch { /* 中转也不可用，返回直连时的原始错误 */ }
+    return { ok: false, error: err.message };
   }
 }
 
-/** 是否需要问「大概多大碗」这类追问：AI 说需要、或本地判断需要 */
-export function needsPortionQuestion(items) {
-  return items.some((it) => it.needsConfirm || it.portionUnclear);
+/** 这家预设是否支持浏览器直连（界面上要提示清楚） */
+export function presetDirectCall(presetId) {
+  return findPreset(presetId).directCall !== false;
 }
+
+export { defaultStorage };

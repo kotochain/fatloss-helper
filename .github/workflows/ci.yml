@@ -1,0 +1,80 @@
+# 这个工作流在每次推送和 PR 时自动跑测试。
+# 目的：即使只有一个人维护，也不会出现「改坏了没发现」。
+name: 测试
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 跑测试与自检
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 语法检查
+        run: |
+          for f in js/*.js tools/*.mjs tests/*.mjs sw.js; do
+            node --check "$f" || exit 1
+          done
+
+      - name: 单元测试
+        run: npm test
+
+      - name: 反向验证（故意改坏代码，确认测试会失败）
+        run: node tools/mutate-check.mjs
+
+      - name: 密钥自查（确认没有密钥被提交）
+        run: node tools/check-secrets.mjs --self-test
+
+      - name: 缓存清单检查（离线可用的前提是文件都在清单里）
+        run: |
+          node -e "
+          const fs = require('fs');
+          const list = [...fs.readFileSync('sw.js','utf8').matchAll(/'\.\/([^']+)'/g)].map(m=>m[1]).filter(x=>!x.endsWith('/'));
+          const missing = list.filter(f => !fs.existsSync(f));
+          if (missing.length) { console.error('缓存清单里的文件不存在:', missing); process.exit(1); }
+          const jsFiles = fs.readdirSync('js').map(f => 'js/'+f);
+          const notCached = jsFiles.filter(f => !list.includes(f));
+          if (notCached.length) { console.error('这些 js 文件没进离线缓存:', notCached); process.exit(1); }
+          console.log('缓存清单 OK：' + list.length + ' 个文件');
+          "
+
+  browser:
+    name: 真浏览器自检
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 启动本地服务
+        run: |
+          node tools/serve.mjs 4173 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4173/ > /dev/null && break
+            sleep 1
+          done
+
+      - name: 界面与流程自检（Chrome 由 GitHub 的机器自带）
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          node tools/quicklog-check.mjs
+          node tools/offline-check.mjs
+
+  # 说明：需要访问外部 AI 服务的自检（direct-check / ai-e2e-check）默认不在 CI 跑，
+  # 它们用的是本地假服务，理论上也能跑，但会拖长 CI 时间。需要时手动在本地跑：
+  #   node tools/direct-check.mjs
+  #   node tools/ai-e2e-check.mjs

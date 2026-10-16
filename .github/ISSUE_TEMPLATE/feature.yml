@@ -1,0 +1,27 @@
+name: 想要一个新功能
+description: 新的想法、改进、或者「这个用起来别扭」
+title: "[想法] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: pain
+    attributes:
+      label: 现在哪里别扭
+      description: 先说清现在的问题，再说想怎么改 —— 这样我能想到更好的做法
+      placeholder: 例：每次记体重都要点到体重页，麻烦；希望今天页就能直接填
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你希望怎么做
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 有多要紧
+      options:
+        - 影响每天用（希望尽快）
+        - 用起来更顺手
+        - 有了更好，没有也行
+    validations:
+      required: true

@@ -1,7 +1,7 @@
 /* 离线缓存：装到手机主屏幕后，没有网络也能打开。
  * 改动文件后把 CACHE 的版本号加一，手机上刷新一次就会拿到新版本。 */
 
-const CACHE = 'fatloss-v6';
+const CACHE = 'fatloss-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,9 @@ const ASSETS = [
   './js/cardio.js',
   './js/mealparse.js',
   './js/ai.js',
+  './js/ai-core.js',
+  './js/ai-config.js',
+  './js/providers.js',
   './js/recommend.js',
   './js/store.js',
   './icons/icon.svg',

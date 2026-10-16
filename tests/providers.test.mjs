@@ -173,7 +173,9 @@ test('连通测试：成功/401/404/连不上，各自给中文原因', async ()
     fetchImpl: async () => { throw new Error('ECONNREFUSED'); },
   });
   assert.equal(down.ok, false);
-  assert.ok(down.error.includes('连不上'), down.error);
+  // 说法可以是「连不上 …」或「调用失败：…」，但必须是中文可读、而不是原始英文异常
+  assert.ok(/连不上|调用失败/.test(down.error), down.error);
+  assert.ok(!down.error.includes('NetworkError'), '不该把浏览器原始报错直接抛给用户');
   proxy.clearSavedConfig();
 });
 
