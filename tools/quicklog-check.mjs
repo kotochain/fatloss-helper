@@ -103,6 +103,32 @@ function connect(wsUrl) {
   });
 }
 
+/**
+ * 回到「记录」页的「吃的」那一半，并等到输入框真的在。
+ * 记录页有分段（吃的/练的），她上次可能停在「练的」；自检脚本不能假设当前状态。
+ */
+async function ensureOnLogPage(evaluate) {
+  // 先关掉可能开着的弹层
+  await evaluate(`(() => {
+    for (let i = 0; i < 6; i++) {
+      const b = document.querySelector('#sheetClose');
+      if (!b || b.offsetParent === null) break;
+      b.click();
+    }
+    return true;
+  })()`);
+  await evaluate(`document.querySelector('.tab[data-view="log"]')?.click()`);
+  await evaluate(`document.querySelector('[data-record-tab="food"]')?.click()`);
+  const ok = await evaluate(`(async () => {
+    for (let i = 0; i < 30; i++) {
+      if (document.querySelector('#quickText')) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  })()`);
+  if (!ok) throw new Error('回到记录页后仍找不到说一句的输入框（#quickText）');
+}
+
 async function main() {
   await waitForServer();
   fs.mkdirSync(outDir, { recursive: true });
@@ -133,7 +159,10 @@ async function main() {
   // 断言可能"看起来没问题"（元素不存在就跳过），必须靠这里兜住。
   const pageErrors = [];
   client.on?.('Runtime.exceptionThrown', (p) => {
-    pageErrors.push((p?.exceptionDetails?.exception?.description || p?.exceptionDetails?.text || '').split('\n')[0].slice(0, 160));
+    // 连堆栈一起收：只有一句 "reading 'value'" 根本不知道在哪（排查花过很久）
+    const d = p?.exceptionDetails?.exception?.description || p?.exceptionDetails?.text || '';
+    const lines = d.split('\n').filter((l) => l.includes('app.js') || l.includes('at ')).slice(0, 3);
+    pageErrors.push([d.split('\n')[0].slice(0, 120), ...lines.map((l) => l.trim().slice(0, 90))].join(' | '));
   });
   await client.send('Page.enable');
   await client.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -141,7 +170,11 @@ async function main() {
   const errors = [];
   const evaluate = async (expression) => {
     const r = await client.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    if (r.exceptionDetails) {
+      // 报错时带上表达式的前 80 字 —— 否则只有行号，根本不知道是哪一句（排查花过很久）
+      const expr = String(expression).replace(/\s+/g, ' ').slice(0, 80);
+      throw new Error(`${r.exceptionDetails.exception?.description || r.exceptionDetails.text}\n    出错的那句: ${expr}`);
+    }
     return r.result.value;
   };
   const problems = [];
@@ -181,6 +214,77 @@ async function main() {
   })()`);
   console.log(apiNotCached === 0 ? '✅ 接口请求没有被离线缓存接管' : `❌ 有 ${apiNotCached} 个 /api 请求被缓存了`);
   if (apiNotCached !== 0) problems.push('/api 请求被离线缓存接管，设置页会读到旧状态');
+
+  console.log('\n=== 一·〇、新手引导（第一次打开的人看到的）===');
+  // 清空存储，模拟「第一次打开」
+  await evaluate(`(async () => { localStorage.clear(); const r = await navigator.serviceWorker.getRegistrations(); await Promise.all(r.map((x) => x.unregister())); for (const n of await caches.keys()) await caches.delete(n); return true; })()`);
+  await client.send('Page.navigate', { url: BASE + '/' });
+  await sleep(1800);
+  // 检查元素而不是文字：之前按文字找，被自己 slice 截断了，误判成「没有引导入口」
+  const welcome = await evaluate(`({
+    文字: document.querySelector('#app')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 46),
+    有引导按钮: !!document.querySelector('[data-act="onboard"]'),
+    有示例按钮: !!document.querySelector('[data-act="demo"]'),
+  })`);
+  console.log(`✅ 首次打开看到欢迎页：${welcome.文字}`);
+  console.log(`   引导入口 ${welcome.有引导按钮}｜示例入口 ${welcome.有示例按钮}`);
+  if (!welcome.有引导按钮) problems.push('首次打开没有引导入口');
+
+  await evaluate(`document.querySelector('[data-act="onboard"]')?.click()`);
+  await sleep(700);
+  const ob1 = await evaluate(`({ 标题: document.querySelector('#sheetTitle')?.textContent, 步骤: document.querySelector('.onboard-step')?.textContent })`);
+  console.log(`✅ 第 1 步「${ob1.标题}」（${ob1.步骤}）`);
+  await evaluate(`document.querySelector('#obNext')?.click()`);
+  // 等表单真的出现再操作 —— 固定 sleep 偶尔不够（踩过：去设值时元素还没渲染出来）
+  await evaluate(`(async () => {
+    for (let i = 0; i < 30; i++) {
+      if (document.querySelector('#pHeight')) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  })()`);
+  await sleep(200);
+  const ob2 = await evaluate(`({ 有表单: !!document.querySelector('#pHeight'), 按钮: document.querySelector('#pSave')?.textContent })`);
+  console.log(`✅ 第 2 步填基础数据（表单在 ${ob2.有表单}，按钮「${ob2.按钮}」）`);
+  if (!ob2.有表单) problems.push('引导第 2 步没有资料表单');
+
+  await evaluate(`(() => {
+    const h = document.querySelector('#pHeight');
+    if (!h) return 'no-height';
+    h.value = '163';
+    const w = document.querySelector('#pWeight'); if (w) w.value = '58';
+    const a = document.querySelector('#pAge'); if (a) a.value = '26';
+    document.querySelector('#pSave')?.click();
+    return 'ok';
+  })()`);
+  await evaluate(`(async () => {
+    for (let i = 0; i < 30; i++) {
+      if (document.querySelector('[data-pick]')) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  })()`);
+  const ob3 = await evaluate(`({ 标题: document.querySelector('#sheetTitle')?.textContent, 选项: [...document.querySelectorAll('[data-pick]')].map((e) => e.querySelector('b').textContent.trim()) })`);
+  console.log(`✅ 第 3 步「${ob3.标题}」：${ob3.选项.join(' / ')}`);
+  if (!ob3.选项.includes('普通模式') || !ob3.选项.includes('AI 模式')) problems.push('引导里没有让用户选模式');
+  if (ob3.选项[0] !== '普通模式') problems.push('普通模式应当排在前面（大多数人不会配 API）');
+
+  await evaluate(`document.querySelector('[data-pick="basic"]')?.click()`);
+  await evaluate(`(async () => {
+    for (let i = 0; i < 30; i++) {
+      if (document.querySelector('#obGo')) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  })()`);
+  const ob4 = await evaluate(`({ 步骤: document.querySelector('.onboard-step')?.textContent, 有去记录: !!document.querySelector('#obGo') })`);
+  console.log(`✅ 第 4 步（${ob4.步骤}）引导去记第一笔：${ob4.有去记录}`);
+  await evaluate(`document.querySelector('#obGo')?.click()`);
+  await sleep(1200);
+  const obDone = await evaluate(`({ 标签: document.querySelector('.tab.active')?.textContent.trim(), 模式: JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}')?.settings?.mode, 引导完成: JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}')?.settings?.onboarded })`);
+  console.log(`✅ 引导结束 → 落在「${obDone.标签}」页，模式存为 ${obDone.模式}，引导标记 ${obDone.引导完成}`);
+  if (obDone.模式 !== 'basic') problems.push('引导里选了普通模式，存档里却不是');
+  if (obDone.引导完成 !== true) problems.push('引导完成后没有记录标记（下次打开会重复引导）');
 
   console.log('\n=== 一、「说一句就记上」 ===');
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
@@ -275,14 +379,23 @@ async function main() {
   }
 
   // 改份量：把第一条改成 800 克，看合计有没有跟着变
-  const before = await evaluate(`document.querySelector('#draftHost .row.between b').textContent`);
-  await evaluate(`(() => {
+  const before = await evaluate(`document.querySelector('#draftHost .row.between b')?.textContent`);
+  const changeRes = await evaluate(`(() => {
     const inp = document.querySelector('#draftHost .draft-grams');
+    if (!inp) {
+      // 报出真实 DOM，方便判断是结构变了还是元素真没了
+      return { ok: false, html: (document.querySelector('#draftHost')?.innerHTML || '').replace(/\s+/g, ' ').slice(0, 200) };
+    }
     inp.value = '800';
     inp.dispatchEvent(new Event('input', { bubbles: true }));
+    return { ok: true };
   })()`);
+  if (!changeRes.ok) {
+    console.log('   ❌ 找不到份量输入框，弹层实际内容：', changeRes.html);
+    problems.push('弹层里找不到份量输入框（.draft-grams）');
+  }
   await sleep(200);
-  const after = await evaluate(`document.querySelector('#draftHost .row.between b').textContent`);
+  const after = await evaluate(`document.querySelector('#draftHost .row.between b')?.textContent || '(没找到合计)'`);
   console.log(`✅ 改份量后合计从 ${before} 变成 ${after} kcal`);
   if (before === after) problems.push('改份量没有重算热量');
 
@@ -411,6 +524,9 @@ async function main() {
   await sleep(300);
 
   // 记一笔，看有没有「记完的反馈」提示条
+  // 注意：必须显式回到「记录」页并等输入框出现 —— 上面几步把页面切到了今天页，
+  // 而记录页现在还有「吃的/练的」分段，不能假设输入框一定在（踩过：脚本自己报了空指针）
+  await ensureOnLogPage(evaluate);
   await evaluate(`(() => {
     const ta = document.querySelector('#quickText');
     ta.value = '中午吃了一碗米饭';
@@ -468,7 +584,7 @@ async function main() {
   if (!modes.some((m) => m.includes('普通模式'))) problems.push('设置页没有「普通模式」选项');
   if (!modes.some((m) => m.includes('AI 模式'))) problems.push('设置页没有「AI 模式」选项');
   if (!modes.some((m) => m.includes('当前') && m.includes('普通'))) problems.push('默认应当是普通模式（大多数人不会配 API）');
-  for (const must of ['AI 设置', '数据与备份', '她的资料', '关于']) {
+  for (const must of ['AI 设置', '数据与备份', '你的资料', '关于']) {
     if (!settings.条目.includes(must)) problems.push(`设置页缺少「${must}」`);
   }
 
@@ -585,6 +701,204 @@ async function main() {
 
   await evaluate(`document.querySelector('#sheetClose').click()`);
   await sleep(200);
+
+  console.log('\n=== 三、运动记录：记一次运动，统计跟着变 ===');
+  // 红线：记运动前后，「今天还可以吃」必须一模一样。
+  // 先把这个数字记下来，最后再对一遍 —— 这是整个功能最容易做错的地方。
+  await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);
+  await sleep(500);
+  const heroBefore = await evaluate(`(() => ({
+    剩余: document.querySelector('.ring-center .big')?.textContent || null,
+    标签: document.querySelector('.ring-center .cap')?.textContent || null,
+    已吃: document.querySelector('.hero .sub')?.textContent.replace(/\\s+/g, ' ').trim() || null,
+    有奖励胶囊: !!document.querySelector('.bonus-pill'),
+  }))()`);
+  console.log(`   记运动前：${heroBefore.标签} ${heroBefore.剩余} kcal ｜ ${heroBefore.已吃}`);
+
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(400);
+  const seg0 = await evaluate(`(() => ({
+    分段: [...document.querySelectorAll('#recordTabs .seg-btn')].map((b) => b.textContent.trim() + (b.classList.contains('on') ? '(当前)' : '')),
+    有吃的输入框: !!document.querySelector('#quickText'),
+    有运动面板: !!document.querySelector('[data-train-cardio]'),
+  }))()`);
+  console.log(`✅ 记录页分段：${seg0.分段.join(' / ')}`);
+  if (seg0.分段.length !== 2) problems.push('记录页没有「吃的 / 练的」两个分段');
+  if (!seg0.有吃的输入框) problems.push('记录页默认应当是「吃的」那一半（否则记饭要多点一次）');
+  if (seg0.有运动面板) problems.push('「吃的」那一半不该同时显示运动面板');
+
+  await evaluate(`document.querySelector('[data-record-tab="training"]').click()`);
+  await sleep(450);
+  const train = await evaluate(`(() => {
+    const chips = [...document.querySelectorAll('#trainCardio .chip')];
+    const on = document.querySelector('#trainCardio .chip.on');
+    return {
+      吃的输入框还在: !!document.querySelector('#quickText'),
+      动作数: chips.length,
+      默认动作: on ? on.textContent.trim() : null,
+      前几个动作: chips.slice(0, 5).map((c) => c.textContent.trim()),
+      估算文案: document.querySelector('#trainEstimate')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+      估算数字: document.querySelector('#trainEstimate b')?.textContent || null,
+      算式: document.querySelector('#trainEstimate .tiny')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+      统计: [...document.querySelectorAll('.stats .stat')].map((s) => s.textContent.replace(/\\s+/g, ' ').trim()),
+      力量: [...document.querySelectorAll('#trainStrength .chip')].map((c) => c.textContent.trim()),
+      有器械: !!document.querySelector('[data-train-eq]'),
+    };
+  })()`);
+  console.log(`✅ 「练的」面板：${train.动作数} 个动作可选（${train.前几个动作.join('、')}…），默认选中「${train.默认动作}」`);
+  console.log(`   力量训练：${train.力量.join('、')}｜器械可勾选 ${train.有器械}`);
+  console.log(`   统计：${train.统计.join(' · ')}`);
+  console.log(`   估算：${train.估算文案.slice(0, 70)}…`);
+  if (train.吃的输入框还在) problems.push('切到「练的」之后「吃的」输入框还留在页面上');
+  if (!train.动作数) problems.push('「练的」一个动作都没列出来');
+  if (!train.力量.length) problems.push('「练的」里没有力量训练（跟着计划练力量的人没法记）');
+  if (!/^\d+$/.test(train.估算数字 || '')) problems.push(`没有显示这次的估算消耗（读到「${train.估算数字}」）`);
+  if (!train.估算文案.includes('估算')) problems.push('消耗没有标明是估算');
+  if (train.估算文案.includes('可以多吃') || train.估算文案.includes('奖励')) problems.push('运动面板的文案在暗示「练了可以多吃」');
+  if (train.统计.length !== 3) problems.push('运动记录里缺少「今天 / 这周 / 累计」三个数字');
+
+  // 改时长：估算必须立刻跟着变（不能等点了「记上」才重算）
+  const kcalBefore = Number(train.估算数字);
+  await evaluate(`(() => {
+    const inp = document.querySelector('#trainMinutesInput');
+    inp.value = '40';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await sleep(250);
+  const after40 = await evaluate(`(() => ({
+    数字: document.querySelector('#trainEstimate b')?.textContent || null,
+    算式: document.querySelector('#trainEstimate .tiny')?.textContent.replace(/\\s+/g, ' ').trim() || null,
+  }))()`);
+  console.log(`✅ 把时长改成 40 分钟：估算 ${kcalBefore} → ${after40.数字} kcal（${after40.算式.slice(0, 52)}）`);
+  if (!(Number(after40.数字) > kcalBefore)) problems.push('改了时长但估算消耗没有重算');
+
+  // 记上：确认写进存档、提示出现、统计数字跟着变
+  const statsBefore = await evaluate(`[...document.querySelectorAll('.stats .stat')].map((s) => s.textContent.replace(/\\s+/g, ' ').trim())`);
+  await evaluate(`document.querySelector('#trainSave').click()`);
+  await sleep(700);
+  const savedTrain = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    const key = Object.keys(st.days).sort().pop();
+    const list = st.days[key].exercises || [];
+    const t = [...document.querySelectorAll('.toast')].pop();
+    return {
+      条数: list.length,
+      最后一条: list[list.length - 1] || null,
+      提示: t ? t.textContent.trim() : null,
+      统计: [...document.querySelectorAll('.stats .stat')].map((s) => s.textContent.replace(/\\s+/g, ' ').trim()),
+      历史条数: document.querySelectorAll('.card .entry .name').length,
+      分段还在练的: (document.querySelector('#recordTabs .seg-btn.on')?.textContent || '').includes('练的'),
+    };
+  })()`);
+  const rec = savedTrain.最后一条 || {};
+  console.log(`✅ 记上了：${rec.name} ${rec.minutes} 分钟（METs ${rec.mets}）｜提示：${savedTrain.提示}`);
+  console.log(`   统计 ${statsBefore.join(' · ')} → ${savedTrain.统计.join(' · ')}`);
+  if (savedTrain.条数 === 0 || rec.minutes !== 40) problems.push(`这次运动没有正确写进存档（minutes=${rec.minutes}）`);
+  if (!(rec.mets > 1)) problems.push('记录里没有存下 METs（那今天页会按旧强度算错消耗）');
+  if (!rec.name) problems.push('记录里没有存下动作名（历史会显示成 key）');
+  if (!(savedTrain.提示 || '').includes('记上了')) problems.push('记完运动没有即时反馈');
+  if (savedTrain.统计[0] === statsBefore[0]) problems.push('记完之后「今天几次」没有变');
+  if (savedTrain.历史条数 === 0) problems.push('运动历史列表里没有出现刚记的这条');
+  if (!savedTrain.分段还在练的) problems.push('记完之后分段跳走了（应当留在「练的」）');
+  // 界面显示的估算和记录里的 METs 手算结果要对得上（差 1 以内是四舍五入）
+  const handKcal = Math.round(rec.mets * 58 * 40 / 60);
+  if (Math.abs(Number(after40.数字) - handKcal) > 1) {
+    problems.push(`显示的估算 ${after40.数字} 和手算 ${handKcal} 对不上（METs ${rec.mets} × 58kg × 40 分钟）`);
+  }
+
+  const shotTrain = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-training.png'), Buffer.from(shotTrain.data, 'base64'));
+
+  // 回今天页：额度必须一分没变（红线），而且能看到刚记的运动
+  await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);
+  await sleep(500);
+  const heroAfter = await evaluate(`(() => ({
+    剩余: document.querySelector('.ring-center .big')?.textContent || null,
+    标签: document.querySelector('.ring-center .cap')?.textContent || null,
+    已吃: document.querySelector('.hero .sub')?.textContent.replace(/\\s+/g, ' ').trim() || null,
+    有奖励胶囊: !!document.querySelector('.bonus-pill'),
+    今天运动: [...document.querySelectorAll('.hero .stat')].map((s) => s.textContent.replace(/\\s+/g, ' ').trim()).find((t) => t.includes('运动')) || null,
+    运动卡片: (() => {
+      const card = [...document.querySelectorAll('.card')].find((c) => c.textContent.includes('今天的运动'));
+      return card ? card.textContent.replace(/\\s+/g, ' ').trim().slice(0, 110) : null;
+    })(),
+  }))()`);
+  console.log(`   记运动后：${heroAfter.标签} ${heroAfter.剩余} kcal ｜ ${heroAfter.已吃}`);
+  console.log(`   今天页运动：${heroAfter.今天运动}｜${(heroAfter.运动卡片 || '').slice(0, 78)}…`);
+  if (heroAfter.剩余 !== heroBefore.剩余 || heroAfter.标签 !== heroBefore.标签) {
+    problems.push(`记运动把「${heroBefore.标签} ${heroBefore.剩余}」变成了「${heroAfter.标签} ${heroAfter.剩余}」—— 运动消耗不许加回当天可吃的额度`);
+  }
+  if (heroAfter.已吃 !== heroBefore.已吃) problems.push('什么都没吃，已吃热量却变了');
+  if (heroAfter.有奖励胶囊) problems.push('首页还有「运动奖励 … 已计入」的胶囊（红线：不许加回额度）');
+  if (!(heroAfter.今天运动 || '').includes('40')) problems.push('今天页没有显示刚记的 40 分钟运动');
+
+  // 分段要记住：重新打开还停在「练的」
+  await client.send('Page.navigate', { url: BASE + '/' });
+  await sleep(2000);
+  await evaluate(`document.querySelector('.tab[data-view="log"]')?.click()`);
+  await sleep(450);
+  const remembered = await evaluate(`(() => ({
+    分段: document.querySelector('#recordTabs .seg-btn.on')?.textContent.trim() || null,
+    有运动面板: !!document.querySelector('[data-train-cardio]'),
+    统计: [...document.querySelectorAll('.stats .stat')].map((s) => s.textContent.replace(/\\s+/g, ' ').trim()),
+  }))()`);
+  console.log(remembered.有运动面板
+    ? `✅ 重新打开还停在「${remembered.分段}」（统计：${remembered.统计.join(' · ')}）`
+    : `❌ 重新打开分段变回「${remembered.分段}」`);
+  if (!remembered.有运动面板) problems.push('分段没有记住，重新打开又回到「吃的」');
+
+  console.log('\n=== 三·二、计划页的记录入口没被改坏（两处都能记，走同一条路）===');
+  const exBefore = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    const key = Object.keys(st.days).sort().pop();
+    return (st.days[key].exercises || []).length;
+  })()`);
+  await evaluate(`document.querySelector('.tab[data-view="plan"]').click()`);
+  await sleep(600);
+  const planEntry = await evaluate(`(() => {
+    const btn = document.querySelector('[data-log-cardio]');
+    return { 有按钮: !!btn, 文案: btn ? btn.textContent.trim() : null };
+  })()`);
+  if (!planEntry.有按钮) {
+    console.log('❌ 计划页没有「今天就做这个」按钮');
+    problems.push('计划页的记录入口消失了');
+  } else {
+    await evaluate(`document.querySelector('[data-log-cardio]').click()`);
+    await sleep(700);
+    const planLogged = await evaluate(`(() => {
+      const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      const key = Object.keys(st.days).sort().pop();
+      const list = st.days[key].exercises || [];
+      const t = [...document.querySelectorAll('.toast')].pop();
+      const card = [...document.querySelectorAll('.card')].find((c) => c.textContent.includes('今天已经记了'));
+      return {
+        条数: list.length,
+        最后一条: list[list.length - 1] || null,
+        提示: t ? t.textContent.trim() : null,
+        卡片: card ? card.textContent.replace(/\\s+/g, ' ').trim().slice(0, 90) : null,
+      };
+    })()`);
+    console.log(`✅ 计划页「${planEntry.文案}」→ ${planLogged.提示}`);
+    console.log(`   今天已经记了：${(planLogged.卡片 || '').slice(0, 80)}…`);
+    if (planLogged.条数 !== exBefore + 1) problems.push('计划页的记录入口没有写进记录');
+    if (!(planLogged.最后一条?.mets > 1)) problems.push('计划页记的运动没存 METs');
+    if (!(planLogged.提示 || '').includes('记上了')) problems.push('计划页记完没有反馈');
+  }
+
+  // 回到「吃的」：老流程一点没变（说一句 + 搜索 + 常吃的都在）
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(400);
+  await evaluate(`document.querySelector('[data-record-tab="food"]').click()`);
+  await sleep(450);
+  const backToFood = await evaluate(`(() => ({
+    输入框: !!document.querySelector('#quickText'),
+    搜索框: !!document.querySelector('#logSearch'),
+    常吃的卡片: !!document.querySelector('[data-act="quick-add"]'),
+  }))()`);
+  console.log(backToFood.输入框 && backToFood.搜索框
+    ? `✅ 切回「吃的」：说一句 ${backToFood.输入框}｜搜索食物 ${backToFood.搜索框}｜常吃的 ${backToFood.常吃的卡片}`
+    : '❌ 切回「吃的」之后旧内容丢了');
+  if (!backToFood.输入框 || !backToFood.搜索框) problems.push('切回「吃的」之后原有的记录功能不见了');
 
   if (pageErrors.length) {
     console.log('\n=== 页面运行时异常 ===');

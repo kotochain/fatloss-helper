@@ -121,16 +121,16 @@ export function listExercises() {
 
 /* ── 运动记录与统计 ────────────────────────────────
    把「记一次运动」收敛到这一个地方，是因为：
-    1)「记录」页和「推荐」页都要能记，各写一遍消耗换算，两处迟早对不上；
+    1)「记录」页和「计划」页都要能记，各写一遍消耗换算，两处迟早对不上；
     2) 记录里存下当时的动作名和 METs —— 动作库以后改了，历史记录不该跟着变样；
     3)「今天几次 / 这周几次 / 累计多久」只有一份实现，今天页、记录页、历史列表用的是同一个数。
    消耗始终是估算：kcal = METs × 体重(kg) × 小时数。
-   ────────────────────────────────────────────────── */
 
-/** 单次运动的最长合理时长：超过这个数基本是输错了（10 小时） */
-export const MAX_TRAINING_MINUTES = 600;
-/** 最短一次：再短就没法算了（四舍五入会把 0.4 分钟变成 0 分钟） */
-export const MIN_TRAINING_MINUTES = 1;
+   一条产品红线：**运动消耗绝不加回「今天还可以吃」的额度**，额度只由 calcTargets 决定。
+   两个理由：资料里的活动量系数（比如轻度活动 ×1.375）本来就包含日常活动，再加一次等于
+   同一次运动算了两遍；而「练了就奖励自己多吃」正好会把辛苦练出来的缺口抹平。
+   所以这里只负责把消耗**算出来给人看**，不提供任何「可以多吃多少」的函数。
+   ────────────────────────────────────────────────── */
 
 /**
  * 有氧库动作 → 旧 METs 池的 key。
@@ -195,16 +195,17 @@ export function resolveTrainingAction({ cardioId = null, exerciseKey = null } = 
   return null;
 }
 
-/** 时长必须是真的数字：字符串 '30' 能通过 > 0 的判断，存进去却会让统计变成字符串拼接 */
+/**
+ * 时长在界面这一层先挡一道明显的手滑：'30' 这种字符串能被 Number() 转成 30，
+ * 但存进去的就不是数字了，统计会变成字符串拼接。
+ * 真正的关卡（0 / 负数 / 超过 24 小时）在 store 的 addExercise —— 那里返回 null。
+ */
 function normalizeTrainingMinutes(minutes) {
   if (typeof minutes !== 'number' || !Number.isFinite(minutes)) {
     throw new Error(`时长要填数字（分钟），收到了 ${JSON.stringify(minutes)}`);
   }
   if (!(minutes > 0)) throw new Error('时长要大于 0 分钟，0 和负数都记不了。');
-  const m = Math.round(minutes);
-  if (m < MIN_TRAINING_MINUTES) throw new Error(`时长太短了，至少 ${MIN_TRAINING_MINUTES} 分钟。`);
-  if (m > MAX_TRAINING_MINUTES) throw new Error(`单次运动 ${m} 分钟？超过 ${MAX_TRAINING_MINUTES} 分钟（10 小时）多半是输错了，请确认。`);
-  return m;
+  return minutes;
 }
 
 function normalizeTrainingIntensity(intensity) {
@@ -222,7 +223,7 @@ function normalizeTrainingNote(note) {
 }
 
 /**
- * 记一次运动。界面上的两个入口（记录页、推荐页）都走这里，记录的形状只在这里定义一次。
+ * 记一次运动。界面上的两个入口（记录页、计划页）都走这里，记录的形状只在这里定义一次。
  * @returns {object} 新记录（调用方负责存盘）
  */
 export function logTraining(state, dateKey, opts = {}) {
@@ -235,8 +236,11 @@ export function logTraining(state, dateKey, opts = {}) {
   const intensity = normalizeTrainingIntensity(opts.intensity);
   const note = normalizeTrainingNote(opts.note);
 
-  // 仍然走 store 的 addExercise：id、入哪个数组这些事只由 store 决定
+  // 仍然走 store 的 addExercise：id、写进哪一天这些事只由 store 决定
   const item = addExercise(state, dateKey, action.exerciseKey, minutes);
+  // store 是唯一关卡：0 / 负数 / 超过 24 小时都返回 null。
+  // 必须检查返回值 —— 当成成功处理的话，界面会提示「记上了」而记录里什么都没有。
+  if (!item) throw new Error('这次没记上：时长要大于 0 分钟，而且不能超过 24 小时。');
   Object.assign(item, {
     cardioId: action.cardioId,
     name: action.name,
@@ -246,23 +250,6 @@ export function logTraining(state, dateKey, opts = {}) {
     createdAt: new Date().toISOString(),
   });
   return item;
-}
-
-/**
- * 运动消耗只把一半算进「今天还可以吃」的额度。
- *
- * 这是产品原则，不是随手取的系数：
- *  - 全算回去 = 一运动就鼓励多吃，热量缺口当天就没了，减脂直接停滞；
- *  - 完全不算 = 明明动了却不认，用户会觉得白练（而且现有文案一直说的是「只算一半」）。
- * 所以「一半」是刻意的折中，且界面上必须写清这是估算。
- */
-export const TRAINING_BUDGET_SHARE = 0.5;
-
-/** 一次运动的消耗里，可以计入当天额度的部分 */
-export function trainingBudgetBonus(kcal) {
-  const n = Number(kcal);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.round(n * TRAINING_BUDGET_SHARE);
 }
 
 /** 一条记录的 METs：优先用记下来那一刻的值；这次改动之前的老记录没有，退回旧 METs 池 */

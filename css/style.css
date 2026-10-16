@@ -652,6 +652,49 @@ input:focus, select:focus, textarea:focus {
 details summary { outline: none; }
 details[open] summary { margin-bottom: 4px; }
 
+/* 新手引导 */
+.onboard-step {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--rose-deep);
+  background: var(--grad-soft);
+  border-radius: 99px;
+  padding: 3px 11px;
+  display: inline-block;
+  margin-bottom: 12px;
+}
+.onboard-hero { font-size: 44px; text-align: center; margin: 4px 0 10px; line-height: 1; }
+.onboard-h { margin-bottom: 14px; }
+.onboard-h b { display: block; font-size: 14px; font-weight: 680; margin-bottom: 4px; }
+.onboard-h p { font-size: 12.5px; line-height: 1.75; color: var(--ink-2); margin: 0; }
+.mode-chip.big { display: block; width: 100%; padding: 15px 16px; margin-bottom: 11px; text-align: left; }
+.mode-chip.big b { font-size: 15px; margin-bottom: 5px; }
+.mode-chip.big em { font-size: 12px; line-height: 1.72; margin-bottom: 8px; }
+.mode-tag {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 650;
+  color: #fff;
+  background: var(--rose);
+  border-radius: 99px;
+  padding: 2px 9px;
+}
+.mode-tag.ghost { background: #EFE6E8; color: var(--ink-2); }
+
+/* 「记一笔」大按钮：今天页唯一的主操作，要一眼看到 */
+.big-log {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 15px;
+  margin-bottom: 14px;
+  letter-spacing: 0.02em;
+}
+.big-log-plus { font-size: 19px; font-weight: 400; line-height: 1; }
+
 /* 洞察卡片 */
 .insight-card { background: linear-gradient(150deg, #FFFCFA, #FFF6F8); }
 .insight {
@@ -921,3 +964,53 @@ details[open] summary { margin-bottom: 4px; }
 .spark { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin: 8px 0; }
 .spark > span { flex: 1; background: var(--green-soft); border-radius: 3px 3px 0 0; position: relative; min-height: 3px; }
 .spark > span.on { background: var(--green); }
+
+/* ── 记录页：吃的 / 练的 分段切换 ──────────────
+   做成「一个胶囊里两个格子」：一眼看出是同一件事的两半，
+   而不是两个各自独立的按钮（那样会被当成「点一下就执行」）。 */
+.segments {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: #F7EDEF;
+  border-radius: 16px;
+  padding: 4px;
+  margin-bottom: 12px;
+}
+.seg-btn {
+  border: 0;
+  background: transparent;
+  border-radius: 13px;
+  padding: 9px 6px;
+  font-size: 14px;
+  font-weight: 620;
+  color: var(--ink-2);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .18s, box-shadow .18s, color .18s;
+}
+.seg-btn:active { transform: scale(.98); }
+.seg-btn.on {
+  background: #fff;
+  color: var(--rose-deep);
+  box-shadow: 0 2px 8px rgba(190, 130, 145, 0.16);
+}
+
+/* 运动消耗的估算框：算式和「不加回额度」的话放一起。
+   单独做成一块底色，是为了让它看起来像一个「算出来的估计」，
+   而不是跟旁边的数字一样精确。 */
+.train-estimate {
+  background: var(--grad-soft);
+  border-radius: 14px;
+  padding: 11px 13px;
+  margin-top: 12px;
+  line-height: 1.6;
+}
+.train-estimate .te-main { font-size: 14px; color: var(--ink); }
+.train-estimate .te-main b {
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--rose-deep);
+  font-variant-numeric: tabular-nums;
+  margin: 0 2px;
+}

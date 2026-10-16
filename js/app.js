@@ -9,7 +9,11 @@ import {
 } from './calc.js';
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount } from './foods.js';
 import { searchFoods, MEAL_SLOTS } from './foodlog.js';
-import { listExercises, buildWeekPlan, EXERCISES } from './exercise.js';
+import {
+  listExercises, buildWeekPlan, EXERCISES,
+  TRAINING_INTENSITY, trainingActions, trainingSummary, trainingHistory,
+  resolveTrainingAction, logTraining, describeTraining, estimateTrainingKcal,
+} from './exercise.js';
 import {
   parseDescription, normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
   gramsFromText, portionGrams,
@@ -53,6 +57,11 @@ let ai = { configured: false, checked: false, reason: null };
 let quickMealHint = null;
 /** 有氧推荐的选择 */
 let cardioPick = { equipment: ['treadmill', 'elliptical', 'bike', 'bodyweight'], goal: 'fat_burn', minutes: 30 };
+/**
+ * 「练的」那一半正在填的东西。
+ * 放在模块里而不是当场读输入框：换分段、切换器械重绘之后，已经填好的时长和备注不能丢。
+ */
+let trainingPick = { cardioId: null, exerciseKey: null, minutes: 30, intensity: '', note: '' };
 const app = $('#app');
 
 /* ── 存档 ────────────────────────────────── */
@@ -124,13 +133,18 @@ function weekdayLabel(key) {
   return w;
 }
 
-function dateLabel() {
+/** 把一个日期键说成人话：今天 / 昨天 / 明天 / 10月14日 周二 */
+function dayLabel(key) {
   const today = todayKey();
-  if (dateKey === today) return '今天';
-  if (dateKey === shiftDate(today, -1)) return '昨天';
-  if (dateKey === shiftDate(today, 1)) return '明天';
-  const [, m, d] = dateKey.split('-');
-  return `${Number(m)}月${Number(d)}日 ${weekdayLabel(dateKey)}`;
+  if (key === today) return '今天';
+  if (key === shiftDate(today, -1)) return '昨天';
+  if (key === shiftDate(today, 1)) return '明天';
+  const [, m, d] = key.split('-');
+  return `${Number(m)}月${Number(d)}日 ${weekdayLabel(key)}`;
+}
+
+function dateLabel() {
+  return dayLabel(dateKey);
 }
 
 function fmt(n, digits = 0) {
@@ -191,6 +205,8 @@ function render() {
     renderWelcome();
     return;
   }
+  // 有资料但没走完引导：补一句提示，不硬拦（她可能只是想先看看）
+  // 引导入口固定放在欢迎页和「我的 → 设置」里，不重复弹窗打扰。
   if (view === 'today') renderToday();
   else if (view === 'log') renderLog();
   else if (view === 'plan') renderPlan();
@@ -213,16 +229,16 @@ function handleAction(act, data) {
     case 'add-food': return openFoodSheet(data.meal);
     case 'growth': return openGrowthSheet();
     case 'insights': return openInsightsSheet();
+    case 'onboard': return onboard({ step: 'intro' });
     case 'go-log':
-      view = 'log';
-      document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
-      render();
-      return;
+      // 这两条都是「记吃」的入口，所以要把记录页切回「吃的」那一半 ——
+      // 上次停在「练的」时如果不切，用户点「搜索食物」会落到运动那一半上，找不到输入框
+      state.settings.recordTab = 'food';
+      return goView('log');
     case 'quick-fill': {
       quickMealHint = data.meal || null;
-      view = 'log';
-      document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
-      render();
+      state.settings.recordTab = 'food';
+      goView('log');
       const ta = $('#quickText');
       if (ta) { ta.focus(); toast('在这里写一句，会自动记到你那一餐。'); }
       return;
@@ -239,7 +255,9 @@ function handleAction(act, data) {
     }
     case 'add-exercise': return openExerciseSheet();
     case 'del-exercise':
-      removeExercise(state, dateKey, data.id);
+      // 历史列表里可能列出别的日子的记录，所以删除要认记录自己那一天，
+      // 不能用当前选中的日期（否则会去错误的那天找一个不存在的 id，删不掉也不报错）
+      removeExercise(state, data.date || dateKey, data.id);
       save();
       render();
       return;
@@ -263,20 +281,164 @@ function handleAction(act, data) {
 
 /* ── 首次进入 ────────────────────────────── */
 
+/* ── 新手引导 ───────────────────────────────
+   为什么要做：第一次打开的人面对的是一个空界面和一堆没解释的词（目标热量、碳蛋脂、METs）。
+   引导要解决三件事，一件都不能少：
+     1) 让她知道「这工具是干嘛的、数据在哪」（信任）
+     2) 拿到算目标需要的几个数字（不然什么都算不出来）
+     3) **让她选模式**（普通 / AI）—— 这是产品决定：模式在开始就选，
+        不要藏在设置的角落里。默认普通模式，因为大多数人不会去配 API。
+   最后一定要让她**记下第一笔**再结束 —— 空着的应用她不会再打开第二次。
+   ─────────────────────────────────────────── */
+
+const ONBOARD_STEPS = ['intro', 'profile', 'mode', 'first'];
+
+function onboard({ step, targets: t = null } = {}) {
+  if (step === 'intro') return onboardIntro();
+  if (step === 'profile') return openProfileSheet({ firstTime: true, onSaved: (tt) => onboard({ step: 'mode', targets: tt }) });
+  if (step === 'mode') return onboardMode(t);
+  if (step === 'first') return onboardFirst();
+  return onboardIntro();
+}
+
+function onboardIntro() {
+  openSheet({
+    title: '先说三件事',
+    body: `
+      <div class="onboard-step">1 / 4</div>
+      <div class="onboard-hero">🍚</div>
+      <div class="onboard-h">
+        <b>它帮你算「今天该吃多少」</b>
+        <p>不是让你少吃，是让你知道自己在吃多少。填几个数字，它会算出你的热量和蛋白脂肪碳水目标，
+        然后按这个给你配餐、配运动。</p>
+      </div>
+      <div class="onboard-h">
+        <b>记录只要说一句话</b>
+        <p>「中午在食堂吃了碗牛肉面，加了个蛋」—— 它听得懂。说不清份量的时候它会问你一句，
+        不会瞎猜。</p>
+      </div>
+      <div class="onboard-h">
+        <b>你的数据只在这台手机上</b>
+        <p>不联网、不上传、不需要注册。换手机或清缓存前记得导出备份（在「我的」里）。
+        它只做估算和记录，不是医疗建议。</p>
+      </div>`,
+    foot: '<button class="btn block" id="obNext">开始</button>',
+    onMount: (_b, foot) => {
+      $('#obNext', foot).addEventListener('click', () => onboard({ step: 'profile' }));
+    },
+  });
+}
+
+function onboardMode(t) {
+  const kcal = t ? Math.round(t.targetCalories / 10) * 10 : null;
+  openSheet({
+    title: '选一个模式',
+    body: `
+      <div class="onboard-step">3 / 4</div>
+      ${kcal ? `<div class="warn info">你每天的目标大约是 <b>${kcal} kcal</b>。下面两种模式都能用这个目标。</div>` : ''}
+      <button class="mode-chip big" data-pick="basic">
+        <b>普通模式</b>
+        <em>不用配任何东西，打开就能用。
+          说一句话照样记得上、餐单和运动方案照样给、每天还能看到你自己的规律。
+          全部在这台手机上算，断网也能用。</em>
+        <span class="mode-tag">推荐先用这个</span>
+      </button>
+      <button class="mode-chip big" data-pick="ai">
+        <b>AI 模式</b>
+        <em>多一个 AI 帮你听懂更随意的说法（「随便吃了点」这种），教练建议也更具体。
+          需要你自己去申请一个 API 密钥填进来（我会一步步带你填，不用懂技术）。
+          数字还是本地算 —— AI 只负责怎么说话。</em>
+        <span class="mode-tag ghost">要多一步设置</span>
+      </button>
+      <p class="tiny muted" style="margin-top:10px">
+        随时可以在「我的 → 设置」里换，不会丢数据。
+      </p>`,
+    onMount: (body) => {
+      body.querySelectorAll('[data-pick]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const pick = el.dataset.pick;
+          state.settings = { ...(state.settings || {}), mode: pick };
+          save();
+          if (pick === 'ai') {
+            // 选 AI 就直接带她去配密钥，别让她自己找
+            closeSheet();
+            openAiSettingsSheet({ then: () => onboard({ step: 'first' }) });
+          } else {
+            onboard({ step: 'first' });
+          }
+        });
+      });
+    },
+  });
+}
+
+function onboardFirst() {
+  openSheet({
+    title: '最后一步',
+    body: `
+      <div class="onboard-step">4 / 4</div>
+      <div class="onboard-hero">🌱</div>
+      <div class="onboard-h">
+        <b>记下第一笔，就开始了</b>
+        <p>不用追求记得准。第一笔随便记点什么 —— 早饭、一杯奶茶、一顿外卖都行。
+        记录本身就会让它越来越懂你：记满 4 天，「你的规律」里就会出现只属于你的结论。</p>
+      </div>
+      <div class="onboard-h">
+        <b>怎么记</b>
+        <p>在「记录」页说一句话，或者点「加一笔」手动搜食物。<br>
+        练了什么也能记 —— 记录页切到「练的」。</p>
+      </div>`,
+    foot: `<button class="btn block" id="obGo">去记一笔</button>
+      <button class="btn ghost block" id="obLater" style="margin-top:8px">我先随便看看</button>`,
+    onMount: (_b, foot) => {
+      $('#obGo', foot).addEventListener('click', () => {
+        finishOnboarding();
+        goView('log');
+        setTimeout(() => { $('#quickText')?.focus(); }, 300);
+      });
+      $('#obLater', foot).addEventListener('click', () => {
+        finishOnboarding();
+        goView('today');
+      });
+    },
+  });
+}
+
+/** 引导只做一次；记在存档里，换设备要重新走（数据不在，走了才有意义） */
+function finishOnboarding() {
+  state.settings = { ...(state.settings || {}), onboarded: true };
+  save();
+  closeSheet();
+  render();
+  setTimeout(() => {
+    const t = targets();
+    if (t) toast(`记一笔试试。你今天的目标是约 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
+  }, 500);
+}
+
+/** 切到某个标签页（多处要用，抽出来免得每处都写一遍 classList 循环） */
+function goView(next) {
+  view = next;
+  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === next));
+  render();
+  window.scrollTo({ top: 0 });
+}
+
 function renderWelcome() {
   app.innerHTML = `
     <div class="card">
-      <div class="card-title">填几个数字，就能算出你每天该吃多少</div>
-      <p class="small muted" style="margin:0 0 12px">
-        需要：性别、年龄、身高、体重、平时的活动量、想多快瘦下来。<br>
-        全部只存在这台设备的浏览器里，不联网、不上传，别人看不到。
+      <div class="onboard-hero">🍚</div>
+      <div class="card-title">知道自己在吃多少，比少吃更有用</div>
+      <p class="small muted" style="margin:0 0 14px">
+        记一句话就能记下吃了什么，它会算出你每天该吃多少、给你配餐和运动方案。
+        数据只在这台手机上，不联网、不上传。
       </p>
-      <button class="btn block" data-act="edit-profile">开始填写</button>
+      <button class="btn block" data-act="onboard">开始（约 1 分钟）</button>
       <div class="btn-row">
-        <button class="btn ghost grow" data-act="demo">看一个填好的例子</button>
+        <button class="btn ghost grow" data-act="demo">先看一个填好的例子</button>
       </div>
       <p class="tiny muted" style="margin:12px 0 0">
-        这个工具只做估算和记录，不是医疗建议。如果你怀孕/哺乳、有甲状腺或肾脏问题、在吃影响体重的药，
+        它只做估算和记录，不是医疗建议。如果你怀孕/哺乳、有甲状腺或肾脏问题、在吃影响体重的药，
         或者年龄未满 18 岁，请先问医生，不要照这里的数字吃。
       </p>
     </div>`;
@@ -405,19 +567,9 @@ function renderToday() {
 
     ${tip ? `<div class="warn info">${tip}</div>` : ''}
 
-    <div class="card">
-      <div class="card-title">说一句就记上
-        <button class="btn ghost" id="aiSettingsBtn" style="padding:4px 11px;font-size:12px">
-          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已开启' : '去设置 AI'}
-        </button>
-      </div>
-      <textarea id="quickText" rows="2" placeholder="今天中午在食堂吃了碗牛肉面，加了个蛋"></textarea>
-      <div class="btn-row" style="margin-top:8px">
-        <button class="btn grow" id="quickParse">解析这一句</button>
-        <button class="btn ghost" data-act="go-log">搜索食物</button>
-      </div>
-      <div id="quickResult"></div>
-    </div>
+    <button class="btn block big-log" data-act="go-log">
+      <span class="big-log-plus">＋</span> 记一笔
+    </button>
     ${t.warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join('')}
 
     ${MEAL_SLOTS.map((slot) => {
@@ -483,9 +635,48 @@ function suggestNext(totals, t, remainingKcal) {
 
 /* ── 记录页 ──────────────────────────────── */
 
+/**
+ * 记录页的两个分段：吃的 / 练的。
+ *
+ * 为什么不新增底部标签页：底部已经四个了，再加一个会把「今天」推远；
+ * 运动本来就是「记录」的一部分，和吃饭记在一起才顺手。
+ * 上次停在哪一半存在 settings.recordTab 里（老存档没有这个字段 → 按「吃的」处理）：
+ * 减脂的人一天要记好几顿饭，不能每次都让她重新点一下。
+ */
+function currentRecordTab() {
+  return state.settings?.recordTab === 'training' ? 'training' : 'food';
+}
+
+function setRecordTab(tab) {
+  const next = tab === 'training' ? 'training' : 'food';
+  if (next === currentRecordTab()) return;
+  state.settings.recordTab = next;
+  save();
+  render();
+  // 换分段要回到顶部：不回的话会停在上一半的中间位置，看起来像点了没反应
+  window.scrollTo({ top: 0 });
+}
+
 function renderLog() {
-  const recent = frequentFoods(state, 8);
+  const tab = currentRecordTab();
   app.innerHTML = `
+    <div class="segments" id="recordTabs" role="tablist" aria-label="记什么">
+      <button class="seg-btn ${tab === 'food' ? 'on' : ''}" data-record-tab="food" role="tab" aria-selected="${tab === 'food'}">🍚 吃的</button>
+      <button class="seg-btn ${tab === 'training' ? 'on' : ''}" data-record-tab="training" role="tab" aria-selected="${tab === 'training'}">🏃 练的</button>
+    </div>
+    ${tab === 'training' ? renderTrainingPane() : renderFoodPane()}`;
+  app.querySelectorAll('[data-record-tab]').forEach((b) => {
+    b.addEventListener('click', () => setRecordTab(b.dataset.recordTab));
+  });
+  // 两个分段各绑各的：绑错分段会拿到 null 的输入框，点一下就报错
+  if (tab === 'training') bindTrainingPane();
+  else bindFoodPane();
+}
+
+/** 「吃的」那一半：内容跟原来一模一样（说一句 / 手动记 / 常吃的 / 全部食物 / 自定义） */
+function renderFoodPane() {
+  const recent = frequentFoods(state, 8);
+  return `
     <div class="card">
       <div class="card-title">说一句就记上
         <button class="btn ghost" id="aiSettingsBtn" style="padding:3px 10px;font-size:12px">
@@ -531,7 +722,10 @@ function renderLog() {
           <span class="kk">＋</span>
         </div>`).join('')}</div>` : ''}
     </div>`;
+}
 
+/** 「吃的」那一半的交互：搜索、常吃的、自定义、说一句 */
+function bindFoodPane() {
   const input = $('#logSearch');
   const results = $('#logResults');
   const draw = () => {
@@ -560,6 +754,238 @@ function renderLog() {
       const food = [...state.customFoods, ...FOODS].find((f) => f.id === el.dataset.id);
       openAmountSheet(food, guessMeal());
     });
+  });
+}
+
+/* ── 记录页：练的（运动记录）───────────────────
+   为什么和「吃的」并列放在记录页，而不是塞进「计划」页：
+    1) 练完想马上记一笔，第一反应是点「记录」；
+    2) 「计划」页是「今天练什么」的建议 —— 建议和记录分开，换建议不会动到已经记下的东西。
+   消耗一律是估算，界面上必须写清楚（手环给的数字通常更高）。
+   红线：这里算出来的消耗**不参与**当天可吃额度的计算，只用来显示。
+   ─────────────────────────────────────────── */
+
+/** 默认选一个动作：先用「计划」页排出来的首选，其次是当前器械能做的第一个 */
+function defaultTrainingPick(actions) {
+  const rec = recommendCardio({
+    equipment: cardioPick.equipment,
+    goal: cardioPick.goal,
+    minutes: Number(trainingPick.minutes) || 30,
+    weightKg: state.profile?.weightKg ?? 60,
+  });
+  const first = rec.picks.find((p) => actions.cardio.some((e) => e.id === p.id)) || actions.cardio[0];
+  if (first) trainingPick.cardioId = first.id;
+  else if (actions.strength.length) trainingPick.exerciseKey = actions.strength[0].key;
+}
+
+/** 选好的动作如果已经做不了了（器械被取消勾选），要换掉 —— 否则会记下一个做不了的动作 */
+function ensureTrainingPick(actions) {
+  const cardioOk = trainingPick.cardioId && actions.cardio.some((e) => e.id === trainingPick.cardioId);
+  const strengthOk = trainingPick.exerciseKey && actions.strength.some((s) => s.key === trainingPick.exerciseKey);
+  if (cardioOk || strengthOk) return;
+  trainingPick.cardioId = null;
+  trainingPick.exerciseKey = null;
+  defaultTrainingPick(actions);
+}
+
+/** 这次运动的大致消耗（只用于显示，不参与额度计算） */
+function currentTrainingKcal() {
+  const weightKg = state.profile?.weightKg ?? 60;
+  const action = resolveTrainingAction(trainingPick);
+  const minutes = Number(trainingPick.minutes);
+  if (!action || !(minutes > 0)) return { action: null, minutes: 0, kcal: 0, weightKg };
+  return {
+    action,
+    minutes,
+    weightKg,
+    kcal: Math.round(estimateTrainingKcal({ mets: action.mets, minutes }, weightKg)),
+  };
+}
+
+/** 算式直接写在界面上：她可以自己核对，不用信一个来路不明的数字 */
+function drawTrainingEstimate() {
+  const box = $('#trainEstimate');
+  if (!box) return;
+  const { action, minutes, kcal, weightKg } = currentTrainingKcal();
+  box.innerHTML = `
+    <div class="te-main">这次大约 <b>${action ? kcal : '—'}</b> kcal <span class="tiny muted">（估算，不是实测）</span></div>
+    <div class="tiny muted">
+      ${action ? `${esc(action.name)} · ${minutes} 分钟 · METs ${action.mets} × 体重 ${weightKg} kg × ${round(minutes / 60, 2)} 小时` : '先挑一个动作，这里会算出大概消耗'}
+    </div>
+    <div class="tiny muted" style="margin-top:4px">
+      这部分消耗不会加回「今天还可以吃」的额度 —— 它直接变成当天的缺口，所以不用、也不该吃回来。
+      手环给的数字通常比这里高，这里只是粗略估算。
+    </div>`;
+}
+
+/**
+ * 一条运动记录在列表里的样子。计划页的「今天已经记了」和记录页的历史共用一份 ——
+ * 两处各写一遍的话，改了一处忘了另一处，同一个数据会显示成两个样子。
+ */
+function trainingRow(it, { showDate = false } = {}) {
+  return `
+    <div class="entry">
+      <span class="name">${esc(it.name)}<em>${showDate ? `${dayLabel(it.dateKey)} · ` : ''}${it.minutes} 分钟${it.intensityName ? ` · ${esc(it.intensityName)}` : ''}${it.note ? ` · ${esc(it.note)}` : ''}</em></span>
+      <span class="kcal">约 ${it.kcal} kcal</span>
+      <button class="del" data-act="del-exercise" data-id="${it.id}"${showDate ? ` data-date="${it.dateKey}"` : ''} aria-label="删除">✕</button>
+    </div>`;
+}
+
+function renderTrainingPane() {
+  const weightKg = state.profile?.weightKg ?? 60;
+  const today = todayKey();
+  const actions = trainingActions(cardioPick.equipment);
+  ensureTrainingPick(actions);
+  const sum = trainingSummary(state, today, weightKg);
+  const rows = trainingHistory(state, { days: 14, weightKg }).flatMap((d) => d.items).slice(0, 12);
+  const minutes = Number(trainingPick.minutes);
+  return `
+    <div class="card">
+      <div class="card-title">记一次运动 <span class="tiny muted">消耗是估算，不是实测</span></div>
+
+      <label class="field"><span>今天能用的器械（可多选，和「计划」页共用）</span>
+        <div class="chips" id="trainEquip">
+          ${listEquipment().map((eq) => `<button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-train-eq="${eq.key}">${eq.icon} ${eq.name}</button>`).join('')}
+        </div>
+      </label>
+
+      <div class="tiny muted" style="margin:12px 0 6px">练了什么？<span class="muted">（只列出现在勾的器械做得了的动作）</span></div>
+      <div class="chips" id="trainCardio">
+        ${actions.cardio.map((e) => `<button class="chip ${trainingPick.cardioId === e.id ? 'on' : ''}" data-train-cardio="${e.id}">${esc(e.name)}</button>`).join('')
+          || '<span class="tiny muted">按现在勾的器械没有能做的动作。勾上「徒手/地面」—— 徒手循环和 HIIT 都不需要器械。</span>'}
+      </div>
+
+      <div class="tiny muted" style="margin:12px 0 6px">力量训练<span class="muted">（不用器械也能做）</span></div>
+      <div class="chips" id="trainStrength">
+        ${actions.strength.map((s) => `<button class="chip ${trainingPick.exerciseKey === s.key ? 'on' : ''}" data-train-strength="${s.key}">${esc(s.name)}</button>`).join('')}
+      </div>
+
+      <label class="field" style="margin-top:12px"><span>练了多久</span>
+        <div class="chips" id="trainMinutes">
+          ${[15, 20, 30, 45, 60].map((m) => `<button class="chip ${minutes === m ? 'on' : ''}" data-train-min="${m}">${m} 分钟</button>`).join('')}
+        </div>
+      </label>
+      <div class="row" style="gap:8px;align-items:center;margin:2px 0 4px">
+        <span class="tiny muted">也可以自己填</span>
+        <input type="number" id="trainMinutesInput" inputmode="numeric" min="1" max="1440"
+          value="${minutes > 0 ? minutes : ''}" style="width:86px;padding:6px 8px;font-size:14px">
+        <span class="tiny muted">分钟</span>
+      </div>
+
+      <label class="field"><span>强度（可不填，只记进历史）</span>
+        <div class="chips" id="trainIntensity">
+          <button class="chip ${trainingPick.intensity === '' ? 'on' : ''}" data-train-intensity="">不填</button>
+          ${Object.entries(TRAINING_INTENSITY).map(([k, v]) => `<button class="chip ${trainingPick.intensity === k ? 'on' : ''}" data-train-intensity="${k}">${v.name}</button>`).join('')}
+        </div>
+      </label>
+
+      <label class="field"><span>备注（可不填）</span>
+        <input type="text" id="trainNote" maxlength="40" placeholder="例如：跑步机 8 档，膝盖没不适" value="${esc(trainingPick.note)}">
+      </label>
+
+      <div class="train-estimate" id="trainEstimate"></div>
+      ${dateKey !== today ? `<div class="warn info" style="margin-top:10px">这些数字按「今天」算；你上面选的是${dayLabel(dateKey)}，记完会写到那一天。</div>` : ''}
+      <button class="btn block" id="trainSave" style="margin-top:10px">记上这次运动</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">运动记录 <span class="tiny muted">都在这台设备上算，不联网</span></div>
+      <div class="stats">
+        <span class="stat">今天 <b>${sum.today.count}</b> 次</span>
+        <span class="stat">这周 <b>${sum.week.count}</b> 次</span>
+        <span class="stat">累计 <b>${sum.total.minutes}</b> 分钟</span>
+      </div>
+      <p class="tiny muted" style="text-align:center;margin:6px 0 0">
+        今天 ${sum.today.minutes} 分钟 · 这周 ${sum.week.minutes} 分钟 · 累计约 ${sum.total.kcal} kcal（估算）
+      </p>
+      <hr class="sep">
+      ${rows.length ? rows.map((r) => trainingRow(r, { showDate: true })).join('') : '<div class="tiny muted">还没有运动记录。走路也算 —— 记上比不记准。</div>'}
+      <p class="tiny muted" style="margin:10px 0 0">
+        消耗按「动作强度 × 体重 × 时长」估算，和手环对不上很正常。记运动是为了看清自己动了多少，不是给「多吃一点」找理由。
+      </p>
+    </div>`;
+}
+
+/** 「练的」那一半的交互：挑动作、改时长、记上 */
+function bindTrainingPane() {
+  drawTrainingEstimate();
+  const markMinutes = () => {
+    app.querySelectorAll('[data-train-min]').forEach((c) => {
+      c.classList.toggle('on', Number(c.dataset.trainMin) === Number(trainingPick.minutes));
+    });
+  };
+
+  app.querySelectorAll('[data-train-eq]').forEach((b) => b.addEventListener('click', () => {
+    const key = b.dataset.trainEq;
+    cardioPick.equipment = cardioPick.equipment.includes(key)
+      ? cardioPick.equipment.filter((k) => k !== key)
+      : [...cardioPick.equipment, key];
+    if (!cardioPick.equipment.length) cardioPick.equipment = ['bodyweight'];
+    save();
+    // 动作列表要跟着器械变，所以整页重绘；已填的时长和备注在 trainingPick 里，不会丢
+    render();
+  }));
+
+  app.querySelectorAll('[data-train-cardio]').forEach((b) => b.addEventListener('click', () => {
+    trainingPick.cardioId = b.dataset.trainCardio;
+    trainingPick.exerciseKey = null;
+    // 只改选中状态，不整页重绘：重绘会把光标从输入框里踢出去
+    app.querySelectorAll('[data-train-cardio]').forEach((c) => c.classList.toggle('on', c === b));
+    app.querySelectorAll('[data-train-strength]').forEach((c) => c.classList.remove('on'));
+    drawTrainingEstimate();
+  }));
+
+  app.querySelectorAll('[data-train-strength]').forEach((b) => b.addEventListener('click', () => {
+    trainingPick.exerciseKey = b.dataset.trainStrength;
+    trainingPick.cardioId = null;
+    app.querySelectorAll('[data-train-strength]').forEach((c) => c.classList.toggle('on', c === b));
+    app.querySelectorAll('[data-train-cardio]').forEach((c) => c.classList.remove('on'));
+    drawTrainingEstimate();
+  }));
+
+  app.querySelectorAll('[data-train-min]').forEach((b) => b.addEventListener('click', () => {
+    trainingPick.minutes = Number(b.dataset.trainMin);
+    const box = $('#trainMinutesInput');
+    if (box) box.value = trainingPick.minutes;
+    markMinutes();
+    drawTrainingEstimate();
+  }));
+
+  const minuteInput = $('#trainMinutesInput');
+  minuteInput?.addEventListener('input', () => {
+    // 边输边算：填 37 分钟也要立刻看到消耗，不能等点了「记上」才算
+    trainingPick.minutes = Number(minuteInput.value);
+    markMinutes();
+    drawTrainingEstimate();
+  });
+
+  app.querySelectorAll('[data-train-intensity]').forEach((b) => b.addEventListener('click', () => {
+    trainingPick.intensity = b.dataset.trainIntensity;
+    app.querySelectorAll('[data-train-intensity]').forEach((c) => c.classList.toggle('on', c === b));
+  }));
+
+  $('#trainNote')?.addEventListener('input', (e) => { trainingPick.note = e.target.value; });
+
+  $('#trainSave')?.addEventListener('click', () => {
+    try {
+      const item = logTraining(state, dateKey, {
+        cardioId: trainingPick.cardioId,
+        exerciseKey: trainingPick.exerciseKey,
+        minutes: Number(trainingPick.minutes),
+        intensity: trainingPick.intensity,
+        note: trainingPick.note,
+      });
+      const saved = describeTraining(item, state.profile?.weightKg ?? 60);
+      // 备注写的是「这一次」的情况，记完清掉；动作和时长留着（下次多半差不多，省一步）
+      trainingPick.note = '';
+      save();
+      // 反馈落在「记了什么 + 大约多少 + 写到哪天」，不说「成功」这种空话
+      toast(`记上了：${saved.name} ${saved.minutes} 分钟，大约 ${saved.kcal} kcal${dateKey === todayKey() ? '' : `（写到${dayLabel(dateKey)}）`}。`);
+      render();
+    } catch (err) {
+      // 时长没填 / 填了 0：store 会拒绝，这里把原因原样说给她听
+      toast(err.message);
+    }
   });
 }
 
@@ -950,17 +1376,25 @@ function renderCardioCard() {
       ${today.exercises.length ? `
         <hr class="sep">
         <div class="small muted">今天已经记了：</div>
-        ${today.exercises.map((x) => {
-          const ex = EXERCISES[x.exerciseKey] || { name: x.exerciseKey, mets: 4 };
-          const kcal = calcExerciseKcal({ mets: ex.mets, weightKg, minutes: x.minutes });
-          return `<div class="entry">
-            <span class="name">${esc(ex.name)}<em>${x.minutes} 分钟</em></span>
-            <span class="kcal">约 ${Math.round(kcal)} kcal</span>
-            <button class="del" data-act="del-exercise" data-id="${x.id}">✕</button>
-          </div>`;
-        }).join('')}
+        ${today.exercises.map((x) => trainingRow(describeTraining(x, weightKg))).join('')}
       ` : ''}
     </div>`;
+}
+
+/**
+ * 「计划」页记一笔运动。和记录页走同一条路（logTraining），只是动作是这里推荐出来的 ——
+ * 动作名、METs、旧池 key 的对应关系只在 exercise.js 维护一份，两边各写一份迟早会对不上。
+ */
+function logRecommendCardio(cardioId, minutes) {
+  try {
+    const item = logTraining(state, dateKey, { cardioId, minutes });
+    const saved = describeTraining(item, state.profile?.weightKg ?? 60);
+    save();
+    render();
+    toast(`记上了：${saved.name} ${saved.minutes} 分钟，大约 ${saved.kcal} kcal。`);
+  } catch (err) {
+    toast(err.message);
+  }
 }
 
 /** 有氧卡片的交互：选器械/目标/时长，以及「记入记录」和「看替代」 */
@@ -995,21 +1429,7 @@ function bindCardioCard() {
     el.addEventListener('click', () => {
       const ex = CARDIO.find((c) => c.id === el.dataset.logCardio);
       if (!ex) return;
-      // 运动记录用 key 存，这里把有氧库的动作映射到运动库（没有对应项就用最接近的）
-      const map = {
-        incline_treadmill: 'walk', treadmill_walk: 'walk', outdoor_walk: 'walk',
-        treadmill_run: 'jog', outdoor_jog: 'jog', treadmill_interval: 'jog',
-        elliptical_steady: 'elliptical', elliptical_interval: 'elliptical',
-        bike_steady: 'cycle', bike_interval: 'cycle', spin_class: 'cycle', outdoor_cycle: 'cycle',
-        rower_steady: 'strength', stair_climber: 'stairs', stepper: 'elliptical',
-        jump_rope: 'jump_rope', jump_rope_low: 'jump_rope', bodyweight_circuit: 'hiit', hiit_video: 'hiit',
-        real_stairs: 'stairs', swim_steady: 'swim', badminton: 'badminton', dance_class: 'dance',
-        yoga_stretch: 'yoga',
-      };
-      addExercise(state, dateKey, map[ex.id] || 'walk', cardioPick.minutes);
-      save();
-      render();
-      toast(`记上了：${ex.name} ${cardioPick.minutes} 分钟。`);
+      logRecommendCardio(ex.id, cardioPick.minutes);
     });
   });
   app.querySelectorAll('[data-subs]').forEach((el) => {
@@ -1048,12 +1468,9 @@ function openSubstituteSheet(originalId) {
       body.querySelectorAll('[data-subs-log]').forEach((btn) => {
         btn.addEventListener('click', () => {
           const ex = CARDIO.find((c) => c.id === btn.dataset.subsLog);
-          const map = { elliptical_steady: 'elliptical', bike_steady: 'cycle', rower_steady: 'strength', stair_climber: 'stairs', real_stairs: 'stairs', outdoor_walk: 'walk', jump_rope: 'jump_rope', bodyweight_circuit: 'hiit', hiit_video: 'hiit', swim_steady: 'swim', dance_class: 'dance', badminton: 'badminton', yoga_stretch: 'yoga', treadmill_walk: 'walk', outdoor_jog: 'jog' };
-          addExercise(state, dateKey, map[ex.id] || 'walk', minutes);
-          save();
-          closeSheet();
-          render();
-          toast(`记上了：${ex.name} ${minutes} 分钟。`);
+          if (!ex) return;
+          closeSheet();   // 先收起弹层再记录：记录完界面会重绘，弹层不该还挂在上面
+          logRecommendCardio(ex.id, minutes);
         });
       });
     },
@@ -1261,10 +1678,10 @@ function openExerciseSheet() {
     title: '加运动',
     body: `
       <div class="chips" id="exChips">
-        ${list.map((e) => `<button class="chip ${e.kind === 'strength' ? '' : ''}" data-ex="${e.key}">${esc(e.name)}</button>`).join('')}
+        ${list.map((e) => `<button class="chip" data-ex="${e.key}">${esc(e.name)}</button>`).join('')}
       </div>
       <label class="field" style="margin-top:14px"><span>练了多久（分钟）</span>
-        <input type="number" id="exMinutes" inputmode="numeric" value="30" min="1" max="600">
+        <input type="number" id="exMinutes" inputmode="numeric" value="30" min="1" max="1440">
       </label>
       <div id="exPreview" class="warn info"></div>`,
     foot: '<button class="btn block" id="confirmEx">加入记录</button>',
@@ -1275,8 +1692,11 @@ function openExerciseSheet() {
       const update = () => {
         const ex = EXERCISES[picked];
         const m = Number(minutes.value) || 0;
-        const kcal = calcExerciseKcal({ mets: ex.mets, weightKg: state.profile?.weightKg ?? 60, minutes: m });
-        preview.innerHTML = `${esc(ex.name)} ${m} 分钟 ≈ 消耗 <b>${Math.round(kcal)} kcal</b>，其中一半（约 ${Math.round(kcal / 2)} kcal）会算进今天可以多吃的额度。`;
+        const kcal = m > 0
+          ? estimateTrainingKcal({ mets: ex.mets, minutes: m }, state.profile?.weightKg ?? 60)
+          : 0;
+        // 这里绝不能写「一半算进可以多吃的额度」—— 运动消耗不参与额度计算，写反了就是在鼓励多吃
+        preview.innerHTML = `${esc(ex.name)} ${m} 分钟 ≈ 消耗 <b>${Math.round(kcal)} kcal</b>（估算）。这部分不会加回今天可吃的额度，它直接变成当天的缺口。`;
       };
       body.querySelectorAll('#exChips .chip').forEach((c) => c.classList.toggle('on', c.dataset.ex === picked));
       update();
@@ -1289,9 +1709,12 @@ function openExerciseSheet() {
         update();
       });
       $('#confirmEx').addEventListener('click', () => {
-        const m = Number(minutes.value);
-        if (!(m > 0 && m <= 600)) return toast('时长请填 1~600 分钟。');
-        addExercise(state, dateKey, picked, m);
+        try {
+          // 走和记录页同一条路：时长不合法时 store 会拒绝，这里把原因原样说出来
+          logTraining(state, dateKey, { exerciseKey: picked, minutes: Number(minutes.value) });
+        } catch (err) {
+          return toast(err.message);
+        }
         save();
         closeSheet();
         render();
@@ -1492,6 +1915,12 @@ function openSettingsSheet() {
         <span class="set-go">›</span>
       </button>
 
+      <button class="set-row" data-set="guide">
+        <span class="set-ico">🧭</span>
+        <span class="set-main"><b>重新看一遍新手引导</b><em>忘了它是怎么算的、想改模式，都从这里</em></span>
+        <span class="set-go">›</span>
+      </button>
+
       <button class="set-row" data-set="about">
         <span class="set-ico">ℹ️</span>
         <span class="set-main"><b>关于</b><em>算得准不准、数据存在哪、更新怎么生效</em></span>
@@ -1523,6 +1952,7 @@ function openSettingsSheet() {
           else if (which === 'growth') { closeSheet(); openGrowthSheet(); }
           else if (which === 'backup') openBackupSheet();
           else if (which === 'about') openAboutSheet();
+          else if (which === 'guide') { closeSheet(); setTimeout(() => onboard({ step: 'intro' }), 250); }
         });
       });
     },
@@ -1840,13 +2270,18 @@ function openCalendarSheet() {
 
 let lastModels = [];
 
-async function openAiSettingsSheet() {
+/**
+ * AI 设置。
+ * @param {{then?:Function}} options then 是「配完/离开设置后接着做什么」——
+ *   新手引导里选 AI 模式时会传，这样配完能接着走引导的最后一步，不用用户自己找。
+ */
+async function openAiSettingsSheet({ then = null } = {}) {
   const cfg = currentAiConfig();
   const relay = await relayStatus(1200);
-  drawAiSettings(cfg, relay);
+  drawAiSettings(cfg, relay, then);
 }
 
-function drawAiSettings(cfg, relay) {
+function drawAiSettings(cfg, relay, then = null) {
   const presetId = cfg.presetId || 'deepseek';
   const preset = findPreset(presetId);
   const mode = cfg.mode || (preset.directCall === false ? 'relay' : 'direct');
@@ -2073,7 +2508,15 @@ export function validateProfile(form) {
   return null;
 }
 
-function openProfileSheet() {
+/**
+ * 资料表单。openProfileSheet 和「新手引导」共用这一套 —— 校验只有一份，
+ * 免得「第一次填」和「以后修改」走两套规则，出现引导能存、设置里存不了这种怪事。
+ *
+ * @param {{firstTime?:boolean, onSaved?:Function}} options
+ *   firstTime 时标题和按钮文案不同（引导里说的是「开始用」，不是「保存」）
+ *   onSaved 可以拦住后续流程（引导要接着问下一个问题）
+ */
+function openProfileSheet({ firstTime = false, onSaved = null } = {}) {
   const p = state.profile || {
     nickname: '',
     sex: 'female', age: 25, heightCm: 163, weightKg: 58, bodyFatPct: null,
@@ -2081,7 +2524,7 @@ function openProfileSheet() {
   };
   const hasProfile = Boolean(state.profile);
   openSheet({
-    title: hasProfile ? '我的资料' : '填写资料',
+    title: firstTime ? '你的基础数据' : (hasProfile ? '我的资料' : '填写资料'),
     body: `
       <label class="field"><span>怎么称呼你</span>
         <input type="text" id="pNickname" value="${esc(p.nickname || '')}" maxlength="8" placeholder="选填，例如：小繁">
@@ -2124,20 +2567,23 @@ function openProfileSheet() {
       <p class="tiny muted">
         这些数字只用来算基础代谢（Mifflin-St Jeor 公式），误差一般 ±10%。数据只存在这台设备上。
       </p>`,
-    foot: `<button class="btn block" id="pSave">保存</button>${hasProfile ? '<button class="btn ghost block" id="pCancel" style="margin-top:8px">取消</button>' : ''}`,
+    foot: `<button class="btn block" id="pSave">${firstTime ? '算算我每天该吃多少' : '保存'}</button>${hasProfile && !firstTime ? '<button class="btn ghost block" id="pCancel" style="margin-top:8px">取消</button>' : ''}`,
     onMount: (body, foot) => {
-      const num = (id) => Number($(`#${id}`, body).value);
+      // 取值一律走这里：字段可能因为界面变动暂时不在，
+      // 直接解引用会抛异常，把整个表单（包括实时预览）打挂 —— 表单要能容忍缺字段。
+      const raw = (id) => $(`#${id}`, body)?.value ?? '';
+      const num = (id) => (raw(id) === '' ? NaN : Number(raw(id)));
       const form = () => ({
-        nickname: ($('#pNickname', body).value || '').trim().slice(0, 8),
+        nickname: (raw('pNickname') || '').trim().slice(0, 8),
         sex: body.querySelector('#sexChips .chip.on')?.dataset.sex || 'female',
         age: num('pAge'),
         heightCm: num('pHeight'),
         weightKg: num('pWeight'),
-        bodyFatPct: $('#pBodyFat', body).value === '' ? null : num('pBodyFat'),
+        bodyFatPct: raw('pBodyFat') === '' ? null : num('pBodyFat'),
         activity: body.querySelector('#actChips .chip.on')?.dataset.actKey || 'light',
         goal: body.querySelector('#goalChips .chip.on')?.dataset.goal || 'lose',
         pace: body.querySelector('#paceChips .chip.on')?.dataset.pace || 'standard',
-        targetWeightKg: $('#pTarget', body).value === '' ? null : num('pTarget'),
+        targetWeightKg: raw('pTarget') === '' ? null : num('pTarget'),
       });
       const preview = $('#profilePreview', body);
       const update = () => {
@@ -2194,12 +2640,13 @@ function openProfileSheet() {
           view = 'today';
           document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
           render();
-          toast(`已保存。你每天的目标大约是 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
+          if (onSaved) onSaved(t);
+          else toast(`已保存。你每天的目标大约是 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
         } catch (err) {
           toast(err.message);
         }
       });
-      if (hasProfile) $('#pCancel', foot).addEventListener('click', closeSheet);
+      if (hasProfile && !firstTime) $('#pCancel', foot).addEventListener('click', closeSheet);
     },
   });
 }
