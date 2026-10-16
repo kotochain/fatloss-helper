@@ -215,6 +215,65 @@ async function main() {
   if (draft.条数 === 0) problems.push('一句话没解析出任何条目');
   if (!draft.有确认按钮) problems.push('缺少「记上」按钮');
 
+  console.log('\n=== 一·二、份量不确定时反问她 ===');
+  // 这段必须放在「改成 800 克」之前：她一旦自己填了数字，追问就会收起来（设计如此）。
+  const guess = await evaluate(`(() => {
+    const block = document.querySelector('#draftHost [data-guess]');
+    if (!block) return null;
+    const chips = [...block.querySelectorAll('.chip')];
+    return {
+      条目: block.previousElementSibling?.querySelector('.name')?.textContent.trim().replace(/\\s+/g, ' ') || null,
+      标注: block.querySelector('.guess-tag')?.textContent || null,
+      理由: block.querySelector('.guess-why')?.textContent || null,
+      档位: chips.map((c) => c.textContent.trim()),
+      追问块数: document.querySelectorAll('#draftHost [data-guess]').length,
+      合计: document.querySelector('#draftHost .row.between b').textContent,
+      索引: block.dataset.guess,
+    };
+  })()`);
+  if (!guess) {
+    console.log('❌ 「一碗牛肉面」这种说不准的份量，界面没有反问她');
+    problems.push('份量说不准时没有反问她（缺档位按钮）');
+  } else {
+    console.log(`✅ 反问她一句：「${guess.标注}」${guess.理由}`);
+    console.log(`   档位：${guess.档位.join(' / ')}（共 ${guess.追问块数} 条在问）`);
+    if (!(guess.标注 || '').includes('猜的')) problems.push('低置信度条目没有标出「这个份量我是猜的」');
+    if (guess.档位.length < 2) problems.push(`份量档位只有 ${guess.档位.length} 个，等于没法选`);
+    // 留一张图，方便人直接看这块长什么样（截图在 .selfcheck/，不进版本库）
+    const shotGuess = await client.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(outDir, 'shot-portion.png'), Buffer.from(shotGuess.data, 'base64'));
+  }
+
+  // 点最大的那一档：克数、行内热量、合计都要跟着变，问过的就别再挂着
+  const beforePick = guess ? guess.合计 : await evaluate(`document.querySelector('#draftHost .row.between b').textContent`);
+  const clicked = await evaluate(`(() => {
+    const block = document.querySelector('#draftHost [data-guess]');
+    if (!block) return null;
+    const chips = [...block.querySelectorAll('.chip')];
+    const target = chips[chips.length - 1];
+    target.click();
+    return { 档位: target.textContent.trim(), 索引: block.dataset.guess };
+  })()`);
+  await sleep(250);
+  if (!clicked) {
+    console.log('（没有可点的档位，跳过改份量检查）');
+  } else {
+    const picked = await evaluate(`(() => {
+      const idx = ${clicked.索引};
+      return {
+        克数: document.querySelectorAll('#draftHost .draft-grams')[idx]?.value || null,
+        行内热量: document.querySelector('#draftHost [data-kcal="' + idx + '"]')?.textContent || null,
+        合计: document.querySelector('#draftHost .row.between b').textContent,
+        追问还在: !!document.querySelector('#draftHost [data-guess="' + idx + '"]'),
+      };
+    })()`);
+    const tierGrams = Number((clicked.档位.match(/(\d+)\s*克/) || [])[1]);
+    console.log(`✅ 点档位「${clicked.档位}」→ 第 ${clicked.索引} 条变成 ${picked.克数} 克（${picked.行内热量}），合计 ${beforePick} → ${picked.合计} kcal`);
+    if (Number(picked.克数) !== tierGrams) problems.push(`点档位没有把克数改成档位上的数（点了 ${tierGrams}，实际 ${picked.克数}）`);
+    if (beforePick === picked.合计) problems.push('换档位后合计热量没有跟着变');
+    if (picked.追问还在) problems.push('选完档位追问没有收起来（会一直问她同一句）');
+  }
+
   // 改份量：把第一条改成 800 克，看合计有没有跟着变
   const before = await evaluate(`document.querySelector('#draftHost .row.between b').textContent`);
   await evaluate(`(() => {
@@ -257,6 +316,27 @@ async function main() {
   }))()`);
   console.log(`✅ 今天页：${todayInfo.已吃}`);
   if (!todayInfo.晚餐行 || !todayInfo.晚餐行.includes('牛肉面')) problems.push('「今天」页没有显示刚记的晚餐');
+
+  // 反过来：份量说得清清楚楚时，界面不许因为这次改动多出任何东西（不能变啰嗦）
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(400);
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '中午吃了200克米饭和两个鸡蛋';
+    document.querySelector('#quickParse').click();
+  })()`);
+  await waitFor(() => evaluate(`document.querySelectorAll('#draftHost .entry').length || null`), { what: '第二次解析结果（都说清了的例句）' });
+  const noNoise = await evaluate(`(() => ({
+    条数: document.querySelectorAll('#draftHost .entry').length,
+    追问块: document.querySelectorAll('#draftHost [data-guess]').length,
+    猜的标记: [...document.querySelectorAll('#draftHost .entry .tag')].filter((t) => t.textContent.includes('猜的')).length,
+  }))()`);
+  console.log(noNoise.追问块 === 0
+    ? `✅ 都说清了（200克米饭 + 两个鸡蛋）就不问：${noNoise.条数} 条，一个追问都没有`
+    : `❌ 说清楚了还要问：${noNoise.追问块} 条`);
+  if (noNoise.追问块 !== 0 || noNoise.猜的标记 !== 0) problems.push('份量说得清楚时不该反问她（多出了追问）');
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(300);
 
   console.log('\n=== 一·五、正反馈：小植物 / 徽章 / 庆祝 ===');
   // 先看「没填称呼」时的表现：把称呼清掉（这也是新用户的默认状态）
@@ -520,7 +600,7 @@ async function main() {
   } else {
     console.log('✅ 说一句记录 + 按器械换动作，两条流程都跑通');
   }
-  console.log(`截图：${outDir}/shot-quicklog.png、shot-cardio.png`);
+  console.log(`截图：${outDir}/shot-quicklog.png、shot-portion.png（份量反问那块）、shot-cardio.png`);
   void errors;
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill()]);
 }

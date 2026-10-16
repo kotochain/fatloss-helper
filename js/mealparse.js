@@ -8,7 +8,13 @@
  *     不让模型自己编数字 —— 那样就没法核对，也没法离线复算。
  *
  * 统一的中间结果叫「条目（item）」：
- *   { name, grams, kcal, protein, fat, carb, confidence, needsConfirm, question, source }
+ *   { name, grams, kcal, protein, fat, carb, confidence, confidenceReason,
+ *     portionChoices, needsConfirm, question, source }
+ *
+ * confidence（'high' | 'low'）说的是「份量有多确定」，不是「这条准不准」：
+ * 她给了确切克数、或者用了个头/包装有标准的量词，就是 high；
+ * 「一碗」「一份」这种说不准的说法、以及什么都没说时，是 low，
+ * 界面会拿 portionChoices 里的档位反问她一句，而不是默默按默认值记上。
  */
 
 import { FOODS, findFood, parseAmount } from './foods.js';
@@ -50,6 +56,167 @@ export const PORTION_CHOICES = [
   { label: '超大碗（约 650 克）', value: '超大碗', grams: 650 },
 ];
 
+/* ── 份量置信度：什么时候该反问她 ──────────────────
+   她的原话是「一碗在食堂和家里能差一倍」。所以「说了份量词」不等于「说得够准」：
+     · 「200克」「半斤」「两个鸡蛋」「一罐可乐」→ 能换成一个确定的克数，别打扰她；
+     · 「一碗」「一份」「半包」→ 碗有大小、份量看食堂、包装有大有小包，问一句比猜准。
+   判据落在每条 item 的 confidence / confidenceReason 上，界面据此决定要不要给档位按钮。
+   ────────────────────────────────────────────── */
+
+/** 说了这些量词也还是说不准：碗有大小、份量看食堂、包装有大有小包 */
+const VAGUE_UNITS = new Set(['碗', '小碗', '大碗', '超大碗', '份', '盘', '盒', '袋', '包']);
+
+/**
+ * 补档的幅度：按「这东西平时还有多小/多大」分开定，不是所有食物统一乘 0.6/1.5 ——
+ * 一碗面能从 400 吃到 900，一杯奶就 200~350，一勺油只从 8 到 15。
+ * 只在食物库没写那一头时才用得上：库里的份量表永远优先（米饭写的就是「一小碗 130 / 一碗 180 / 一大碗 250」）。
+ */
+const KIND_SPREAD = {
+  bowl: [0.7, 1.4],
+  cup: [0.8, 1.4],
+  plate: [0.6, 1.6],
+  piece: [0.75, 1.35],
+  pack: [0.6, 1.8],
+  spoon: [0.6, 1.5],
+  handful: [0.6, 1.6],
+};
+
+/** 补出来的档位怎么念（跟库里「一小碗」「中杯」的说法保持同一个口吻） */
+const KIND_LABELS = {
+  bowl: ['小碗', '正常', '大碗'],
+  cup: ['小杯', '正常', '大杯'],
+  plate: ['小份', '正常', '大份'],
+  piece: ['小个', '正常', '大个'],
+  pack: ['小包', '正常', '大包'],
+  spoon: ['少一点', '正常', '多一点'],
+  handful: ['小把', '正常', '大把'],
+};
+
+/** 分类 → 平时按什么盛：主食按碗、奶和饮料按杯、坚果油脂按勺、零食按包装、水果蛋按个 */
+const KIND_BY_CATEGORY = {
+  staple: 'bowl', dairy: 'cup', drink: 'cup', fat: 'spoon', snack: 'pack', fruit: 'piece',
+};
+
+/** 个别食物跟所在分类的盛法不一样（坚果是一小把、饺子和虾按个，都不是按勺/按份） */
+const KIND_BY_ID = {
+  oats: 'bowl', noodle_raw: 'bowl', pasta_cooked: 'bowl', quinoa_cooked: 'bowl',
+  peanut: 'handful', walnut: 'handful', almond: 'handful', cashew: 'handful',
+  cheese_slice: 'piece', dumpling_pork: 'piece', shrimp: 'piece', avocado: 'piece',
+};
+
+/** 汤面/粥这类组合菜是一碗盛出来的，档位该按碗问，不是按「份」 */
+const KIND_BY_DISH = {
+  beef_noodle: 'bowl', pork_noodle: 'bowl', noodle_soup_plain: 'bowl', noodle_fried: 'bowl',
+  rice_noodle_soup: 'bowl', instant_noodle: 'bowl', wonton_meal: 'bowl', porridge_meal: 'bowl',
+};
+
+/** 这个食物（或这道菜）平时按什么盛，决定档位的说法和补档幅度 */
+export function portionKindOf(target) {
+  if (!target) return 'plate';
+  if (KIND_BY_ID[target.id]) return KIND_BY_ID[target.id];
+  if (KIND_BY_DISH[target.id]) return KIND_BY_DISH[target.id];
+  return KIND_BY_CATEGORY[target.category] || 'plate';
+}
+
+/** 把库里的「一小碗」「中杯」写成按钮上好念的字样 */
+function prettyTierLabel(raw) {
+  const t = String(raw).replace(/^一/, '').replace(/[（(].*?[)）]/g, '').trim();
+  const map = {
+    碗: '普通碗', 份: '一份', 盘: '一盘', 杯: '一杯', 个: '一个', 块: '一块', 把: '一把',
+    勺: '一勺', 盒: '一盒', 瓶: '一瓶', 罐: '一罐', 包: '一小包', 袋: '一袋', 串: '一串',
+    只: '一只', 根: '一根', 片: '一片', 顿: '一顿', 桶: '一桶',
+  };
+  return map[t] || t;
+}
+
+/**
+ * 给一条「份量是猜的」生成几个可选档位，界面做成按钮，点一下就改。
+ * 保证「最小档 < 当前记的克数 < 最大档」—— 否则按钮点了没变化，等于白问一句。
+ * @param {object|null} target 食物或组合菜（取它的 servings 和类型）
+ * @param {number} defaultGrams 现在按多少克记的
+ * @param {number} count 她说的份数（「两碗米饭」的档位也要跟着翻倍）
+ * @returns {Array<{label:string, grams:number}>} 小/正常/大 三档，从小到大；不值得问时给空数组
+ */
+export function buildPortionChoices(target, defaultGrams, count = 1) {
+  const g = Math.round(Number(defaultGrams) || 0);
+  // 20 克以下的份量（一勺油 10 克、一勺糖 8 克）差几克也无所谓，不值得在界面上多问一句
+  if (!(g >= 20)) return [];
+  const kind = portionKindOf(target);
+  const [smallK, largeK] = KIND_SPREAD[kind] || KIND_SPREAD.plate;
+  const labels = KIND_LABELS[kind] || KIND_LABELS.plate;
+  const times = Math.max(1, Math.round(Number(count) || 1));
+  // 库里的份量按她说的份数放大（「两碗米饭」的档位就该是 260/360/500）
+  const table = [];
+  for (const [label, grams] of Array.isArray(target?.servings) ? target.servings : []) {
+    const v = Math.round(Number(grams) * times);
+    // 离当前值太远的规格不拿出来当档位：说「6 斤米饭」时列一个「一小碗 130 克」，她也选不下去
+    if (v > 0 && v >= g / 3 && v <= g * 2.5) table.push({ label: prettyTierLabel(label), grams: v });
+  }
+  // 只取离当前值最近的那一头：库里有 130/180/250 时，不会拿 130 当「大碗」
+  const nearest = (below) => table
+    .filter((x) => (below ? x.grams < g : x.grams > g))
+    .sort((a, b) => (below ? b.grams - a.grams : a.grams - b.grams))[0] || null;
+  const round5 = (v) => (v >= 100 ? Math.round(v / 10) * 10 : v >= 20 ? Math.round(v / 5) * 5 : Math.round(v));
+  const exact = table.find((x) => x.grams === g);
+  const below = nearest(true) || { label: labels[0], grams: round5(g * smallK) };
+  const above = nearest(false) || { label: labels[2], grams: round5(g * largeK) };
+  const suffix = times > 1 ? `×${times}` : '';
+  // 三档的说法不能撞车（「小包 30」和「小包 50」两个按钮她会不知道选哪个），撞了就用中性说法
+  const useLabel = (() => {
+    const used = new Set([exact ? exact.label : labels[1]]);
+    const alt = ['小一点', '大一点'];
+    return (want) => {
+      const pick = used.has(want) ? (alt.find((a) => !used.has(a)) || want) : want;
+      used.add(pick);
+      return pick;
+    };
+  })();
+  // 库里的说法可能两头撞上（比如「一小份」既算小档又算大档），撞了就用类型标签区分
+  const belowLabel = useLabel(below.label);
+  const aboveLabel = useLabel(below.label === above.label ? labels[2] : above.label);
+  return [
+    // 兜底档收在 5 克以上，并且一定比当前值小，避免四舍五入把小档抬得跟默认一样
+    { label: belowLabel + suffix, grams: Math.max(5, Math.min(below.grams, g - 1)) },
+    { label: (exact ? exact.label : labels[1]) + suffix, grams: g },
+    { label: aboveLabel + suffix, grams: Math.max(above.grams, g + 1) },
+  ];
+}
+
+/** 食物库里写没写过这个量词（牛奶写了「一杯 250 克」才算换算明确） */
+function servingMatch(food, unit) {
+  if (!food || !Array.isArray(food.servings)) return null;
+  const clean = (x) => String(x).replace(/^一/, '').replace(/[（(].*?[)）]/g, '');
+  const exact = food.servings.find(([label]) => clean(label) === unit);
+  if (exact) return { exact: true, label: exact[0] };
+  const loose = food.servings.find(([label]) => String(label).includes(unit));
+  return loose ? { exact: false, label: loose[0] } : null;
+}
+
+/**
+ * 这条的份量算不算说清了。
+ * 高：给了克数/斤两，或用了个头、包装有标准的量词（两个鸡蛋、一罐可乐）；
+ * 低：什么都没说，或者只有「一碗」「一份」「半包」这种说不准的说法。
+ * @param {boolean} converted 她说的那个份量能不能换算成克数（换不出来就等于没说清）
+ */
+function portionVerdict(food, portion, converted = true) {
+  // 换不出克数（比如「半包」套在一个没有包装规格的食物上）：等于没说，别拿她没说的量词当理由
+  if (!portion || !converted) return { confidence: 'low', reason: '你没说多少，我先按常见的一份记的' };
+  if (portion.counting || !portion.portionWord) return { confidence: 'high', reason: null };
+  const said = portion.text || portion.portionWord;
+  const unit = String(portion.portionWord).replace(/^一/, '');
+  if (VAGUE_UNITS.has(unit)) {
+    return { confidence: 'low', reason: `「${said}」有大有小，先按常见的估的` };
+  }
+  const hit = servingMatch(food, unit);
+  if (hit?.exact) return { confidence: 'high', reason: null };
+  return {
+    confidence: 'low',
+    reason: hit
+      ? `「${said}」没有统一规格，我按「${prettyTierLabel(hit.label)}」估的`
+      : `「${said}」没有固定规格，先按常见的估的`,
+  };
+}
+
 /**
  * 组合菜品：她说的是一整份菜（不是单一食材）时用这些。
  * 数值是「一份 = baseGrams 克」的参考值（家常做法估算，误差较大，靠界面确认）。
@@ -79,15 +246,15 @@ export const DISHES = [
   { id: 'yogurt_meal', name: '酸奶+水果', baseGrams: 300, kcal: 250, protein: 10, fat: 6, carb: 38, aliases: ['酸奶水果', '水果捞'] },
 ];
 
-/** 常见配料/加料：识别出来就往上加 */
+/** 常见配料/加料：识别出来就往上加。vague = 加多少全看她手，界面要反问一句 */
 const EXTRA_INGREDIENTS = [
   { key: 'egg', aliases: ['加蛋', '加个蛋', '卤蛋', '鸡蛋', '煎蛋', '荷包蛋', '蛋'], foodId: 'egg', defaultGrams: 50 },
-  { key: 'beef_extra', aliases: ['加肉', '加牛肉', '加份肉', '肉多'], foodId: 'beef_lean', defaultGrams: 60 },
-  { key: 'pork_extra', aliases: ['加猪排', '加大排', '加排骨'], foodId: 'pork_lean', defaultGrams: 80 },
-  { key: 'tofu_extra', aliases: ['加豆腐', '豆腐'], foodId: 'tofu_firm', defaultGrams: 100 },
-  { key: 'veg_extra', aliases: ['加青菜', '青菜', '加菜', '蔬菜', '小白菜', '生菜'], foodId: 'bokchoy', defaultGrams: 150 },
-  { key: 'rice_extra', aliases: ['加饭', '加米饭', '多饭'], foodId: 'rice_cooked', defaultGrams: 150 },
-  { key: 'noodle_extra', aliases: ['加面'], foodId: 'noodle_cooked', defaultGrams: 150 },
+  { key: 'beef_extra', aliases: ['加肉', '加牛肉', '加份肉', '肉多'], foodId: 'beef_lean', defaultGrams: 60, vague: true },
+  { key: 'pork_extra', aliases: ['加猪排', '加大排', '加排骨'], foodId: 'pork_lean', defaultGrams: 80, vague: true },
+  { key: 'tofu_extra', aliases: ['加豆腐', '豆腐'], foodId: 'tofu_firm', defaultGrams: 100, vague: true },
+  { key: 'veg_extra', aliases: ['加青菜', '青菜', '加菜', '蔬菜', '小白菜', '生菜'], foodId: 'bokchoy', defaultGrams: 150, vague: true },
+  { key: 'rice_extra', aliases: ['加饭', '加米饭', '多饭'], foodId: 'rice_cooked', defaultGrams: 150, vague: true },
+  { key: 'noodle_extra', aliases: ['加面'], foodId: 'noodle_cooked', defaultGrams: 150, vague: true },
   { key: 'chili_oil', aliases: ['辣油', '红油', '辣椒油'], foodId: 'oil', defaultGrams: 10, warn: '辣油其实是纯油，一勺约 10 克 = 90 kcal' },
   { key: 'sesame', aliases: ['麻酱', '芝麻酱'], foodId: 'sesame_paste', defaultGrams: 15 },
   { key: 'mayo', aliases: ['沙拉酱', '蛋黄酱', '千岛酱'], foodId: 'salad_dressing', defaultGrams: 15 },
@@ -355,11 +522,20 @@ export function parseDescription(raw, defaultMeal = null) {
       { kcal: chosenDish.kcal, protein: chosenDish.protein, fat: chosenDish.fat, carb: chosenDish.carb },
       grams, chosenDish.baseGrams,
     );
+    // 组合菜大多是「一碗」「一份」这种说法（碗有大小、份量看食堂），这里误差最大；
+    // 但她要是直接说了 600 克，那就是说清了，不该再问。组合菜没有份量表，所以第一个参数给 null。
+    const dishVerdict = near
+      ? portionVerdict(null, near)
+      : { confidence: 'low', reason: '你没说这一份多大，我先按常见的一份记的' };
     items.push({
       name: chosenDish.name,
       grams: Math.round(grams),
       ...nut,
-      confidence: near ? 'medium' : 'low',
+      confidence: dishVerdict.confidence,
+      confidenceReason: dishVerdict.reason,
+      portionChoices: dishVerdict.confidence === 'low'
+        ? buildPortionChoices({ id: chosenDish.id, category: 'dish' }, grams)
+        : [],
       needsConfirm: !near,
       question: near ? (chosenDish.ask || null) : '这一份大概多大？（小碗/普通碗/大碗，热量能差一倍）',
       source: 'dish',
@@ -374,16 +550,22 @@ export function parseDescription(raw, defaultMeal = null) {
     if (chosenDish && chosenDish.aliases.some((a) => a.includes(hit.text) || hit.text.includes(a))) continue;
     if (chosenDish && items.some((it) => it.name.includes(hit.text))) continue;
     const standard = f.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[f.id] || 100;
-    let grams = portion ? gramsForPortion(f, portion) : null;
+    const converted = portion ? gramsForPortion(f, portion) : null;
+    let grams = converted;
     if (!(grams > 0)) grams = FOOD_DEFAULT_GRAMS[f.id] || standard;
     grams = Math.min(grams, 3000);
     const nut = scaleNutrition({ kcal: f.kcal, protein: f.protein, fat: f.fat, carb: f.carb }, grams, 100);
     const needsConfirm = !portion;
+    const verdict = portionVerdict(f, portion, converted > 0);
     items.push({
       name: f.name,
       grams: Math.round(grams),
       ...nut,
-      confidence: needsConfirm ? 'low' : 'medium',
+      confidence: verdict.confidence,
+      confidenceReason: verdict.reason,
+      portionChoices: verdict.confidence === 'low'
+        ? buildPortionChoices(f, grams, portion?.count || 1)
+        : [],
       needsConfirm,
       question: needsConfirm && !chosenDish ? `${f.name}大概多少量？（一个拳头约 150 克）` : null,
       source: 'food',
@@ -408,7 +590,10 @@ export function parseDescription(raw, defaultMeal = null) {
       name: `加${food.name}`,
       grams,
       ...nut,
-      confidence: 'medium',
+      // 「加了个蛋」是一颗标准大小，不用问；「加了点肉/加饭」加多少全看她手，得问一句
+      confidence: h.ref.vague ? 'low' : 'high',
+      confidenceReason: h.ref.vague ? `「${h.text}」没说多少，先按常见的估的` : null,
+      portionChoices: h.ref.vague ? buildPortionChoices(food, grams) : [],
       needsConfirm: false,
       warning: h.ref.warn || null,
       source: 'extra',
@@ -424,7 +609,8 @@ export function parseDescription(raw, defaultMeal = null) {
       it.fat = Math.round(it.fat * style.oilFactor * 10) / 10;
       it.kcal = Math.round(it.protein * 4 + it.fat * 9 + it.carb * 4);
       it.cookingStyle = style.note;
-      it.confidence = 'low';
+      // 注意别在这里动 confidence：那个字段专门表示「份量有多确定」。
+      // 油量不确定走 needsConfirm/question，两件事混在一起界面就分不清该问哪一句了。
       it.needsConfirm = true;
       it.question = `${it.name}是${style.aliases[0]}的，按家常油量估的，差不多吗？`;
     }

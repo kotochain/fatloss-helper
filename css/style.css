@@ -625,6 +625,30 @@ input:focus, select:focus, textarea:focus {
 
 .draft-grams { text-align: center; }
 .entry .name em { font-style: normal; display: block; }
+
+/* 「这个份量我是猜的」：份量不确定的条目在下面挂一条反问 + 档位按钮。
+   用暖橘底跟普通条目区分开，一眼能看出哪几条需要她点一下。 */
+.portion-guess {
+  background: var(--coral-soft);
+  border-radius: 12px;
+  padding: 9px 11px;
+  margin: -2px 0 9px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #9A4A2E;
+}
+.portion-guess .guess-tag { font-weight: 700; margin-right: 5px; }
+.portion-guess .guess-why { color: #A9552F; }
+.portion-guess .chips { margin-top: 7px; }
+.portion-guess .chip {
+  background: #fff;
+  border-color: #F6C9AF;
+  color: #9A4A2E;
+  font-size: 12px;
+  padding: 6px 11px;
+}
+.portion-guess .chip:active { background: #FFF3EC; }
+
 details summary { outline: none; }
 details[open] summary { margin-bottom: 4px; }
 

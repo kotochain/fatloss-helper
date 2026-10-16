@@ -62,6 +62,12 @@ const MUTATIONS = [
   // ── 第六轮：本地周洞察 ──
   { file: 'js/insights.js', from: 'if (logged.length < 4) return [];', to: 'if (false) return [];', why: '记录太少时不许给「规律」（数据不够编出来的结论是害人的）' },
   { file: 'js/insights.js', from: 'if (a.length < minPerGroup || b.length < minPerGroup) return null;', to: 'if (false) return null;', why: '两组样本都不够时不许做对比' },
+  // ── 第七轮：份量不确定时反问她 ──
+  { file: 'js/mealparse.js', from: '    const verdict = portionVerdict(f, portion, converted > 0);', to: "    const verdict = { confidence: 'high', reason: null };", why: '「一碗」「一份」这种说不准的说法必须标成低置信度（全标成高置信度就等于什么都不问）' },
+  { file: 'js/mealparse.js', from: '  if (VAGUE_UNITS.has(unit)) {', to: '  if (false) {', why: '「碗」「份」「包」这类说不准的量词必须问一句' },
+  { file: 'js/mealparse.js', from: '  const below = nearest(true) || { label: labels[0], grams: round5(g * smallK) };', to: '  const below = nearest(true) || { label: labels[0], grams: g };', why: '档位的最小档必须真的比当前值小（否则点了没变化，等于白问）' },
+  { file: 'js/mealparse.js', from: '  const above = nearest(false) || { label: labels[2], grams: round5(g * largeK) };', to: '  const above = nearest(false) || { label: labels[2], grams: g };', why: '档位的最大档必须真的比当前值大（否则点了没变化）' },
+  { file: 'js/mealparse.js', from: "  if (portion.counting || !portion.portionWord) return { confidence: 'high', reason: null };", to: "  if (portion.counting) return { confidence: 'high', reason: null };", why: '她说了确切克数（「200克米饭」）就是说清了，不能再问' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

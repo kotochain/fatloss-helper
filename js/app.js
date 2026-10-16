@@ -652,6 +652,34 @@ async function runQuickParse(text) {
   openDraftSheet();
 }
 
+/** 份量是猜的、而且有档位可点时，界面才多出这块反问（一条都不用问时界面跟以前一模一样） */
+function needsPortionPick(it) {
+  return it.confidence === 'low' && Array.isArray(it.portionChoices) && it.portionChoices.length >= 2;
+}
+
+/**
+ * 改一条的克数：营养按比例换算，行内热量和下面的合计立刻跟着变。
+ * 点档位和她自己在输入框里敲数字都走这里 —— 两条路各写一遍，迟早有一条忘了更新合计。
+ */
+function applyDraftGrams(box, idx, grams) {
+  const it = draft?.items?.[idx];
+  const g = Number(grams);
+  if (!it || !(g > 0)) return;
+  const ratio = g / it.grams;
+  it.grams = Math.round(g);
+  it.kcal = Math.round(it.kcal * ratio);
+  it.protein = Math.round(it.protein * ratio * 10) / 10;
+  it.fat = Math.round(it.fat * ratio * 10) / 10;
+  it.carb = Math.round(it.carb * ratio * 10) / 10;
+  it.needsConfirm = false;
+  const input = box.querySelector(`.draft-grams[data-grams="${idx}"]`);
+  if (input) input.value = it.grams;
+  const kcalCell = box.querySelector(`[data-kcal="${idx}"]`);
+  if (kcalCell) kcalCell.textContent = `${Math.round(it.kcal)} kcal`;
+  const summary = box.querySelector('.row.between.small b');
+  if (summary) summary.textContent = Math.round(sumItems(draft.items).kcal);
+}
+
 /** 把解析结果画成「可以改的清单」 */
 function drawDraft() {
   const box = $('#draftHost') || $('#quickResult');
@@ -674,12 +702,21 @@ function drawDraft() {
         <div class="entry">
           <span class="name">${esc(it.name)}
             ${it.needsConfirm ? '<span class="tag amber">待确认</span>' : ''}
+            ${needsPortionPick(it) ? '<span class="tag amber">份量是猜的</span>' : ''}
             ${it.warning ? `<em style="display:block;color:#92400e">${esc(it.warning)}</em>` : ''}
           </span>
           <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams" style="width:80px;padding:4px 6px;font-size:14px">
           <span class="kcal">克</span>
-          <span class="kcal">${Math.round(it.kcal)} kcal</span>
-        </div>`).join('')}
+          <span class="kcal" data-kcal="${i}">${Math.round(it.kcal)} kcal</span>
+        </div>
+        ${needsPortionPick(it) ? `
+          <div class="portion-guess" data-guess="${i}">
+            <span class="guess-tag">这个份量我是猜的</span>
+            <span class="guess-why">${esc(it.confidenceReason || '')}</span>
+            <div class="chips">
+              ${it.portionChoices.map((c, ci) => `<button class="chip" data-pick-portion="${i}:${ci}">${esc(c.label)} ${c.grams} 克</button>`).join('')}
+            </div>
+          </div>` : ''}`).join('')}
     </div>
     <div class="row between small" style="margin-top:8px">
       <span>这一餐合计约 <b>${Math.round(totals.kcal)}</b> kcal · 蛋白 ${Math.round(totals.protein)} g</span>
@@ -695,22 +732,23 @@ function drawDraft() {
     </div>
     ${needsCheck ? '<p class="tiny muted" style="margin:8px 0 0">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
 
+  // 改份量：点档位和她自己敲数字走同一条路 —— 两处各写一遍，迟早有一处忘了更新合计（这个坑踩过）
   box.querySelectorAll('.draft-grams').forEach((inp) => {
     inp.addEventListener('input', () => {
-      const idx = Number(inp.dataset.grams);
-      const g = Number(inp.value);
-      if (!(g > 0)) return;
-      const it = draft.items[idx];
-      const ratio = g / it.grams;
-      it.grams = Math.round(g);
-      it.kcal = Math.round(it.kcal * ratio);
-      it.protein = Math.round(it.protein * ratio * 10) / 10;
-      it.fat = Math.round(it.fat * ratio * 10) / 10;
-      it.carb = Math.round(it.carb * ratio * 10) / 10;
-      it.needsConfirm = false;
-      const totals2 = sumItems(draft.items);
-      const summary = box.querySelector('.row.between.small b');
-      if (summary) summary.textContent = Math.round(totals2.kcal);
+      if (!(Number(inp.value) > 0)) return;
+      applyDraftGrams(box, Number(inp.dataset.grams), Number(inp.value));
+      // 她自己填了克数，这一条就不用再问了
+      box.querySelector(`[data-guess="${inp.dataset.grams}"]`)?.remove();
+    });
+  });
+  box.querySelectorAll('[data-pick-portion]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const [idx, pick] = btn.dataset.pickPortion.split(':').map(Number);
+      const choice = draft.items[idx]?.portionChoices?.[pick];
+      if (!choice) return;
+      applyDraftGrams(box, idx, choice.grams);
+      // 她答过了就把追问收起来，别一直挂在那儿再问第二遍
+      box.querySelector(`[data-guess="${idx}"]`)?.remove();
     });
   });
   $('#draftMeal', box)?.addEventListener('click', (e) => {
