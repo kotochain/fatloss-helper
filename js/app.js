@@ -2318,6 +2318,15 @@ function openBackupSheet() {
   });
 }
 
+/** 读取当前部署的代码版本（问 sw.js 要 —— 它跟 index.html/js 一起发布，最可靠） */
+async function readAppVersion() {
+  try {
+    const res = await fetch('sw.js', { cache: 'no-store' });
+    const text = await res.text();
+    return (text.match(/APP_VERSION = '([^']+)'/) || [])[1] || '未知';
+  } catch { return '读不到（可能离线）'; }
+}
+
 /** 关于：把「算得准不准」讲清楚 */
 function openAboutSheet() {
   const t = targets();
@@ -2348,8 +2357,21 @@ function openAboutSheet() {
       </div>
       <div class="set-note">
         <b>版本</b><br>
-        存档结构 v${SCHEMA_VERSION} · 应用每次推送自动发布
+        界面代码：<b id="appVersion">读取中…</b><br>
+        <span id="swVersionLine" class="tiny muted"></span>
+        存档结构：v${SCHEMA_VERSION}<br>
+        <span class="tiny muted">截图这一行发我，就能知道你手机上跑的是哪一版 —— 排查问题最有用的一句话。</span>
       </div>`,
+    onMount: async () => {
+      const v = await readAppVersion();
+      const el = document.getElementById('appVersion');
+      if (el) el.textContent = v;
+      const line = document.getElementById('swVersionLine');
+      if (line) {
+        const ctrl = navigator.serviceWorker?.controller;
+        line.textContent = ctrl ? '离线缓存已接管（下次打开会自动拿到新版）' : '离线缓存未接管';
+      }
+    },
   });
 }
 
