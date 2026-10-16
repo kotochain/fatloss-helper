@@ -407,6 +407,50 @@ async function main() {
   await evaluate(`document.querySelector('#sheetClose').click()`);
   await sleep(300);
 
+  console.log('\n=== 一·七、本地周洞察（不联网、不调 AI）===');
+  // 造 6 天记录，看今天页有没有出现「你自己的规律」
+  const seeded = await evaluate(`(async () => {
+    const m = await import('./js/store.js');
+    const f = await import('./js/foods.js');
+    const raw = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    for (let i = 0; i < 6; i++) {
+      const key = m.shiftDate(m.todayKey(), -i);
+      const hi = i % 2 === 0;
+      m.addFoodEntry(raw, key, 'breakfast', f.findFood('egg'), 100);
+      m.addFoodEntry(raw, key, 'lunch', f.findFood('chicken_breast'), hi ? 250 : 40);
+      m.addFoodEntry(raw, key, 'lunch', f.findFood('rice_cooked'), hi ? 150 : 500);
+      m.addFoodEntry(raw, key, 'dinner', f.findFood('rice_cooked'), hi ? 120 : 450);
+    }
+    localStorage.setItem('fatloss.state.v2', JSON.stringify(raw));
+    return Object.keys(raw.days).length;
+  })()`);
+  // 注意：必须用不带 ?demo 的地址重载 —— ?demo=1 每次加载都会重置示例数据，会把刚造的数据冲掉
+  await client.send('Page.navigate', { url: BASE + '/' });
+  await sleep(2200);
+  await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);
+  await sleep(600);
+  const insightCard = await evaluate(`(() => {
+    const el = document.querySelector('.insight-card');
+    if (!el) return null;
+    return { 条数: el.querySelectorAll('.insight').length, 文案: el.textContent.replace(/\\s+/g, ' ').trim().slice(0, 70) };
+  })()`);
+  console.log(insightCard
+    ? `✅ 造了 ${seeded} 天记录后，今天页出现「你的规律」：${insightCard.条数} 条 · ${insightCard.文案}`
+    : `❌ 造了 ${seeded} 天记录仍没有洞察卡片`);
+  if (!insightCard || insightCard.条数 < 2) problems.push('数据够的时候应当出现多条洞察');
+
+  await evaluate(`document.querySelector('[data-act="insights"]')?.click()`);
+  await sleep(700);
+  const allSheet = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    条数: document.querySelectorAll('#sheetBody .insight').length,
+    提到不联网: (document.querySelector('#sheetBody')?.textContent || '').includes('不联网'),
+  }))()`);
+  console.log(`✅ 「看全部规律」弹层：「${allSheet.标题}」${allSheet.条数} 条 · 说明里写了不联网 ${allSheet.提到不联网}`);
+  if (allSheet.标题 !== '你的规律') problems.push('全部规律的弹层没打开');
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(300);
+
   console.log('\n=== 二、按器械换有氧动作 ===');
   await evaluate(`document.querySelector('.tab[data-view="plan"]').click()`);
   await sleep(500);

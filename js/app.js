@@ -27,6 +27,7 @@ import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
 } from './cardio.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
+import { insights, insightHint } from './insights.js';
 import {
   SCHEMA_VERSION, loadState, migrateToCurrent, readBackup, clearBackup, saveBackup, describeMigration,
 } from './schema.js';
@@ -211,6 +212,7 @@ function handleAction(act, data) {
   switch (act) {
     case 'add-food': return openFoodSheet(data.meal);
     case 'growth': return openGrowthSheet();
+    case 'insights': return openInsightsSheet();
     case 'go-log':
       view = 'log';
       document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
@@ -376,6 +378,21 @@ function renderToday() {
         <span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-pin"/></svg>蛋白 <b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
       </div>
     </div>
+
+    ${myInsights(3).length || insightHint(state) ? `
+      <div class="card insight-card">
+        <div class="card-title">你的规律</div>
+        ${myInsights(3).map((x) => `
+          <div class="insight">
+            <span class="insight-ico">${x.icon}</span>
+            <div>
+              <b>${esc(x.title)}</b>
+              <p>${esc(x.detail)}</p>
+            </div>
+          </div>`).join('')}
+        ${insightHint(state) ? `<p class="tiny muted" style="margin:8px 0 0">${esc(insightHint(state).text)}</p>` : ''}
+        ${myInsights(3).length ? `<button class="btn ghost block" style="margin-top:10px" data-act="insights">看全部规律</button>` : ''}
+      </div>` : ''}
 
     <button class="plant-card" data-act="growth">
       <span class="plant-emoji-sm">${plant.state.stage.emoji}</span>
@@ -782,7 +799,8 @@ function renderPlan() {
     <div class="card">
       <div class="card-title">每天的固定提醒</div>
       <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
-        ${buildDailyTips(t, plan.cookingOilG).map((x) => `<li style="margin-bottom:4px">${esc(x)}</li>`).join('')}
+        ${myInsights(2).map((x) => `<li style="margin-bottom:4px">${x.icon} <b>${esc(x.title)}</b><br><span class="muted">${esc(x.detail)}</span></li>`).join('')
+          || buildDailyTips(t, plan.cookingOilG).map((x) => `<li style="margin-bottom:4px">${esc(x)}</li>`).join('')}
       </ul>
     </div>
 
@@ -1357,6 +1375,19 @@ function checkNewAchievements() {
    收成一处，找起来才不费劲。
    ─────────────────────────────────────────── */
 
+/** 从记录里算出的「她自己的规律」（数据不够时返回空数组） */
+function myInsights(limit) {
+  const t = targets();
+  if (!t) return [];
+  try {
+    const list = insights(state, { proteinG: t.proteinG, targetCalories: t.targetCalories, days: 14 });
+    return limit ? list.slice(0, limit) : list;
+  } catch (err) {
+    console.warn('洞察计算失败：', err);
+    return [];
+  }
+}
+
 /**
  * 使用模式：普通 / AI。
  *
@@ -1457,6 +1488,34 @@ function openSettingsSheet() {
         });
       });
     },
+  });
+}
+
+/** 全部规律（本地算的，不调用任何接口） */
+function openInsightsSheet() {
+  const t = targets();
+  const list = myInsights();
+  const hint = insightHint(state);
+  openSheet({
+    title: '你的规律',
+    body: `
+      ${list.length ? list.map((x) => `
+        <div class="insight full">
+          <span class="insight-ico">${x.icon}</span>
+          <div>
+            <b>${esc(x.title)}</b>
+            <p>${esc(x.detail)}</p>
+          </div>
+        </div>`).join('') : `
+        <div class="set-note">
+          <b>还没有足够的记录</b><br>
+          ${esc(hint ? hint.text : '再记几天就能看出规律了。')}
+        </div>`}
+      <p class="tiny muted" style="margin-top:12px">
+        这些数字是从你自己的记录里数出来的，不联网、不上传、不调用 AI。
+        少于 4 天记录时我不会给结论 —— 数据不够编出来的「规律」是害人的。
+      </p>
+      ${t ? `<p class="tiny muted">目标是每天约 ${t.targetCalories} kcal、蛋白 ${Math.round(t.proteinG)} g。</p>` : ''}`,
   });
 }
 

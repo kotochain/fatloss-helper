@@ -59,6 +59,9 @@ const MUTATIONS = [
   { file: 'js/schema.js', from: "for (const [key, list] of Object.entries(meals)) {", to: 'for (const [key, list] of []) {', why: '老记录要补上「哪一餐」（否则按餐汇总全为 0）' },
   { file: 'js/recommend.js', from: 'if (proteinRatio < 0.9) {', to: 'if (false) {', why: '蛋白不足时说明里必须点出来' },
   { file: 'js/recommend.js', from: 'if (fatRatio < 0.85) {', to: 'if (false) {', why: '脂肪不足时说明里必须点出来' },
+  // ── 第六轮：本地周洞察 ──
+  { file: 'js/insights.js', from: 'if (logged.length < 4) return [];', to: 'if (false) return [];', why: '记录太少时不许给「规律」（数据不够编出来的结论是害人的）' },
+  { file: 'js/insights.js', from: 'if (a.length < minPerGroup || b.length < minPerGroup) return null;', to: 'if (false) return null;', why: '两组样本都不够时不许做对比' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

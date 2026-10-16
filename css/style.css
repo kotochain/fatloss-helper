@@ -628,6 +628,27 @@ input:focus, select:focus, textarea:focus {
 details summary { outline: none; }
 details[open] summary { margin-bottom: 4px; }
 
+/* 洞察卡片 */
+.insight-card { background: linear-gradient(150deg, #FFFCFA, #FFF6F8); }
+.insight {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px dashed #F1E4E7;
+}
+.insight:last-of-type { border-bottom: none; }
+.insight.full {
+  background: #FFFCFC;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 13px;
+  margin-bottom: 9px;
+}
+.insight-ico { font-size: 20px; line-height: 1.2; }
+.insight b { font-size: 13.5px; font-weight: 660; display: block; margin-bottom: 3px; }
+.insight p { font-size: 12px; line-height: 1.7; color: var(--ink-2); margin: 0; }
+
 /* 模式切换（普通 / AI） */
 .mode-switch { margin-bottom: 14px; }
 .mode-head { font-size: 12.5px; font-weight: 650; color: var(--ink-2); margin-bottom: 8px; }
