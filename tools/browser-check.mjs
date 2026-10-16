@@ -97,6 +97,7 @@ const DIAGNOSTIC = `(() => {
     return { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) };
   });
   return {
+    appReady: window.__appReady === true,
     viewport: window.innerWidth + 'x' + window.innerHeight,
     docScrollWidth: de.scrollWidth,
     bodyScrollWidth: document.body.scrollWidth,
@@ -143,9 +144,30 @@ async function main() {
 
     const entry = { size: size.name, viewport: `${size.width}x${size.height}`, steps: [] };
 
-    // 第一步：首次进入
+    // 第一步：清掉上一次跑留下的 Service Worker 和缓存，保证测到的是最新文件
     await client.send('Page.navigate', { url: BASE + '/' });
-    await sleep(1200);
+    await sleep(800);
+    await evaluate(client, `(async () => {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+      const names = await caches.keys();
+      await Promise.all(names.map((n) => caches.delete(n)));
+      localStorage.clear();
+      return true;
+    })()`);
+    await client.send('Page.navigate', { url: BASE + '/' });
+    await sleep(1500);
+    await evaluate(client, `(async () => {
+      // 再清一次：上一步加载时 Service Worker 可能又注册上了
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+      const names = await caches.keys();
+      await Promise.all(names.map((n) => caches.delete(n)));
+      localStorage.clear();
+      return true;
+    })()`);
+    await client.send('Page.navigate', { url: BASE + '/' });
+    await sleep(1500);
     entry.steps.push({ at: '首次进入', ...(await evaluate(client, DIAGNOSTIC)) });
     await screenshot(client, path.join(outDir, `shot-${size.name}-1-welcome.png`));
 
@@ -200,6 +222,18 @@ async function main() {
       await screenshot(client, path.join(outDir, `shot-${size.name}-tab-${view}.png`));
     }
 
+    // 第五步半：PWA 清单能不能被浏览器正确解析（决定「添加到主屏幕」是否可用）
+    const manifest = await evaluate(client, `(async () => {
+      const res = await fetch('manifest.webmanifest');
+      const m = await res.json();
+      const sizes = [];
+      for (const ic of m.icons || []) {
+        const ok = await fetch(ic.src).then((r) => r.ok).catch(() => false);
+        sizes.push(ic.sizes + (ok ? '✅' : '❌文件缺失'));
+      }
+      return { name: m.name, display: m.display, start_url: m.start_url, icons: sizes };
+    })()`);
+
     // 第六步：资料弹层（把资料删掉后进入填写流程）
     await evaluate(client, `localStorage.clear(); location.reload();`);
     await sleep(1200);
@@ -208,7 +242,7 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, profilePreview };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, profilePreview, manifest };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -229,9 +263,12 @@ function printReport(report) {
   for (const s of report.sizes) {
     console.log(`\n──── ${s.size} (${s.viewport}) ────`);
     for (const step of s.steps) {
-      const bad = step.horizontalOverflow || step.cutOff.length || step.notVisible.length;
+      const bad = step.horizontalOverflow || step.cutOff.length || step.notVisible.length || !step.appReady || step.cardCount === 0;
       if (bad) problems += 1;
-      console.log(`  ${bad ? '❌' : '✅'} ${step.at}：卡片 ${step.cardCount} 个｜横向溢出 ${step.horizontalOverflow ? '有' : '无'}｜跑出屏幕的元素 ${step.cutOff.length} 个｜不可见标签 ${step.notVisible.length} 个`);
+      const why = [!step.appReady ? '模块没跑起来（白屏）' : '', step.cardCount === 0 ? '一个卡片都没渲染' : '',
+        step.horizontalOverflow ? '横向溢出' : '', step.cutOff.length ? `${step.cutOff.length} 个元素跑出屏幕` : '',
+        step.notVisible.length ? `${step.notVisible.length} 个标签不可见` : ''].filter(Boolean).join('、');
+      console.log(`  ${bad ? `❌ ${why}` : '✅'} ${step.at}：卡片 ${step.cardCount} 个｜横向溢出 ${step.horizontalOverflow ? '有' : '无'}｜跑出屏幕的元素 ${step.cutOff.length} 个｜不可见标签 ${step.notVisible.length} 个`);
       if (step.overflowing.length) {
         for (const o of step.overflowing.slice(0, 4)) console.log(`       ↳ <${o.tag}> "${o.text}" left=${o.left} right=${o.right}（视口宽 ${step.viewport.split('x')[0]}）`);
       }
@@ -243,8 +280,11 @@ function printReport(report) {
     console.log(`  加入记录后：${JSON.stringify(r.afterAdd)}`);
     console.log(`  四个标签页卡片数：${JSON.stringify(r.tabs)}`);
     console.log(`  资料页预览：${r.profilePreview}`);
+    console.log(`  PWA 清单：${r.manifest.name}｜display=${r.manifest.display}｜start_url=${r.manifest.start_url}｜图标 ${r.manifest.icons.join(' ')}`);
     console.log(`  控制台报错：${s.consoleErrors.length ? s.consoleErrors.join(' | ') : '无'}`);
-    if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条 || s.consoleErrors.length) problems += 1;
+    const iconBad = r.manifest.icons.some((x) => x.includes('❌'));
+    if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
+      || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone') problems += 1;
   }
   console.log(`\n${problems === 0 ? '✅ 浏览器自检全部通过' : `❌ 浏览器自检有 ${problems} 处问题`}`);
   console.log(`截图与报告在 ${outDir}`);

@@ -73,7 +73,8 @@ export function createServer() {
       const ext = path.extname(target).toLowerCase();
       res.writeHead(200, {
         'Content-Type': TYPES[ext] || 'application/octet-stream',
-        'Cache-Control': ext === '.html' ? 'no-store' : 'no-cache',
+        // 开发服务器一律不缓存：否则改了文件手机/浏览器还在跑旧版本，很难查
+        'Cache-Control': 'no-store, must-revalidate',
       });
       res.end(data);
     });

@@ -4,17 +4,17 @@
  */
 
 import {
-  calcTargets, calcEntry, calcExerciseKcal, diffAgainstTargets, macroSplit, macroSplit as _ms,
-  defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, round, classifyBMI,
+  calcTargets, calcEntry, calcExerciseKcal, diffAgainstTargets, macroSplit,
+  defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, round,
 } from './calc.js';
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount } from './foods.js';
-import { searchFoods, MEAL_SLOTS, normalize } from './foodlog.js';
+import { searchFoods, MEAL_SLOTS } from './foodlog.js';
 import { listExercises, buildWeekPlan, EXERCISES } from './exercise.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
 import {
   emptyState, migrate, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   addExercise, removeExercise, addWeight, addCustomFood, weightTrend, analyzeProgress,
-  demoProfile, demoEntries,
+  demoProfile, demoEntries, frequentFoods,
 } from './store.js';
 
 const STORAGE_KEY = 'fatloss.state.v2';
@@ -343,9 +343,7 @@ function suggestNext(totals, t, remainingKcal) {
 /* ── 记录页 ──────────────────────────────── */
 
 function renderLog() {
-  const t = targets();
-  const day = getDay(state, dateKey);
-  const recent = frequent(state, 8);
+  const recent = frequentFoods(state, 8);
   app.innerHTML = `
     <div class="card">
       <div class="card-title">记一笔</div>
@@ -407,19 +405,6 @@ function renderLog() {
       openAmountSheet(food, guessMeal());
     });
   });
-  void t;
-}
-
-function frequent(state, limit) {
-  const counter = new Map();
-  for (const key of Object.keys(state.days).sort().reverse().slice(0, 30)) {
-    for (const e of Object.values(state.days[key].meals || {}).flat()) {
-      const cur = counter.get(e.food.id) || { food: e.food, count: 0, grams: e.grams };
-      cur.count += 1;
-      counter.set(e.food.id, cur);
-    }
-  }
-  return [...counter.values()].sort((a, b) => b.count - a.count).slice(0, limit);
 }
 
 /** 按当前时间猜这顿该记到哪一餐 */
@@ -1036,6 +1021,14 @@ async function selfCheck() {
 
 /* ── 启动 ────────────────────────────────── */
 
+// 离线缓存要无条件注册：放在「有资料」的分支里会导致第一次打开（欢迎页）不注册，
+// 结果装到主屏幕后第一次断网就打不开。
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  const register = () => navigator.serviceWorker.register('sw.js').catch((err) => console.warn('离线缓存未启用：', err));
+  if (document.readyState === 'complete') register();
+  else window.addEventListener('load', register);
+}
+
 if (new URLSearchParams(location.search).has('__selfcheck')) {
   selfCheck();
 } else if (!state) {
@@ -1047,10 +1040,6 @@ if (new URLSearchParams(location.search).has('__selfcheck')) {
   render();
 }
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch((err) => console.warn('离线缓存未启用：', err));
-  });
-}
+// 启动成功的标记：浏览器自检靠它判断「模块有没有炸掉导致白屏」
+window.__appReady = true;
 
-void normalize; void _ms; void classifyBMI;

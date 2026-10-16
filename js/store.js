@@ -1,5 +1,5 @@
 import { round } from './calc.js';
-import { buildMealPlan, buildDailyTips } from './recommend.js';
+import { buildMealPlan } from './recommend.js';
 
 export const STATE_VERSION = 2;
 
@@ -138,6 +138,25 @@ export function addWeight(state, dateKey, kg) {
   return list;
 }
 
+/**
+ * 常吃的食物：按出现次数排序，用来做「记录」页的快捷入口。
+ * 只看最近 30 天，避免一年前的习惯一直霸榜。
+ */
+export function frequentFoods(state, limit = 8) {
+  const counter = new Map();
+  const dates = Object.keys(state.days || {}).sort().reverse().slice(0, 30);
+  for (const d of dates) {
+    for (const e of Object.values(state.days[d].meals || {}).flat()) {
+      if (!e || !e.food || !e.food.id) continue;
+      const cur = counter.get(e.food.id) || { food: e.food, count: 0, grams: e.grams };
+      cur.count += 1;
+      cur.grams = e.grams;
+      counter.set(e.food.id, cur);
+    }
+  }
+  return [...counter.values()].sort((a, b) => b.count - a.count).slice(0, limit);
+}
+
 export function addCustomFood(state, food) {
   const id = newId('c');
   const item = {
@@ -194,13 +213,6 @@ export function analyzeProgress(state) {
   };
 }
 
-/** 一天的完整汇总，界面就靠这个渲染 */
-export function daySummary(state, dateKey, targets) {
-  const day = getDay(state, dateKey);
-  const entries = Object.values(day.meals).flat();
-  return { day, entries, targets, dateKey };
-}
-
 /**
  * 演示/自检用的完整示例：填资料 → 生成餐单 → 记一天饮食。
  * 只在本地用，用户点「试用示例」时才会跑。
@@ -231,6 +243,3 @@ export function demoEntries(state, dateKey, targets) {
   return added;
 }
 
-export function dailyTips(targets) {
-  return buildDailyTips(targets);
-}
