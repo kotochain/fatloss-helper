@@ -11,7 +11,30 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
+
+/**
+ * 干完活之后主动退出。
+ *
+ * 为什么必须显式退出：无头浏览器和调试用的 WebSocket 连接会让 Node 的事件循环一直不空，
+ * 表现为「所有断言都通过了，进程却不结束」，最后被看门狗按超时杀掉 → 退出码非零 → CI 判失败。
+ * 这个坑同时骗过了本地和 CI 的排查（报出来的是五花八门的 fetch failed / 超时）。
+ */
+function finishAndExit(exitCode = 0, cleanup = []) {
+  for (const fn of cleanup) { try { fn(); } catch { /* 收尾失败不影响结果 */ } }
+  // 直接退出，不用定时器。
+  // 曾经写成 setTimeout(...).unref()：没有其它任务时定时器永远不触发，
+  // 进程就一直挂着（被看门狗按超时杀掉，退出码还变成非零）。这个坑骗过我和 CI 好几轮。
+  process.exit(exitCode);
+}
 import { findChrome } from './chrome-path.mjs';
+import { portAlive, freePort } from './chrome-launch.mjs';
+
+/** 清掉占用调试端口的残留进程，并等端口真的空出来 */
+async function freePortAndWait(port) {
+  if (!(await portAlive(port))) return;
+  freePort(port);
+  for (let i = 0; i < 25 && (await portAlive(port)); i++) await sleep(200);
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, '.selfcheck');
@@ -54,6 +77,8 @@ function connect(wsUrl) {
     let id = 0;
     const pending = new Map();
     ws.addEventListener('open', () => resolve({
+      ws,
+      close() { try { ws.close(); } catch { /* 已经关了 */ } },
       send(method, params = {}) {
         const msgId = ++id;
         ws.send(JSON.stringify({ id: msgId, method, params }));
@@ -77,14 +102,25 @@ function connect(wsUrl) {
 async function main() {
   await waitForServer();
   fs.mkdirSync(outDir, { recursive: true });
+  // 先把调试端口清干净：上一次没退干净的 Chrome 会占着端口，
+  // 新实例静默失败、等待循环却连上僵尸端口 —— 表现为「只有第一个脚本能过」。
+  await freePortAndWait(PORT);
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(outDir, 'chrome-quicklog')}`,
     '--window-size=390,844', '--hide-scrollbars', 'about:blank',
   ], { stdio: 'ignore' });
 
-  for (let i = 0; i < 40; i++) {
-    try { await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); break; } catch { await sleep(250); }
+  // 等调试端口起来。等不到就明确报错（之前只等 10 秒然后继续，挂在含糊的 fetch failed 上）
+  {
+    const deadline = Date.now() + 40000;
+    let lastErr = '';
+    let ready = false;
+    while (Date.now() < deadline) {
+      try { await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); ready = true; break; } catch (err) { lastErr = err.message; }
+      await sleep(400);
+    }
+    if (!ready) throw new Error(`无头 Chrome 在 40 秒内没有起来（端口 ${PORT}）：${lastErr}`);
   }
   const target = await (await fetch(`http://127.0.0.1:${PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const client = await connect(target.webSocketDebuggerUrl);
@@ -401,9 +437,17 @@ async function main() {
   }
   console.log(`截图：${outDir}/shot-quicklog.png、shot-cardio.png`);
   void errors;
-  chrome.kill();
+  finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill()]);
 }
 
 armWatchdog('quicklog-check.mjs', 200);
 
-main().catch((err) => { console.error('自检失败：', err.message); process.exitCode = 1; });
+// 失败路径也必须收尾：只设 exitCode 的话进程会一直挂着（被看门狗杀掉 → 退出码又变了）
+main().catch((err, cleanup) => {
+  console.error(`自检失败：${err.message}`);
+  finishAndExit(1, Array.isArray(cleanup) ? cleanup : []);
+});
+process.on('uncaughtException', (err) => {
+  console.error(`自检异常：${err.message}`);
+  finishAndExit(1);
+});

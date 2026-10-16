@@ -9,12 +9,35 @@
  * 用法：先 `node tools/serve.mjs 4173`，再 `node tools/browser-check.mjs`
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
+
+/**
+ * 干完活之后主动退出。
+ *
+ * 为什么必须显式退出：无头浏览器和调试用的 WebSocket 连接会让 Node 的事件循环一直不空，
+ * 表现为「所有断言都通过了，进程却不结束」，最后被看门狗按超时杀掉 → 退出码非零 → CI 判失败。
+ * 这个坑同时骗过了本地和 CI 的排查（报出来的是五花八门的 fetch failed / 超时）。
+ */
+function finishAndExit(exitCode = 0, cleanup = []) {
+  for (const fn of cleanup) { try { fn(); } catch { /* 收尾失败不影响结果 */ } }
+  // 直接退出，不用定时器。
+  // 曾经写成 setTimeout(...).unref()：没有其它任务时定时器永远不触发，
+  // 进程就一直挂着（被看门狗按超时杀掉，退出码还变成非零）。这个坑骗过我和 CI 好几轮。
+  process.exit(exitCode);
+}
 import { findChrome } from './chrome-path.mjs';
+import { portAlive, freePort } from './chrome-launch.mjs';
+
+/** 清掉占用调试端口的残留进程，并等端口真的空出来 */
+async function freePortAndWait(port) {
+  if (!(await portAlive(port))) return;
+  freePort(port);
+  for (let i = 0; i < 25 && (await portAlive(port)); i++) await sleep(200);
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, '.selfcheck');
@@ -47,6 +70,24 @@ const SIZES = [
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * 等 Chrome 的调试端口真正可用（最多 30 秒）。
+ * 之前这里只读一次，失败就直接抛错 —— 遇到「上一个 Chrome 没退干净」时表现千奇百怪。
+ */
+async function waitForChromeVersion(port, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr = '';
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) return await res.json();
+      lastErr = `HTTP ${res.status}`;
+    } catch (err) { lastErr = err.message; }
+    await sleep(400);
+  }
+  throw new Error(`无头 Chrome 在 ${timeoutMs / 1000} 秒内没能响应（端口 ${port}）：${lastErr}`);
+}
+
 async function getJson(url) {
   const res = await fetch(url);
   return res.json();
@@ -58,6 +99,8 @@ function connect(wsUrl) {
     let id = 0;
     const pending = new Map();
     ws.addEventListener('open', () => resolve({
+      ws,
+      close() { try { ws.close(); } catch { /* 已经关了 */ } },
       send(method, params = {}) {
         const msgId = ++id;
         ws.send(JSON.stringify({ id: msgId, method, params }));
@@ -134,18 +177,21 @@ const DIAGNOSTIC = `(() => {
 async function main() {
   await waitForServer();
   fs.mkdirSync(outDir, { recursive: true });
+  // 先把调试端口清干净：上一次没退干净的 Chrome 会占着端口，
+  // 新实例静默失败、等待循环却连上僵尸端口 —— 表现为「只有第一个脚本能过」。
+  await freePortAndWait(PORT);
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(outDir, 'chrome-profile')}`,
     '--hide-scrollbars', 'about:blank',
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { stdio: 'ignore' });
 
   // 等调试端口起来
-  let version = null;
-  for (let i = 0; i < 40; i++) {
-    try { version = await getJson(`http://127.0.0.1:${PORT}/json/version`); break; } catch { await sleep(250); }
-  }
-  if (!version) throw new Error('无头 Chrome 没起来（调试端口没响应）');
+  // 等 Chrome 真的能响应。等不到就明确失败 —— 不要拿着坏端口继续往下跑。
+  // 注意：startPort 上的 Chrome 可能启动失败（比如 profile 目录还锁着），
+  // 所以这里每一步都带重试，并且报错要带上原因。
+  const version = await waitForChromeVersion(PORT);
+  if (!version?.Browser) throw new Error(`无头 Chrome 没起来（端口 ${PORT} 没响应）`);
   console.log('浏览器：', version.Browser);
 
   const report = { base: BASE, sizes: [] };
@@ -270,8 +316,9 @@ async function main() {
   }
 
   fs.writeFileSync(path.join(outDir, 'browser-report.json'), JSON.stringify(report, null, 2));
+  clearTimeout(hardTimer);
   printReport(report);
-  chrome.kill();
+  finishAndExit(process.exitCode || 0, [() => chrome.kill()]);
 }
 
 async function screenshot(client, file) {
@@ -312,7 +359,15 @@ function printReport(report) {
   if (problems) process.exitCode = 1;
 }
 
-armWatchdog('browser-check.mjs', 240);
+armWatchdog('browser-check.mjs', 200);
+// 兜底硬超时：脚本本身不能挂死（挂死会让 CI 判失败且看不出原因）。
+// 到点就明确失败、带走 Chrome、立刻退出。
+const HARD_TIMEOUT_MS = 150000;
+const hardTimer = setTimeout(() => {
+  console.error(`\n❌ 自检超过 ${HARD_TIMEOUT_MS / 1000} 秒未完成，判定失败（通常是浏览器没起来或页面卡住）`);
+  try { execSync('pkill -9 -f chrome-profile || true'); } catch { /* 忽略 */ }
+  process.exit(1);
+}, HARD_TIMEOUT_MS);
 
 main().catch((err) => {
   console.error('自检失败：', err.message);
