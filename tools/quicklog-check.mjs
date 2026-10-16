@@ -193,6 +193,92 @@ async function main() {
   console.log(`✅ 今天页：${todayInfo.已吃}`);
   if (!todayInfo.晚餐行 || !todayInfo.晚餐行.includes('牛肉面')) problems.push('「今天」页没有显示刚记的晚餐');
 
+  console.log('\n=== 一·五、正反馈：小植物 / 徽章 / 庆祝 ===');
+  // 回今天页，找成长入口
+  await evaluate(`document.querySelector('.tab[data-view="today"]').click()`);
+  await sleep(400);
+  const plantCard = await evaluate(`(() => {
+    const el = document.querySelector('.plant-card');
+    return el ? { 文案: el.textContent.replace(/\\s+/g, ' ').trim() } : null;
+  })()`);
+  console.log(plantCard ? `✅ 今天页有小植物入口：${plantCard.文案}` : '❌ 没有小植物入口');
+  if (!plantCard) problems.push('今天页缺少小植物入口');
+
+  await evaluate(`document.querySelector('.plant-card').click()`);
+  await sleep(700);
+  const growth = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    有植物: !!document.querySelector('.plant-box'),
+    徽章数: document.querySelectorAll('.badge-grid .ach').length,
+    已解锁: document.querySelectorAll('.badge-grid .ach.on').length,
+    有进度条: document.querySelectorAll('.badge-grid .ach-bar').length,
+    说明: (() => {
+      const txt = document.querySelector('.badge-grid')?.parentElement?.textContent || '';
+      // 我们要的是「明确声明没有少吃类徽章」，不是「出现了少吃两个字」
+      return txt.includes('没有') && txt.includes('少吃') ? '已声明不做少吃类徽章' : '缺少这句声明';
+    })(),
+  }))()`);
+  console.log(`✅ 成长弹层：「${growth.标题}」徽章 ${growth.徽章数} 个（已解锁 ${growth.已解锁}，未解锁带进度条 ${growth.有进度条} 个）`);
+  console.log(`   徽章页文案：${growth.说明}`);
+  if (growth.说明 !== '已声明不做少吃类徽章') problems.push('徽章页缺少「不做少吃类徽章」的说明');
+  if (growth.徽章数 < 10) problems.push(`徽章只有 ${growth.徽章数} 个，太少了`);
+  if (!growth.有植物) problems.push('成长弹层里没有小植物');
+
+  // 点一个未解锁的徽章，应当提示还差多少
+  const achTip = await evaluate(`(async () => {
+    // 先把之前可能还挂在屏幕上的提示条清掉，免得读到旧的
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+    const locked = document.querySelector('.badge-grid .ach:not(.on)');
+    if (!locked) return null;
+    const name = locked.querySelector('.ach-name')?.textContent || '';
+    locked.click();
+    await new Promise((r) => setTimeout(r, 400));
+    const t = [...document.querySelectorAll('.toast')].pop();
+    return { 徽章: name, 提示: t ? t.textContent.trim() : null };
+  })()`);
+  console.log(achTip ? `✅ 点未解锁徽章「${achTip.徽章}」提示：${(achTip.提示 || '').slice(0, 44)}` : '（没有未解锁的徽章可点）');
+  if (achTip && !/\d+\/\d+/.test(achTip.提示 || '')) problems.push('点未解锁徽章没有提示还差多少');
+
+  await evaluate(`document.querySelector('#sheetClose').click()`);
+  await sleep(300);
+
+  // 记一笔，看有没有「记完的反馈」提示条
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '中午吃了一碗米饭';
+    document.querySelector('#quickParse').click();
+  })()`);
+  await sleep(1200);
+  await evaluate(`document.querySelector('#draftSave')?.click()`);
+  await sleep(800);
+  const afterSave = await evaluate(`(() => {
+    const all = [...document.querySelectorAll('.toast')];
+    return all.length ? all[all.length - 1].textContent.trim() : null;
+  })()`);
+  console.log(afterSave ? `✅ 记完一笔的反馈：${afterSave}` : '❌ 记完没有反馈提示');
+  if (!afterSave) problems.push('记完一笔没有任何反馈');
+
+  // 解锁新徽章时应当弹庆祝（带彩条）
+  const celebration = await evaluate(`(() => {
+    const el = document.querySelector('.celebrate');
+    if (!el) return null;
+    return {
+      标题: el.querySelector('.celebrate-title')?.textContent || '',
+      说明: el.querySelector('.celebrate-sub')?.textContent || '',
+      彩条数: el.querySelectorAll('.confetti i').length,
+      有按钮: !!el.querySelector('#celebrateOk'),
+    };
+  })()`);
+  if (celebration) {
+    console.log(`✅ 解锁徽章弹了庆祝：「${celebration.标题}」${celebration.说明.slice(0, 26)}…（彩条 ${celebration.彩条数} 条，可关闭 ${celebration.有按钮}）`);
+    const shotCele = await client.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(outDir, 'shot-celebrate.png'), Buffer.from(shotCele.data, 'base64'));
+    await evaluate(`document.querySelector('#celebrateOk')?.click()`);
+    await sleep(300);
+  } else {
+    console.log('（这一轮没有新徽章可解锁，跳过庆祝检查）');
+  }
+
   console.log('\n=== 二、按器械换有氧动作 ===');
   await evaluate(`document.querySelector('.tab[data-view="plan"]').click()`);
   await sleep(500);

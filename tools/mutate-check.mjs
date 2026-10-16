@@ -43,6 +43,11 @@ const MUTATIONS = [
   { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
   { file: 'js/cardio.js', from: "    .filter((e) => e.equipment.some((q) => avail.has(q)))\n    .map((e) => {", to: "    .filter(() => true)\n    .map((e) => {", why: '替代动作必须是她今天能用的器械' },
   { file: 'js/ai-core.js', from: "    if (!(grams > 0) || grams > 5000) continue;", to: "    if (!(grams > -1)) continue;", why: 'AI 返回的离谱份量要被丢掉' },
+  // ── 第三轮新增：正反馈系统 ──
+  { file: 'js/achievements.js', from: 'if (t.kcal > 0 && t.protein >= goal) n += 1;', to: 'if (t.kcal > 0) n += 1;', why: '「蛋白达标」必须用她的目标判定，不能只要吃了就算达标' },
+  { file: 'js/achievements.js', from: "const level = PLANT_STAGES.reduce((acc, s, i) => (total >= s.min ? i : acc), 0);", to: "const level = PLANT_STAGES.reduce((acc, s, i) => (streak >= s.min ? i : acc), 0);", why: '小植物按累计天数生长（断档不该倒退）' },
+  { file: 'js/achievements.js', from: "  const seen = new Set(state?.achievements?.seen || []);", to: '  const seen = new Set();', why: '庆祝过的徽章不该重复弹' },
+  { file: 'js/achievements.js', from: "  if (!isMonday) return false;", to: '  if (isMonday) return false;', why: '周报只在周一弹，不是每天打扰' },
 ];
 
 let caught = 0;

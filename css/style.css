@@ -576,6 +576,135 @@ input:focus, select:focus, textarea:focus {
 details summary { outline: none; }
 details[open] summary { margin-bottom: 4px; }
 
+/* 小植物入口卡（今天页） */
+.plant-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(120deg, #F2FBF6 0%, #FFF9F7 60%);
+  border: 1px solid #E3F1EA;
+  border-radius: var(--radius);
+  padding: 13px 15px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  font-family: inherit;
+  text-align: left;
+  animation: card-in .32s cubic-bezier(.2, .8, .3, 1) both;
+}
+.plant-card:active { transform: scale(.99); }
+.plant-emoji-sm { font-size: 26px; line-height: 1; }
+.plant-text { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.plant-text b { font-size: 14px; font-weight: 680; color: var(--ink); }
+.plant-text em { font-style: normal; font-size: 11.5px; color: var(--ink-3); }
+.plant-go { font-size: 12px; color: var(--rose-deep); font-weight: 620; white-space: nowrap; }
+
+/* 成长弹层里的植物 */
+.plant-box {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  background: linear-gradient(120deg, #F2FBF6, #FFF6F8);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+.plant-emoji { font-size: 42px; line-height: 1; }
+.plant-info { flex: 1; min-width: 0; }
+.plant-name { font-size: 14.5px; font-weight: 680; margin-bottom: 3px; }
+.plant-bar { height: 6px; border-radius: 99px; background: #E7F2EC; overflow: hidden; margin: 7px 0 5px; }
+.plant-bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #9AD3B8, #7FBFA3); transition: width .5s; }
+
+/* 周报 */
+.hl { font-size: 15px; font-weight: 650; margin-bottom: 8px; }
+.week-dots { display: flex; gap: 6px; margin-top: 10px; }
+.week-dots span {
+  flex: 1;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  background: #FBF3F5;
+  border-radius: 9px;
+  padding: 6px 0;
+}
+.week-dots span.on { background: var(--grad-soft); color: var(--rose-deep); font-weight: 680; }
+
+/* 徽章墙 */
+.badge-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.ach {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 11px 6px 9px;
+  border-radius: var(--radius-sm);
+  background: #FAF6F7;
+  cursor: pointer;
+  transition: transform .15s;
+}
+.ach:active { transform: scale(.96); }
+.ach.on { background: var(--grad-soft); box-shadow: 0 2px 8px rgba(232, 106, 130, 0.12); }
+.ach-emoji { font-size: 24px; line-height: 1; filter: grayscale(1); opacity: .45; }
+.ach.on .ach-emoji { filter: none; opacity: 1; }
+.ach-name { font-size: 10.5px; color: var(--ink-2); text-align: center; line-height: 1.35; }
+.ach.on .ach-name { color: var(--rose-deep); font-weight: 620; }
+.ach-bar { width: 70%; height: 4px; border-radius: 99px; background: #EFE6E8; overflow: hidden; }
+.ach-bar > i { display: block; height: 100%; background: #E4B9C4; border-radius: 99px; }
+
+/* 庆祝动画 */
+.celebrate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(58, 46, 51, 0.42);
+  backdrop-filter: blur(2px);
+  opacity: 1;
+  transition: opacity .24s;
+}
+.celebrate.out { opacity: 0; }
+.celebrate-card {
+  width: min(310px, 84vw);
+  background: #fff;
+  border-radius: 24px;
+  padding: 26px 22px 18px;
+  text-align: center;
+  box-shadow: 0 18px 50px rgba(120, 60, 80, 0.28);
+  animation: pop .34s cubic-bezier(.2, 1.3, .5, 1) both;
+}
+@keyframes pop {
+  from { transform: scale(.86); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.celebrate-emoji { font-size: 54px; line-height: 1; margin-bottom: 10px; animation: bob 1.6s ease-in-out infinite; }
+@keyframes bob {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-6px) rotate(3deg); }
+}
+.celebrate-title { font-size: 18px; font-weight: 720; margin-bottom: 6px; }
+.celebrate-sub { font-size: 13px; color: var(--ink-2); line-height: 1.65; margin-bottom: 18px; }
+/* 彩条 */
+.confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.confetti i {
+  position: absolute;
+  top: -12px;
+  left: calc(var(--x) * 1%);
+  width: 8px; height: 13px;
+  border-radius: 2px;
+  background: hsl(calc(var(--i) * 26), 78%, 68%);
+  animation: fall 2.6s linear infinite;
+  animation-delay: var(--d);
+  opacity: .95;
+}
+@keyframes fall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(105vh) rotate(540deg); opacity: .9; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .celebrate-emoji, .confetti i { animation: none; }
+}
+
 /* 日历 */
 .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
 .cal-week span { text-align: center; font-size: 11px; color: var(--ink-3); }

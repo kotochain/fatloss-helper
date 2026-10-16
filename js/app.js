@@ -20,6 +20,10 @@ import {
 } from './ai.js';
 import { PRESETS, findPreset } from './providers.js';
 import {
+  achievements, plantState, weeklyReview, weeklyHighlight, afterLogMessage,
+  markAchievementsSeen, shouldShowWeekly,
+} from './achievements.js';
+import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
 } from './cardio.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
@@ -178,6 +182,7 @@ function bindCommon() {
 function handleAction(act, data) {
   switch (act) {
     case 'add-food': return openFoodSheet(data.meal);
+    case 'growth': return openGrowthSheet();
     case 'go-log':
       view = 'log';
       document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
@@ -294,6 +299,7 @@ function renderToday() {
   const settled = remaining < 0;      // 超了就把圆环走满
   const streak = streakDays(state);
   const exerciseMin = day.exercises.reduce((a, x) => a + x.minutes, 0);
+  const plant = { state: plantState(state), ach: achievements(state, t.proteinG) };
   const macros = diff.filter((d) => d.key !== 'kcal');
 
   app.innerHTML = `
@@ -337,9 +343,18 @@ function renderToday() {
       <div class="stats">
         ${streak > 1 ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>连续记录 <b>${streak}</b> 天</span>` : ''}
         ${exerciseMin ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-today"/></svg>今天运动 <b>${exerciseMin}</b> 分钟</span>` : ''}
-        <span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-pin"/></svg>蛋白达标 <b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
+        <span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-pin"/></svg>蛋白 <b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
       </div>
     </div>
+
+    <button class="plant-card" data-act="growth">
+      <span class="plant-emoji-sm">${plant.state.stage.emoji}</span>
+      <span class="plant-text">
+        <b>${esc(plant.state.stage.name)}</b>
+        <em>${plant.ach.unlocked.length} 个徽章 · ${plant.state.nextStage ? `再记 ${plant.state.toNext} 天长大` : '已长成'}</em>
+      </span>
+      <span class="plant-go">看成长 ›</span>
+    </button>
 
     ${tip ? `<div class="warn info">${tip}</div>` : ''}
 
@@ -658,6 +673,7 @@ function drawDraft() {
     box.querySelectorAll('#draftMeal .chip').forEach((c) => c.classList.toggle('on', c === b));
   });
   $('#draftSave', box)?.addEventListener('click', () => {
+    const savedMeal = draft.meal;
     for (const it of draft.items) {
       addFoodEntry(state, dateKey, draft.meal, {
         id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -676,7 +692,11 @@ function drawDraft() {
     draft = null;
     closeSheet();
     render();
-    toast(`记上了 ${n} 条，可以随时改份量`);
+    // 先给一句落在「记录」这件事上的反馈，再检查有没有解锁新徽章
+    const t = targets();
+    const msg = afterLogMessage(state, savedMeal, t?.proteinG || 60);
+    toast(`${msg.emoji} ${msg.text}`);
+    checkNewAchievements();
   });
   $('#draftCancel', box)?.addEventListener('click', () => {
     draft = null;
@@ -1048,7 +1068,8 @@ function renderProgress() {
     if (state.profile) state.profile.weightKg = v; // 体重变了，目标跟着重算
     save();
     render();
-    toast('已记录，目标热量按新体重重算了。');
+    toast('记上了。目标热量会跟着新体重重算。');
+    checkNewAchievements();
   }
 }
 
@@ -1185,6 +1206,7 @@ function openExerciseSheet() {
         save();
         closeSheet();
         render();
+        checkNewAchievements();
       });
     },
   });
@@ -1237,6 +1259,111 @@ function openCustomFoodSheet() {
         document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
         render();
         toast('已保存，之后在「记录」和搜索里都能找到。');
+        checkNewAchievements();
+      });
+    },
+  });
+}
+
+/* ── 庆祝：彩条 + 一句话 ─────────────────────
+   只在真的解锁新徽章时放，而且要能关掉（有人不喜欢动画）。
+   ─────────────────────────────────────────── */
+
+function celebrate({ emoji, title, sub, badge }) {
+  if (state?.settings?.celebrations === false) return;
+  const el = document.createElement('div');
+  el.className = 'celebrate';
+  el.innerHTML = `
+    <div class="confetti">${Array.from({ length: 14 }, (_, i) => `<i style="--i:${i};--x:${(i * 37) % 100};--d:${(i % 5) * 0.12}s"></i>`).join('')}</div>
+    <div class="celebrate-card">
+      <div class="celebrate-emoji">${badge || emoji || '🎉'}</div>
+      <div class="celebrate-title">${esc(title || '解锁了一个徽章')}</div>
+      ${sub ? `<div class="celebrate-sub">${esc(sub)}</div>` : ''}
+      <button class="btn block" id="celebrateOk">好</button>
+    </div>`;
+  document.body.appendChild(el);
+  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 240); };
+  el.querySelector('#celebrateOk').addEventListener('click', close);
+  el.addEventListener('click', (e) => { if (e.target === el) close(); });
+  setTimeout(close, 6000);
+}
+
+/**
+ * 检查有没有刚解锁的徽章，有就庆祝一次（同一个徽章只庆祝一次）。
+ * 放在记完一笔、记完体重、记完运动之后调用。
+ */
+function checkNewAchievements() {
+  const t = targets();
+  const a = achievements(state, t?.proteinG || 60);
+  if (!a.justUnlocked.length) return;
+  const first = a.justUnlocked[0];
+  markAchievementsSeen(state, a.justUnlocked.map((x) => x.id));
+  save();
+  celebrate({
+    badge: first.emoji,
+    title: first.name,
+    sub: first.congrats,
+  });
+}
+
+/* ── 弹层：成长（成就墙 + 小植物 + 周报）───── */
+
+function openGrowthSheet() {
+  const t = targets();
+  const a = achievements(state, t?.proteinG || 60);
+  const plant = plantState(state);
+  const review = weeklyReview(state, { proteinTarget: t?.proteinG || 60, calorieTarget: t?.targetCalories || 1500 });
+  const hl = weeklyHighlight(review);
+  const showWeekly = shouldShowWeekly(state);
+  const recent = a.unlocked.slice(-6).reverse();
+
+  openSheet({
+    title: '我的成长',
+    body: `
+      <div class="plant-box">
+        <div class="plant-emoji">${plant.stage.emoji}</div>
+        <div class="plant-info">
+          <div class="plant-name">${esc(plant.stage.name)}</div>
+          <div class="tiny muted">${esc(plant.line)}</div>
+          <div class="plant-bar"><i style="width:${plant.nextStage ? Math.min(100, Math.round((plant.total / plant.nextStage.min) * 100)) : 100}%"></i></div>
+          <div class="tiny muted">${plant.nextStage ? `再记 ${plant.toNext} 天，就会${esc(plant.nextStage.name)}` : '已经长到最大了 🌳'}</div>
+        </div>
+      </div>
+
+      ${showWeekly ? `
+        <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFCFC;border:1px solid var(--line)">
+          <div class="card-title">这周的小结</div>
+          <div class="hl">${hl.emoji} <b>${esc(hl.text)}</b></div>
+          ${review.lines.map((l) => `<div class="small muted" style="margin:4px 0">· ${esc(l)}</div>`).join('')}
+          <div class="week-dots">
+            ${review.days.map((d) => `<span class="${d.logged ? 'on' : ''}" title="${d.date}">${d.date.slice(-2)}</span>`).join('')}
+          </div>
+        </div>` : ''}
+
+      <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFCFC;border:1px solid var(--line)">
+        <div class="card-title">徽章墙 <span class="tiny muted">${a.unlocked.length} / ${a.list.length}</span></div>
+        <div class="badge-grid">
+          ${a.list.map((x) => `
+            <div class="ach ${x.unlocked ? 'on' : ''}" data-ach="${x.id}">
+              <span class="ach-emoji">${x.unlocked ? x.emoji : '🔒'}</span>
+              <span class="ach-name">${esc(x.name)}</span>
+              ${x.unlocked ? '' : `<span class="ach-bar"><i style="width:${x.pct}%"></i></span>`}
+            </div>`).join('')}
+        </div>
+        <p class="tiny muted" style="margin:10px 0 0">
+          徽章只跟「记录、吃够蛋白、动起来」有关 —— 我们没有"少吃几天"这种徽章，那类目标长期是有害的。
+        </p>
+      </div>
+
+      ${recent.length ? `
+        <div class="small muted" style="text-align:center;margin-top:10px">最近拿到：${recent.map((x) => x.emoji + x.name).join('、')}</div>` : ''}`,
+    onMount: (body) => {
+      body.querySelectorAll('[data-ach]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const x = a.list.find((y) => y.id === el.dataset.ach);
+          if (!x) return;
+          toast(x.unlocked ? `${x.emoji} ${x.congrats}` : `${x.hint}（${x.value}/${x.target}）`);
+        });
       });
     },
   });
@@ -1731,6 +1858,7 @@ function openWeightSheet() {
         save();
         closeSheet();
         render();
+        checkNewAchievements();
       });
     },
   });

@@ -12,6 +12,8 @@ export function emptyState() {
     days: {},
     customFoods: [],
     weights: [],
+    // 成长记录：已庆祝过的徽章、上次看周报的日期
+    achievements: { seen: [], lastWeeklyAt: null },
   };
 }
 
@@ -27,6 +29,10 @@ export function migrate(raw) {
     days: raw.days && typeof raw.days === 'object' ? raw.days : {},
     customFoods: Array.isArray(raw.customFoods) ? raw.customFoods : [],
     weights: Array.isArray(raw.weights) ? raw.weights : [],
+    achievements: {
+      seen: Array.isArray(raw.achievements?.seen) ? raw.achievements.seen : [],
+      lastWeeklyAt: raw.achievements?.lastWeeklyAt || null,
+    },
   };
 }
 
