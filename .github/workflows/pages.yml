@@ -23,12 +23,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: 打包要发布的内容（只发应用本体，不发测试和工具）
         run: |
           mkdir -p _site
           cp -r index.html sw.js manifest.webmanifest css js icons _site/
+      # enablement: true —— 即使仓库还没手工开通 Pages，也让它自动开通。
+      # （第一次发布就是因为没开通而失败的）
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
