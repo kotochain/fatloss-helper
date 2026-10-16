@@ -12,10 +12,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readApiKey, aiConfig, buildSystemPrompt, callUpstream, normalizeResult } from '../tools/ai-proxy.mjs';
+import { readApiKey, aiConfig, aiConfigStatus, buildSystemPrompt, callUpstream, normalizeResult } from '../tools/ai-proxy.mjs';
 import { parseDescription, normalizeAiItems, selfTestParser, GOLDEN_CASES } from '../js/mealparse.js';
 
-const CONFIG = { baseUrl: 'https://example.invalid', model: 'test-model', key: 'sk-fake-for-test' };
+const CONFIG = { baseUrl: 'https://example.invalid', model: 'test-model', key: 'sk-fake-for-test' /* secret-scan:allow 假密钥 */ };
 
 function fakeFetch(response, capture = {}) {
   return async (url, init) => {
@@ -146,15 +146,19 @@ test('密钥读取：环境变量优先，其次是密钥文件；都没有就�
   Object.assign(process.env, saved);
 });
 
-test('aiConfig 绝不把密钥放进返回内容（否则会漏到手机端）', () => {
+test('给手机看的状态里绝不包含密钥（aiConfig 内部含密钥，但不下发）', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-cfg-'));
   fs.mkdirSync(path.join(tmp, 'data'), { recursive: true });
-  fs.writeFileSync(path.join(tmp, 'data', 'ai-key.txt'), 'sk-secret-should-not-leak');
+  fs.writeFileSync(path.join(tmp, 'data', 'ai-key.txt'), 'sk-secret-should-not-leak' /* secret-scan:allow 假密钥 */);
   const cfg = aiConfig(tmp);
-  const json = JSON.stringify(cfg);
-  assert.ok(!json.includes('sk-secret-should-not-leak'), '配置对象里泄露了密钥');
   assert.equal(cfg.configured, true);
   assert.ok(cfg.from.endsWith('ai-key.txt'));
+
+  // 真正会发给手机的只有这个状态对象，它必须是掩码
+  const status = aiConfigStatus(tmp);
+  const json = JSON.stringify(status);
+  assert.ok(!json.includes('sk-secret-should-not-leak' /* secret-scan:allow 假密钥 */), '状态接口里泄露了密钥');
+  assert.equal(status.configured, true);
 });
 
 test('提示词要求模型只输出 JSON、且明确份量参考值', () => {

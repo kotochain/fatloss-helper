@@ -17,7 +17,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { aiConfig, callUpstream, readApiKey } from './ai-proxy.mjs';
+import {
+  aiConfig, callUpstream, readApiKey, aiConfigStatus, saveConfigFromInput,
+  clearSavedConfig, testConnection,
+} from './ai-proxy.mjs';
+import { PRESETS } from '../js/providers.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.argv[2] || 4173);
@@ -45,11 +49,65 @@ export function createServer() {
     const url = new URL(req.url, 'http://localhost');
     let pathname = decodeURIComponent(url.pathname);
 
-    // AI 是否已配置（只回状态，绝不回密钥本身）
+    // AI 是否已配置（只回状态与掩码，绝不回密钥本身）
     if (pathname === '/api/ai-status') {
-      const cfg = aiConfig(root);
-      const payload = { configured: cfg.configured, model: cfg.model, from: cfg.from };
-      return send(res, 200, JSON.stringify(payload), TYPES['.json']);
+      const st = aiConfigStatus(root);
+      return send(res, 200, JSON.stringify({
+        configured: st.configured, model: st.model, from: st.from, source: st.source,
+      }), TYPES['.json']);
+    }
+
+    // 设置页需要的全部信息：当前状态 + 服务商预设（预设里没有密钥，只有公开的接口地址）
+    if (pathname === '/api/ai-config' && req.method === 'GET') {
+      const st = aiConfigStatus(root);
+      return send(res, 200, JSON.stringify({
+        ...st,
+        presets: PRESETS.map((p) => ({
+          id: p.id, name: p.name, baseUrl: p.baseUrl, model: p.model,
+          note: p.note, keyUrl: p.keyUrl, recommended: Boolean(p.recommended),
+          allowEmptyKey: Boolean(p.allowEmptyKey),
+        })),
+      }), TYPES['.json']);
+    }
+
+    // 保存设置（先校验格式，再由 app.js 决定要不要先测连通）
+    if (pathname === '/api/ai-config' && req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 20000) req.destroy(); });
+      req.on('end', () => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 下面统一报错 */ }
+        const out = saveConfigFromInput(body, root);
+        if (!out.ok) {
+          return send(res, 400, JSON.stringify({ error: out.problems.join('；'), problems: out.problems }), TYPES['.json']);
+        }
+        console.log(`[AI] 设置已保存：${out.config.baseUrl} · ${out.config.model} · 密钥 ${out.masked}（文件权限 ${out.mode}）`);
+        // 注意：返回里只有掩码，绝不回传密钥
+        return send(res, 200, JSON.stringify({
+          ok: true, file: out.file, mode: out.mode, saved: { ...out.config, apiKey: undefined, keyMasked: out.masked },
+        }), TYPES['.json']);
+      });
+      return;
+    }
+
+    // 清空设置
+    if (pathname === '/api/ai-config' && req.method === 'DELETE') {
+      const removed = clearSavedConfig();
+      const st = aiConfigStatus(root);
+      return send(res, 200, JSON.stringify({
+        ok: true, removed, configured: st.configured, from: st.from,
+      }), TYPES['.json']);
+    }
+
+    // 连通性测试
+    if (req.method === 'POST' && pathname === '/api/ai-config/test') {
+      testConnection().then((r) => {
+        console.log(`[AI] 连通测试：${r.ok ? '成功' : `失败 —— ${r.error}`}`);
+        send(res, r.ok ? 200 : 400, JSON.stringify(r), TYPES['.json']);
+      }).catch((err) => {
+        send(res, 500, JSON.stringify({ ok: false, error: err.message }), TYPES['.json']);
+      });
+      return;
     }
 
     // 饮食描述解析：密钥留在这台电脑上，手机只知道这个本地地址
@@ -62,13 +120,15 @@ export function createServer() {
         const text = typeof body.text === 'string' ? body.text.trim().slice(0, 500) : '';
         if (!text) return send(res, 400, JSON.stringify({ error: '没有收到要解析的内容' }), TYPES['.json']);
 
-        const found = readApiKey(root);
-        if (!found) {
+        // 注意：这里必须用 aiConfig（它包含「手机上保存的配置」），
+        // 不能用 readApiKey（那只认环境变量和密钥文件）—— 否则会出现
+        // 「设置页显示保存成功、解析却还说没配密钥」这种自相矛盾的情况。
+        const cfg = aiConfig(root);
+        if (!cfg.configured || !cfg.key) {
           return send(res, 503, JSON.stringify({
-            error: '这台电脑上还没配置 AI 密钥。看 README 的「接上 AI」一节，三条命令就能配好。',
+            error: '这台电脑上还没配置 AI 密钥。在「记录」页右上角点「AI 设置」填一下就行。',
           }), TYPES['.json']);
         }
-        const cfg = { ...aiConfig(root), key: found.key };
         try {
           const result = await callUpstream({ text, meal: body.meal || null, hour: body.hour, config: cfg });
           console.log(`[AI] 「${text.slice(0, 30)}」→ ${result.items.length} 条${result.questions.length ? `，追问 ${result.questions.length} 个` : ''}`);
@@ -138,16 +198,17 @@ if (isMain) {
       console.log(`  手机打开：  http://${ip}:${port}/   （手机需连同一个 Wi-Fi）`);
     }
     console.log('\n  手机上第一次打开后：浏览器菜单 →「添加到主屏幕」，之后就像 App 一样用。');
-    const cfg = aiConfig(root);
-    if (cfg.configured) {
-      console.log(`\n  AI 解析：已启用（密钥来自 ${cfg.from}，模型 ${cfg.model}）`);
+    const st = aiConfigStatus(root);
+    if (st.configured) {
+      console.log(`\n  AI 解析：已启用（${st.from}｜模型 ${st.model}）`);
       console.log('  她说「今天食堂吃了碗面」，由这台电脑代问 AI，密钥不会发到手机上。');
     } else {
       console.log('\n  AI 解析：未配置 —— 现在用离线规则解析（常见说法能认）。');
-      console.log('  想启用 AI：在终端里执行下面一行，然后重新启动本服务：');
-      console.log('    echo "你的密钥" > ~/.dsh/fatloss-ai-key && chmod 600 ~/.dsh/fatloss-ai-key');
-      console.log('  密钥文件在你自己电脑的用户目录里，不在项目目录，永远不会被提交到版本库。');
+      console.log('  两种配置方式，任选：');
+      console.log('   ① 手机上进「记录」页 → 右上角「AI 设置」，选服务商、贴密钥即可（推荐，密钥不进手机）');
+      console.log('   ② 命令行：echo "你的密钥" > ~/.dsh/fatloss-ai-key && chmod 600 ~/.dsh/fatloss-ai-key');
     }
+    if (st.configFile) console.log(`  配置文件：${st.configFile}（权限 600，只有本人可读，不在项目目录里）`);
     console.log('\n  按 Ctrl+C 停止。\n');
   });
 }

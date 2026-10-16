@@ -32,7 +32,15 @@ const walk = (dir) => {
     if (entry.isDirectory()) { walk(full); continue; }
     if (!/\.(js|mjs|json|md|html|txt|yml|yaml)$/.test(entry.name)) continue;
     const text = fs.readFileSync(full, 'utf8');
-    for (const m of text.matchAll(/sk-[A-Za-z0-9_-]{16,}/g)) hits.push({ file: path.relative(root, full), key: m[0] });
+    // 测试夹具需要假密钥。豁免要显式写在那一行上（// secret-scan:allow），
+    // 这样审查时一眼能看到哪些是刻意放进去的，而不是靠放宽规则蒙过去。
+    const lines = text.split('\n');
+    for (const [i, line] of lines.entries()) {
+      if (line.includes('secret-scan:allow')) continue;
+      for (const m of line.matchAll(/sk-[A-Za-z0-9_-]{16,}/g)) {
+        hits.push({ file: `${path.relative(root, full)}:${i + 1}`, key: m[0] });
+      }
+    }
   }
 };
 walk(root);

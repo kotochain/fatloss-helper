@@ -52,6 +52,58 @@ export async function askAi(text, ctx = {}, timeoutMs = 25000) {
   }
 }
 
+/** 读设置页需要的信息（当前状态 + 服务商预设；服务端只回掩码，不回密钥） */
+export async function loadAiConfig(timeoutMs = 4000) {
+  try {
+    const res = await fetch('/api/ai-config', { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return { ok: false, error: `服务返回 ${res.status}` };
+    return { ok: true, data: await res.json() };
+  } catch {
+    return { ok: false, error: '连不上解析服务（电脑上的服务没开，或者手机不在同一个 Wi-Fi）' };
+  }
+}
+
+/** 保存设置。密钥只发给本机服务，不发给 AI 厂商，也不留在手机里 */
+export async function saveAiConfig(input, timeoutMs = 8000) {
+  try {
+    const res = await fetch('/api/ai-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error || `保存失败（${res.status}）` };
+    return { ok: true, data };
+  } catch {
+    return { ok: false, error: '保存失败：连不上电脑上的服务' };
+  }
+}
+
+/** 清空设置在电脑上保存的密钥 */
+export async function clearAiConfig(timeoutMs = 8000) {
+  try {
+    const res = await fetch('/api/ai-config', { method: 'DELETE', signal: AbortSignal.timeout(timeoutMs) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error || `清除失败（${res.status}）` };
+    return { ok: true, data };
+  } catch {
+    return { ok: false, error: '清除失败：连不上电脑上的服务' };
+  }
+}
+
+/** 让电脑代测一下能不能连上服务商 */
+export async function testAiConnection(timeoutMs = 30000) {
+  try {
+    const res = await fetch('/api/ai-config/test', { method: 'POST', signal: AbortSignal.timeout(timeoutMs) });
+    const data = await res.json().catch(() => ({}));
+    return res.ok ? { ok: true, ...data } : { ok: false, error: data.error || `测试失败（${res.status}）` };
+  } catch (err) {
+    const msg = err?.name === 'TimeoutError' ? '测试超时（等了 30 秒）' : '连不上电脑上的服务';
+    return { ok: false, error: msg };
+  }
+}
+
 /** 是否需要问「大概多大碗」这类追问：AI 说需要、或本地判断需要 */
 export function needsPortionQuestion(items) {
   return items.some((it) => it.needsConfirm || it.portionUnclear);

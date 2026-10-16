@@ -100,6 +100,21 @@ async function main() {
   const ready = await evaluate(`window.__appReady === true`);
   if (!ready) problems.push('页面没启动（白屏）');
 
+  // 接口请求不能被离线缓存接管（否则设置页读到的永远是旧状态）
+  const apiNotCached = await evaluate(`(async () => {
+    await fetch('/api/ai-status').catch(() => {});
+    const names = await caches.keys();
+    let hits = 0;
+    for (const n of names) {
+      const c = await caches.open(n);
+      const keys = await c.keys();
+      hits += keys.filter((r) => new URL(r.url).pathname.startsWith('/api/')).length;
+    }
+    return hits;
+  })()`);
+  console.log(apiNotCached === 0 ? '✅ 接口请求没有被离线缓存接管' : `❌ 有 ${apiNotCached} 个 /api 请求被缓存了`);
+  if (apiNotCached !== 0) problems.push('/api 请求被离线缓存接管，设置页会读到旧状态');
+
   console.log('\n=== 一、「说一句就记上」 ===');
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
   await sleep(400);

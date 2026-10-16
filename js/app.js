@@ -14,7 +14,7 @@ import {
   parseDescription, normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
   gramsFromText, portionGrams,
 } from './mealparse.js';
-import { askAi, aiStatus } from './ai.js';
+import { askAi, aiStatus, loadAiConfig, saveAiConfig, clearAiConfig, testAiConnection } from './ai.js';
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
 } from './cardio.js';
@@ -364,7 +364,9 @@ function renderLog() {
   app.innerHTML = `
     <div class="card">
       <div class="card-title">说一句就记上
-        <span class="tag ${ai.configured ? 'green' : ''}">${!ai.checked ? '检查中' : ai.configured ? 'AI 已启用' : '离线识别'}</span>
+        <button class="btn ghost" id="aiSettingsBtn" style="padding:3px 10px;font-size:12px">
+          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已启用 ⚙' : 'AI 设置 ⚙'}
+        </button>
       </div>
       <p class="small muted" style="margin:0 0 8px">
         像跟人说话一样写就行，例如「今天中午在食堂吃了碗牛肉面，加了个蛋」「晚上吃了半份麻辣烫」。
@@ -433,6 +435,7 @@ function renderLog() {
   });
   $('#customFoodBtn').addEventListener('click', () => openCustomFoodSheet());
   bindQuickLog();
+  $('#aiSettingsBtn')?.addEventListener('click', openAiSettingsSheet);
   app.querySelectorAll('[data-act="quick-add"]').forEach((el) => {
     el.addEventListener('click', () => {
       const food = [...state.customFoods, ...FOODS].find((f) => f.id === el.dataset.id);
@@ -1161,6 +1164,150 @@ function openCustomFoodSheet() {
         toast('已保存，之后在「记录」和搜索里都能找到。');
       });
     },
+  });
+}
+
+/* ── 弹层：AI 设置 ─────────────────────────
+   设计要点：密钥从手机发到「你这台电脑上的服务」，由电脑保存（权限 600）。
+   手机自己不保存密钥，服务端也从不把密钥回传给手机 —— 手机丢了也不会泄露账号。
+   ─────────────────────────────────────────── */
+
+async function openAiSettingsSheet() {
+  openSheet({
+    title: 'AI 设置',
+    body: '<div class="empty">正在读取当前设置…</div>',
+    onMount: async () => {
+      const res = await loadAiConfig();
+      if (!res.ok) {
+        openSheet({
+          title: 'AI 设置',
+          body: `<div class="warn">${esc(res.error)}</div>
+            <p class="small muted">AI 设置需要电脑上的服务在运行（就是启动 <code>node tools/serve.mjs</code> 的那个窗口），
+            并且手机和电脑连同一个 Wi-Fi。没配也能用，记录时会走内置的离线识别。</p>`,
+        });
+        return;
+      }
+      drawAiSettings(res.data);
+    },
+  });
+}
+
+function drawAiSettings(data) {
+  const saved = data.saved || {};
+  const current = saved.configured ? saved : null;
+  const body = `
+    <div class="warn info">
+      密钥保存在<b>你这台电脑</b>上（文件权限 600），<b>不保存在她手机里、也不在网页里</b>。
+      之后她手机只把「吃了什么」发给电脑，由电脑去问 AI。
+    </div>
+
+    <label class="field"><span>选一个服务商</span>
+      <div class="chips" id="presetChips">
+        ${data.presets.map((p) => `
+          <button class="chip ${((saved.presetId || 'deepseek') === p.id) ? 'on' : ''}" data-preset="${p.id}">
+            ${esc(p.name)}${p.recommended ? ' ★' : ''}
+          </button>`).join('')}
+      </div>
+    </label>
+
+    <div id="presetNote" class="small muted" style="margin:-4px 0 12px"></div>
+
+    <label class="field"><span>接口地址</span>
+      <input type="text" id="aiBaseUrl" value="${esc(saved.baseUrl || '')}" placeholder="https://api.deepseek.com">
+    </label>
+    <label class="field"><span>模型名</span>
+      <input type="text" id="aiModel" value="${esc(saved.model || '')}" placeholder="deepseek-chat">
+    </label>
+    <label class="field"><span>密钥${current ? '（已保存，留空则不改）' : ''}</span>
+      <input type="text" id="aiKey" placeholder="${current ? esc(current.keyMasked) : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </label>
+
+    <div id="aiSettingsMsg"></div>
+
+    ${current ? `<div class="small muted">当前生效：${esc(current.presetName || '')} · ${esc(current.model || '')} · 密钥 ${esc(current.keyMasked || '')}
+      ${current.updatedAt ? `<br>更新于 ${esc(String(current.updatedAt).slice(0, 16).replace('T', ' '))}` : ''}</div>` : ''}
+    ${data.source === 'env' ? '<div class="warn">注意：现在生效的是命令行里配置的密钥，不是这里保存的。在这里保存一份会优先使用这里的。</div>' : ''}
+    <p class="tiny muted" style="margin-top:8px">
+      配置文件：${esc(data.configFile || '')}（在项目目录之外，不会被提交到版本库）
+    </p>`;
+
+  const foot = `
+    <button class="btn block" id="aiSave">保存并测试连通</button>
+    <div class="btn-row">
+      <button class="btn ghost grow" id="aiTest">只测当前连通</button>
+      ${current ? '<button class="btn ghost grow" id="aiClear">清除密钥</button>' : ''}
+    </div>`;
+
+  openSheet({ title: 'AI 设置', body, foot });
+  const bodyEl = $('#sheetBody');
+  const msg = $('#aiSettingsMsg');
+
+  // 预设文案与自动填地址/模型
+  const applyPreset = (id, { overwrite = true } = {}) => {
+    const p = data.presets.find((x) => x.id === id);
+    if (!p) return;
+    $('#presetNote').innerHTML = `${esc(p.note)}${p.keyUrl ? ` <a href="${esc(p.keyUrl)}" target="_blank" rel="noopener">去拿密钥 →</a>` : ''}`;
+    if (overwrite) {
+      if (p.baseUrl) $('#aiBaseUrl').value = p.baseUrl;
+      if (p.model) $('#aiModel').value = p.model;
+      $('#aiKey').placeholder = p.allowEmptyKey ? '本地模型随便填，例如 ollama' : '粘贴服务商的 API Key';
+    }
+  };
+  const initialPreset = saved.presetId || 'deepseek';
+  applyPreset(initialPreset, { overwrite: false });
+
+  bodyEl.querySelectorAll('#presetChips .chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      bodyEl.querySelectorAll('#presetChips .chip').forEach((c) => c.classList.toggle('on', c === chip));
+      applyPreset(chip.dataset.preset);
+    });
+  });
+
+  const collect = () => ({
+    presetId: bodyEl.querySelector('#presetChips .chip.on')?.dataset.preset || 'custom',
+    baseUrl: $('#aiBaseUrl').value.trim(),
+    model: $('#aiModel').value.trim(),
+    apiKey: $('#aiKey').value.trim(),
+  });
+
+  const show = (html, kind = 'info') => {
+    msg.className = `warn ${kind}`;
+    msg.innerHTML = html;
+  };
+
+  $('#aiSave').addEventListener('click', async () => {
+    const input = collect();
+    if (!input.baseUrl || !input.model) return show('接口地址和模型名要填。', '');
+    if (!input.apiKey && !current) return show('密钥还没填。', '');
+    show('正在保存并测试…', 'info');
+    const saveRes = await saveAiConfig(input);
+    if (!saveRes.ok) return show(esc(saveRes.error), '');
+    const testRes = await testAiConnection();
+    if (testRes.ok) {
+      show(`✅ 保存成功，连通正常（${esc(testRes.model)} 回复：${esc(testRes.reply || '正常')}）<br>现在她可以随便怎么描述都行了。`, 'info');
+      ai = { configured: true, checked: true, reason: null };
+      render();
+    } else {
+      show(`设置已保存，但连通测试失败：<b>${esc(testRes.error)}</b><br>请检查密钥、模型名、接口地址。在修好之前会继续用离线识别。`, '');
+      ai = { configured: false, checked: true, reason: testRes.error };
+      render();
+    }
+  });
+
+  $('#aiTest')?.addEventListener('click', async () => {
+    show('正在测试…（最多 20 秒）', 'info');
+    const r = await testAiConnection();
+    if (r.ok) show(`✅ 连通正常（${esc(r.model)} 回复：${esc(r.reply || '正常')}）`, 'info');
+    else show(`❌ ${esc(r.error)}`, '');
+  });
+
+  $('#aiClear')?.addEventListener('click', async () => {
+    if (!confirm('清除在这台电脑上保存的 AI 密钥？清除后会退回离线识别。')) return;
+    const r = await clearAiConfig();
+    if (!r.ok) return show(esc(r.error), '');
+    ai = { configured: Boolean(r.data.configured), checked: true, reason: null };
+    show('已清除。现在走离线识别。', 'info');
+    setTimeout(() => { closeSheet(); render(); }, 800);
   });
 }
 

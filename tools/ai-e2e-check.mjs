@@ -12,6 +12,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,7 +24,7 @@ const APP_PORT = 4199;
 const CDP_PORT = 9338;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const fakeKeyFile = path.join(root, '.selfcheck', 'fake-ai-key');
+const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-e2e-cfg-'));
 let upstreamRequests = 0;
 
 /** 假上游：按 OpenAI 兼容格式返回，内容针对输入做区分 */
@@ -77,19 +78,20 @@ function connect(wsUrl) {
 
 async function main() {
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(fakeKeyFile, 'sk-e2e-fake-key-for-testing\n');
 
   const fakeAi = startFakeAi();
   await new Promise((r) => fakeAi.listen(FAKE_AI_PORT, '127.0.0.1', r));
 
-  // 启动转发服务：密钥文件指向假密钥，上游指向假 AI
+  // 启动转发服务：不预置任何密钥，配置全部由「界面设置」流程写入（这才是真实用法）
   const serve = spawn(process.execPath, ['tools/serve.mjs', String(APP_PORT)], {
     cwd: root,
     env: {
       ...process.env,
-      AI_API_KEY: 'sk-e2e-fake-key-for-testing',
-      AI_BASE_URL: `http://127.0.0.1:${FAKE_AI_PORT}`,
-      AI_MODEL: 'fake-model',
+      FATLOSS_CONFIG_DIR: cfgDir,
+      AI_API_KEY: '',
+      DEEPSEEK_API_KEY: '',
+      AI_BASE_URL: '',
+      AI_MODEL: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -102,9 +104,9 @@ async function main() {
     try { await (await fetch(`${BASE}/api/ai-status`)).json(); break; } catch { await sleep(250); }
   }
   const status = await (await fetch(`${BASE}/api/ai-status`)).json();
-  console.log('AI 状态：', JSON.stringify(status));
+  console.log('初始 AI 状态：', JSON.stringify(status));
   const problems = [];
-  if (!status.configured) problems.push('转发服务没有认出密钥，AI 状态是未配置');
+  if (status.configured) problems.push('一开始就是已配置状态，说明没隔离干净（应当由界面设置写入）');
 
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -142,17 +144,64 @@ async function main() {
   await client.send('Page.navigate', { url: BASE + '/' });
   await sleep(1500);
 
-  // 界面上应该显示「AI 已启用」
+  // 界面上应该显示「AI 设置」
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
   await sleep(600);
+
+  console.log('\n=== 一、在界面上配置 AI（模拟用户自己填） ===');
+  const beforeTag = await evaluate(`document.querySelector('#aiSettingsBtn')?.textContent.trim()`);
+  console.log('设置前按钮文案：', beforeTag);
+  await evaluate(`document.querySelector('#aiSettingsBtn').click()`);
+  await sleep(1200);
+  const sheet = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    预设数: document.querySelectorAll('#presetChips .chip').length,
+    有地址框: !!document.querySelector('#aiBaseUrl'),
+    有模型框: !!document.querySelector('#aiModel'),
+    有密钥框: !!document.querySelector('#aiKey'),
+  }))()`);
+  console.log('设置弹层：', JSON.stringify(sheet));
+  // 设置弹层本身就是交付物的一部分，先截一张（在填写之前，展示预设列表）
+  const shotSheet = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-ai-settings.png'), Buffer.from(shotSheet.data, 'base64'));
+  if (!sheet.有地址框 || !sheet.有模型框 || !sheet.有密钥框) problems.push('设置弹层缺少输入框');
+  if (sheet.预设数 < 5) problems.push(`服务商预设只有 ${sheet.预设数} 个`);
+
+  // 选「自定义」，填成本机假上游（模拟用户填自己的网关/端口）
+  await evaluate(`document.querySelector('#presetChips [data-preset="custom"]').click()`);
+  await sleep(200);
+  await evaluate(`(() => {
+    document.querySelector('#aiBaseUrl').value = 'http://127.0.0.1:${FAKE_AI_PORT}/v1';
+    document.querySelector('#aiModel').value = 'fake-model';
+    document.querySelector('#aiKey').value = 'sk-e2e-fake-key-for-testing' /* secret-scan:allow 假密钥 */;
+    document.querySelector('#aiSave').click();
+  })()`);
+  await sleep(3000);
+  const saveMsg = await evaluate(`document.querySelector('#aiSettingsMsg')?.textContent.replace(/\s+/g, ' ').trim() || ''`);
+  console.log('保存并测试的结果：', saveMsg);
+  if (!saveMsg.includes('保存成功')) problems.push(`保存失败：${saveMsg}`);
+  if (!saveMsg.includes('连通正常')) problems.push(`连通测试没过：${saveMsg}`);
+
+  // 配置文件的权限与位置
+  const cfgInfo = await evaluate(`fetch('/api/ai-config').then((r) => r.json()).then((d) => ({
+    已配置: d.configured, 来源: d.source, 模型: d.model,
+    掩码: d.saved?.keyMasked || null, 文件: d.configFile,
+    含完整密钥: JSON.stringify(d).includes('sk-e2e-fake-key-for-testing' /* secret-scan:allow 假密钥 */),
+  }))`);
+  console.log('配置状态：', JSON.stringify(cfgInfo));
+  if (cfgInfo.含完整密钥) problems.push('状态接口把完整密钥回传给了手机');
+  if (!cfgInfo.掩码?.includes('*')) problems.push('没有返回掩码');
+
+  const shotSaved = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-ai-settings-saved.png'), Buffer.from(shotSaved.data, 'base64'));
+  await evaluate(`document.querySelector('#sheetClose').click()`);
+  await sleep(400);
+  console.log('\n=== 二、用配好的 AI 解析一句话 ===');
   const tag = await evaluate(`document.querySelector('#quickResult') ? 'ok' : 'ok'`);
   void tag;
-  const aiTag = await evaluate(`(() => {
-    const el = [...document.querySelectorAll('.card-title .tag')].map((t) => t.textContent.trim());
-    return el;
-  })()`);
-  console.log('记录页标签：', JSON.stringify(aiTag));
-  if (!aiTag.some((t) => t.includes('AI 已启用'))) problems.push('界面没有显示「AI 已启用」');
+  const aiTag = await evaluate(`document.querySelector('#aiSettingsBtn')?.textContent.replace(/\\s+/g, ' ').trim() || null`);
+  console.log('记录页按钮：', JSON.stringify(aiTag));
+  if (!aiTag || !aiTag.includes('AI 已启用')) problems.push(`配好之后界面按钮没有变成「AI 已启用」，实际是：${aiTag}`);
 
   // 走一遍 AI 解析
   await evaluate(`(() => {
@@ -179,7 +228,7 @@ async function main() {
     }
     const joined = texts.join('\\n');
     return {
-      含密钥: joined.includes('sk-e2e-fake-key-for-testing'),
+      含密钥: joined.includes('sk-e2e-fake-key-for-testing' /* secret-scan:allow 假密钥 */),
       含sk前缀: /sk-[A-Za-z0-9_-]{10,}/.test(joined),
     };
   })()`);
@@ -207,7 +256,7 @@ async function main() {
   chrome.kill();
   serve.kill();
   fakeAi.close();
-  try { fs.unlinkSync(fakeKeyFile); } catch { /* 忽略 */ }
+  try { fs.rmSync(cfgDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
 }
 
 main().catch((err) => { console.error('自检失败：', err.message); process.exitCode = 1; });
