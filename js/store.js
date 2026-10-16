@@ -13,7 +13,7 @@ export function emptyState() {
     customFoods: [],
     weights: [],
     // 成长记录：已庆祝过的徽章、上次看周报的日期
-    achievements: { seen: [], lastWeeklyAt: null },
+    achievements: { seen: [], lastWeeklyAt: null, milestones: [] },
   };
 }
 
@@ -32,6 +32,7 @@ export function migrate(raw) {
     achievements: {
       seen: Array.isArray(raw.achievements?.seen) ? raw.achievements.seen : [],
       lastWeeklyAt: raw.achievements?.lastWeeklyAt || null,
+      milestones: Array.isArray(raw.achievements?.milestones) ? raw.achievements.milestones : [],
     },
   };
 }
@@ -225,6 +226,7 @@ export function analyzeProgress(state) {
  */
 export function demoProfile() {
   return {
+    nickname: '小繁',
     sex: 'female',
     age: 26,
     heightCm: 163,

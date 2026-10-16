@@ -202,6 +202,13 @@ async function main() {
     return el ? { 文案: el.textContent.replace(/\\s+/g, ' ').trim() } : null;
   })()`);
   console.log(plantCard ? `✅ 今天页有小植物入口：${plantCard.文案}` : '❌ 没有小植物入口');
+  const personal = await evaluate(`(() => ({
+    顶部昵称签: document.querySelector('#nameTag')?.textContent.trim() || null,
+    问候语: document.querySelector('.greet')?.textContent.replace(/\\s+/g, ' ').trim() || null,
+  }))()`);
+  console.log(`✅ 个性化：顶部签「${personal.顶部昵称签}」｜问候「${personal.问候语}」`);
+  if (!personal.顶部昵称签) problems.push('顶部没有显示她的昵称');
+  if (!personal.问候语 || !personal.问候语.includes('小繁')) problems.push('问候语里没有她的名字');
   if (!plantCard) problems.push('今天页缺少小植物入口');
 
   await evaluate(`document.querySelector('.plant-card').click()`);
@@ -218,7 +225,11 @@ async function main() {
       return txt.includes('没有') && txt.includes('少吃') ? '已声明不做少吃类徽章' : '缺少这句声明';
     })(),
   }))()`);
+  const specialBadges = await evaluate(`[...document.querySelectorAll('.badge-grid .ach.special .ach-name')].map((e) => e.textContent.trim())`);
   console.log(`✅ 成长弹层：「${growth.标题}」徽章 ${growth.徽章数} 个（已解锁 ${growth.已解锁}，未解锁带进度条 ${growth.有进度条} 个）`);
+  console.log(`   专属徽章：${specialBadges.join('、') || '（没找到）'}`);
+  if (!specialBadges.length) problems.push('徽章墙里没有专属徽章');
+  if (specialBadges.some((t) => !t.includes('小繁'))) problems.push(`专属徽章没有带上她的昵称：${specialBadges.join('、')}`);
   console.log(`   徽章页文案：${growth.说明}`);
   if (growth.说明 !== '已声明不做少吃类徽章') problems.push('徽章页缺少「不做少吃类徽章」的说明');
   if (growth.徽章数 < 10) problems.push(`徽章只有 ${growth.徽章数} 个，太少了`);

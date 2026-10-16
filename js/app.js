@@ -21,7 +21,7 @@ import {
 import { PRESETS, findPreset } from './providers.js';
 import {
   achievements, plantState, weeklyReview, weeklyHighlight, afterLogMessage,
-  markAchievementsSeen, shouldShowWeekly,
+  markAchievementsSeen, shouldShowWeekly, nickname, greeting, hitMilestone, badgeLabel,
 } from './achievements.js';
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
@@ -157,7 +157,11 @@ document.querySelectorAll('.tab').forEach((btn) => {
 /* ── 主渲染 ──────────────────────────────── */
 
 function render() {
-  $('#dateLabel').textContent = dateLabel();
+  const dn = $('#dateText');
+  if (dn) dn.textContent = dateLabel();
+  else $('#dateLabel').textContent = dateLabel();
+  const nameTag = $('#nameTag');
+  if (nameTag) nameTag.textContent = nickname(state);
   if (!state.profile && view !== 'progress') {
     renderWelcome();
     return;
@@ -300,10 +304,12 @@ function renderToday() {
   const streak = streakDays(state);
   const exerciseMin = day.exercises.reduce((a, x) => a + x.minutes, 0);
   const plant = { state: plantState(state), ach: achievements(state, t.proteinG) };
+  const greet = greeting(state);
   const macros = diff.filter((d) => d.key !== 'kcal');
 
   app.innerHTML = `
     <div class="card hero">
+      <div class="greet">${greet.emoji} <span>${esc(greet.word)}，<b>${esc(greet.name)}</b></span></div>
       <div class="ring-wrap">
         <svg class="ring" viewBox="0 0 190 190" aria-hidden="true">
           <defs>
@@ -1269,10 +1275,11 @@ function openCustomFoodSheet() {
    只在真的解锁新徽章时放，而且要能关掉（有人不喜欢动画）。
    ─────────────────────────────────────────── */
 
-function celebrate({ emoji, title, sub, badge }) {
+function celebrate(opts) {
+  const { emoji, title, sub, badge } = opts;
   if (state?.settings?.celebrations === false) return;
   const el = document.createElement('div');
-  el.className = 'celebrate';
+  el.className = `celebrate${opts.special ? ' special' : ''}`;
   el.innerHTML = `
     <div class="confetti">${Array.from({ length: 14 }, (_, i) => `<i style="--i:${i};--x:${(i * 37) % 100};--d:${(i % 5) * 0.12}s"></i>`).join('')}</div>
     <div class="celebrate-card">
@@ -1296,14 +1303,29 @@ function checkNewAchievements() {
   const t = targets();
   const a = achievements(state, t?.proteinG || 60);
   if (!a.justUnlocked.length) return;
-  const first = a.justUnlocked[0];
+  // 有专属徽章时优先庆祝专属的（更有惊喜感）
+  const first = a.justUnlocked.find((x) => x.special) || a.justUnlocked[0];
   markAchievementsSeen(state, a.justUnlocked.map((x) => x.id));
   save();
   celebrate({
     badge: first.emoji,
-    title: first.name,
+    title: badgeLabel(state, first),
     sub: first.congrats,
+    special: first.special,
   });
+
+  // 顺带检查有没有踩到「每 10 天」的里程碑
+  const mile = hitMilestone(state);
+  if (mile && !(state.achievements?.milestones || []).includes(mile.days)) {
+    state.achievements.milestones = [...(state.achievements?.milestones || []), mile.days];
+    save();
+    setTimeout(() => celebrate({
+      badge: mile.emoji,
+      title: `${mile.nickname}，${mile.text}`,
+      sub: '这是给你的。',
+      special: true,
+    }), 1400);
+  }
 }
 
 /* ── 弹层：成长（成就墙 + 小植物 + 周报）───── */
@@ -1344,9 +1366,9 @@ function openGrowthSheet() {
         <div class="card-title">徽章墙 <span class="tiny muted">${a.unlocked.length} / ${a.list.length}</span></div>
         <div class="badge-grid">
           ${a.list.map((x) => `
-            <div class="ach ${x.unlocked ? 'on' : ''}" data-ach="${x.id}">
+            <div class="ach ${x.unlocked ? 'on' : ''} ${x.special ? 'special' : ''}" data-ach="${x.id}">
               <span class="ach-emoji">${x.unlocked ? x.emoji : '🔒'}</span>
-              <span class="ach-name">${esc(x.name)}</span>
+              <span class="ach-name">${esc(badgeLabel(state, x))}</span>
               ${x.unlocked ? '' : `<span class="ach-bar"><i style="width:${x.pct}%"></i></span>`}
             </div>`).join('')}
         </div>
@@ -1704,6 +1726,7 @@ export function validateProfile(form) {
     if (v < lo || v > hi) return `${label}要在 ${lo}~${hi} 之间。`;
   }
   if (form.age < 18) return '这个工具只适合 18 岁以上使用，未成年人请先问医生。';
+  // 昵称是可选的，不校验；空值由 nickname() 统一回落到默认名
   if (form.bodyFatPct !== null && form.bodyFatPct !== undefined) {
     const bf = form.bodyFatPct;
     if (typeof bf !== 'number' || !Number.isFinite(bf) || bf < 3 || bf > 60) {
@@ -1721,6 +1744,7 @@ export function validateProfile(form) {
 
 function openProfileSheet() {
   const p = state.profile || {
+    nickname: '小繁',
     sex: 'female', age: 25, heightCm: 163, weightKg: 58, bodyFatPct: null,
     activity: 'light', pace: 'standard', goal: 'lose', targetWeightKg: null,
   };
@@ -1728,6 +1752,10 @@ function openProfileSheet() {
   openSheet({
     title: hasProfile ? '我的资料' : '填写资料',
     body: `
+      <label class="field"><span>怎么称呼她</span>
+        <input type="text" id="pNickname" value="${esc(p.nickname || '小繁')}" maxlength="8" placeholder="例如：小繁">
+        <span class="tiny muted" style="margin-top:4px;display:block">会用在问候、徽章和周报里。留空就用「小繁」。</span>
+      </label>
       <label class="field"><span>性别（决定基础代谢公式，必须选）</span>
         <div class="chips" id="sexChips">
           <button class="chip ${p.sex === 'female' ? 'on' : ''}" data-sex="female">女</button>
@@ -1769,6 +1797,7 @@ function openProfileSheet() {
     onMount: (body, foot) => {
       const num = (id) => Number($(`#${id}`, body).value);
       const form = () => ({
+        nickname: ($('#pNickname', body).value || '').trim().slice(0, 8) || '小繁',
         sex: body.querySelector('#sexChips .chip.on')?.dataset.sex || 'female',
         age: num('pAge'),
         heightCm: num('pHeight'),
