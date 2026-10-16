@@ -18,6 +18,24 @@ const outDir = path.join(root, '.selfcheck');
 const CHROME = findChrome();
 const PORT = 9337;
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:4173';
+
+/**
+ * 等本地服务真的能响应再开始。
+ * CI 上服务是后台起的，偶尔还没监听就开始跑，会报 "fetch failed"（踩过）。
+ */
+async function waitForServer(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastErr = '';
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(BASE + '/', { signal: AbortSignal.timeout(5000) });
+      if (res.ok) return true;
+      lastErr = `HTTP ${res.status}`;
+    } catch (err) { lastErr = err.message; }
+    await sleep(700);
+  }
+  throw new Error(`本地服务在 ${timeoutMs / 1000} 秒内没有响应（${BASE}）：${lastErr}`);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitFor(fn, { timeout = 12000, interval = 300, what = '条件' } = {}) {
@@ -57,6 +75,7 @@ function connect(wsUrl) {
 }
 
 async function main() {
+  await waitForServer();
   fs.mkdirSync(outDir, { recursive: true });
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',

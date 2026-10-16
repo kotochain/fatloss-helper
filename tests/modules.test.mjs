@@ -56,6 +56,18 @@ test('app.js 里每个具名导入都能在对应模块里找到导出', () => {
   assert.deepEqual(problems, [], problems.join('\n'));
 });
 
+test('离线缓存清单必须覆盖所有 js 文件（漏一个断网就打不开）', () => {
+  // CI 上真抓到过：新增 js/schema.js 之后忘了加进 sw.js 的缓存清单，
+  // 结果断网时新代码加载不了。这里把 CI 的检查搬到单元测试里，本地也能拦住。
+  const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  const list = [...sw.matchAll(/'(\.\/[^']+)'/g)].map((m) => m[1].replace('./', ''));
+  const jsFiles = fs.readdirSync(jsDir).map((f) => `js/${f}`);
+  const missing = jsFiles.filter((f) => !list.includes(f));
+  assert.deepEqual(missing, [], `这些 js 文件没进离线缓存清单：${missing.join('、')}`);
+  const notExist = list.filter((f) => !fs.existsSync(path.join(root, f)));
+  assert.deepEqual(notExist, [], `缓存清单里的文件不存在：${notExist.join('、')}`);
+});
+
 test('每个 js 模块都能被 Node 正常加载（语法与顶层代码没问题）', async () => {
   const files = fs.readdirSync(jsDir).filter((f) => f.endsWith('.js'));
   assert.ok(files.length >= 5, `js 目录下只有 ${files.length} 个文件，是不是路径错了`);
