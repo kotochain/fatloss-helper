@@ -27,7 +27,7 @@ const MUTATIONS = [
   // 碳水 80 克下限原来也测不出来，但加了「脂肪按热量可达值下调」之后会被触发，所以现在应当能抓到。
   { file: 'js/calc.js', from: 'const deficitCap = tdee * 0.75;', to: 'const deficitCap = tdee * 5;', why: '缺口上限（理论护栏，测不到）', expectCaught: false },
   { file: 'js/calc.js', from: 'const MIN_CARB_G = 80;', to: 'const MIN_CARB_G = 0;', why: '碳水 80 克下限（兜底，正常输入走不到）', expectCaught: false },
-  { file: 'js/calc.js', from: 'const idealFatG = weightKg * (goalMode === ', to: 'const idealFatG = weightKg * 0.1 * (goalMode === ', why: '脂肪 0.8~0.9 g/kg 的目标' },
+  { file: 'js/calc.js', from: "const idealFatG = weightKg * (goalMode === 'lose' ? 0.8 : 0.9);", to: "const idealFatG = weightKg * (goalMode === 'lose' ? 0.05 : 0.9);", why: '脂肪 0.8~0.9 g/kg 的目标' },
   { file: 'js/foods.js', from: 'kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9', to: 'kcal: 316, protein: 2.6, fat: 0.3, carb: 25.9', why: '熟米饭每 100 克 116 kcal' },
   { file: 'js/foods.js', from: 'if (/斤/.test(unit)) return round1(qty * 500);', to: 'if (/斤/.test(unit)) return round1(qty * 50);', why: '一斤 = 500 克' },
   { file: 'js/foods.js', from: 'const exact = pairs.find((x) => x.key === unit);', to: 'const exact = null;', why: '「一碗」必须精确命中而不是被「一小碗」抢走' },
@@ -41,7 +41,7 @@ const MUTATIONS = [
   { file: 'js/mealparse.js', from: "      .sort((a, b) => a.dist - b.dist);", to: '      .sort((a, b) => b.dist - a.dist);', why: '份量按最近距离配对（否则「两个鸡蛋和一个苹果」会串份量）' },
   { file: 'js/mealparse.js', from: 'const perUnit = food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || portion.perUnit || 100;', to: 'const perUnit = portion.perUnit || 100;', why: '「一个」要按食物自己的份量换算（鸡蛋 50 克 ≠ 通用 100 克）' },
   { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
-  { file: 'js/cardio.js', from: "    .filter((e) => e.equipment.some((q) => avail.has(q)))\n    .map((e) => {", to: "    .filter(() => true)\n    .map((e) => {", why: '替代动作必须是她今天能用的器械' },
+  { file: 'js/cardio.js', from: 'const avail = new Set(availableEquipment || []);', to: 'const avail = new Set(Object.keys(EQUIPMENT));', why: '替代动作必须是她今天能用的器械' },
   { file: 'js/ai-core.js', from: "    if (!(grams > 0) || grams > 5000) continue;", to: "    if (!(grams > -1)) continue;", why: 'AI 返回的离谱份量要被丢掉' },
   // ── 第三轮新增：正反馈系统 ──
   { file: 'js/achievements.js', from: 'if (t.kcal > 0 && t.protein >= goal) n += 1;', to: 'if (t.kcal > 0) n += 1;', why: '「蛋白达标」必须用她的目标判定，不能只要吃了就算达标' },
@@ -49,11 +49,31 @@ const MUTATIONS = [
   { file: 'js/achievements.js', from: "  const seen = new Set(state?.achievements?.seen || []);", to: '  const seen = new Set();', why: '庆祝过的徽章不该重复弹' },
   { file: 'js/achievements.js', from: "  if (!isMonday) return false;", to: '  if (isMonday) return false;', why: '周报只在周一弹，不是每天打扰' },
   // ── 第四轮：份量上限与脂肪目标对账 ──
-  { file: 'js/recommend.js', from: 'const MAX_SERVINGS_PER_FOOD = 3;', to: 'const MAX_SERVINGS_PER_FOOD = 99;', why: '单个食物最多 3 份（别给「一顿 4.5 个鸡蛋」这种方案）' },
+  { file: 'js/recommend.js', from: 'const servingUnit = (food.servings?.[0]?.[1] || 100) >= 40', to: 'const servingUnit = (food.servings?.[0]?.[1] || 100) >= 400', why: '主菜份量不能用「一只虾 15 克」当单位（会算出 30 克主菜）' },
+  { file: 'js/recommend.js', from: "const raw = role === 'carb' ? perMealKcal / 300 : perMealKcal / 380;", to: "const raw = role === 'carb' ? perMealKcal / 30 : perMealKcal / 38;", why: '单个食物份量上限（别给「一顿 4.5 个鸡蛋」这种方案）' },
   { file: 'js/recommend.js', from: 'if (grams >= servingG * 0.8)', to: 'if (grams >= 0)', why: '配角要么给一份，要么别出现（不要「33 克酸奶」）' },
-  { file: 'js/recommend.js', from: 'const achievable = plan.planFatG + oilMax;      // 这份餐单最多能给到多少脂肪', to: 'const achievable = 9999;', why: '脂肪目标要对齐餐单实际可达值' },
-  { file: 'js/recommend.js', from: 'if (proteinDiff > 5) {', to: 'if (false) {', why: '蛋白目标要跟着餐单实际上调（否则总热量永远追不上目标）' },
+  // ── 第五轮：数据迁移与「目标不许被餐单改写」 ──
+  { file: 'js/schema.js', from: 'if (from > SCHEMA_VERSION) {', to: 'if (false) {', why: '未来版本的存档必须拒绝读取（否则会抹掉新字段）' },
+  { file: 'js/schema.js', from: "return hasShape && daysIsObject;", to: 'return true;', why: '乱七八糟的内容不能被当成存档' },
+  { file: 'js/schema.js', from: 'if (from < SCHEMA_VERSION) {', to: 'if (false) {', why: '升级前必须留快照（能回滚）' },
+  { file: 'js/schema.js', from: "for (const [key, list] of Object.entries(meals)) {", to: 'for (const [key, list] of []) {', why: '老记录要补上「哪一餐」（否则按餐汇总全为 0）' },
+  { file: 'js/recommend.js', from: 'if (proteinRatio < 0.9) {', to: 'if (false) {', why: '蛋白不足时说明里必须点出来' },
+  { file: 'js/recommend.js', from: 'if (fatRatio < 0.85) {', to: 'if (false) {', why: '脂肪不足时说明里必须点出来' },
 ];
+
+// 先自己检查一遍：每条变异锚点必须在文件里找得到，
+// 否则「没抓到」其实是脚本失效，而不是测试太弱（这个坑踩过好几次）
+const brokenAnchors = [];
+for (const m of MUTATIONS) {
+  const target = path.join(root, m.file);
+  const src = fs.readFileSync(target, 'utf8');
+  if (!src.includes(m.from)) brokenAnchors.push(`${m.file}: ${m.from.slice(0, 60)}`);
+}
+if (brokenAnchors.length) {
+  console.error('❌ 有变异的锚点代码已经不存在了（脚本自己失效，先修锚点）：');
+  for (const b of brokenAnchors) console.error('   -', b);
+  process.exit(1);
+}
 
 let caught = 0;
 const missed = [];

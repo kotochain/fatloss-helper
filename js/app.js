@@ -26,9 +26,12 @@ import {
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
 } from './cardio.js';
-import { buildMealPlan, buildDailyTips, convergePlan } from './recommend.js';
+import { buildMealPlan, buildDailyTips } from './recommend.js';
 import {
-  emptyState, migrate, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
+  SCHEMA_VERSION, loadState, migrateToCurrent, readBackup, clearBackup, saveBackup, describeMigration,
+} from './schema.js';
+import {
+  emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   addExercise, removeExercise, addWeight, addCustomFood, weightTrend, analyzeProgress,
   demoProfile, demoEntries, frequentFoods,
 } from './store.js';
@@ -53,19 +56,26 @@ const app = $('#app');
 
 /* ── 存档 ────────────────────────────────── */
 
+/** 存档读取结果（用于启动后提示「已升级、数据都在」） */
+let startupNotice = null;
+
 function load() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return migrate(JSON.parse(raw));
-  } catch (err) {
-    console.warn('存档读取失败，已忽略：', err);
+  const res = loadState(localStorage, { key: STORAGE_KEY });
+  if (!res.ok) {
+    // 读不出来或版本太新：绝不用空数据覆盖她的记录
+    startupNotice = { kind: 'error', text: res.error };
+    console.warn('存档读取失败：', res.error);
     return null;
   }
+  if (res.data && res.upgradedFrom) {
+    startupNotice = { kind: 'ok', text: describeMigration(res) };
+  }
+  return res.data;
 }
 
 function save() {
   try {
+    state.schemaVersion = SCHEMA_VERSION;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (err) {
     toast('存不进去了（浏览器存储可能满了），请到「体重」页导出备份。');
@@ -74,22 +84,18 @@ function save() {
 }
 
 /**
- * 她的每日目标。
+ * 她的每日目标 —— **只由公式决定，跟餐单无关**。
  *
- * 注意这里做了一次「对账」：先用公式算出目标，再生成一份餐单看实际能做到多少，
- * 然后让脂肪目标落回可达范围（否则会出现「该吃 46 克脂肪、餐单只给 39 克」这种自相矛盾）。
- * 只调脂肪，蛋白和总热量不动 —— 蛋白保肌肉，热量决定速度。
+ * 这里曾经让目标跟着餐单对账（为了让「目标」和「餐单」一致），
+ * 但那是错的：同一个人的目标会随「换一套」在 36~69 克脂肪之间跳，
+ * 甚至会压穿 0.6 g/kg 的安全线（独立核验实测：9.67% 的正常体型组合中招）。
+ * 目标必须是稳定的 —— 它同时决定首页圆环、达成率和成就的达标线。
+ *
+ * 餐单给不到目标时，由餐单自己如实说明差多少、怎么补（见 recommend.js 的 deviationNote）。
  */
 function targets() {
   if (!state.profile) return null;
-  const raw = calcTargets(state.profile);
-  if (!raw) return null;
-  try {
-    return convergePlan(raw, { seed: planSeed }).targets;
-  } catch (err) {
-    console.warn('目标对账失败，用原始目标：', err);
-    return raw;
-  }
+  return calcTargets(state.profile);
 }
 
 /* ── 小工具 ──────────────────────────────── */
@@ -157,7 +163,7 @@ $('.sheet-mask').addEventListener('click', closeSheet);
 $('#prevDay').addEventListener('click', () => { dateKey = shiftDate(dateKey, -1); render(); });
 $('#nextDay').addEventListener('click', () => { dateKey = shiftDate(dateKey, 1); render(); });
 $('#dateLabel').addEventListener('click', openCalendarSheet);
-$('#profileBtn').addEventListener('click', openProfileSheet);
+$('#profileBtn').addEventListener('click', openSettingsSheet);
 
 document.querySelectorAll('.tab').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -1345,6 +1351,171 @@ function checkNewAchievements() {
   }
 }
 
+/* ── 设置页（「我的」）────────────────────
+   以前这些东西散在四个地方（AI 在记录页、备份在体重页、资料在头像、示例在今天页尾部）。
+   收成一处，找起来才不费劲。
+   ─────────────────────────────────────────── */
+
+function openSettingsSheet() {
+  const t = targets();
+  const cfg = currentAiConfig();
+  const plant = plantState(state);
+  const a = achievements(state, t?.proteinG || 60);
+  const backup = readBackup(localStorage);
+
+  openSheet({
+    title: '设置',
+    body: `
+      <button class="set-row" data-set="profile">
+        <span class="set-ico">👤</span>
+        <span class="set-main"><b>她的资料</b><em>${state.profile ? `${state.profile.heightCm} cm · ${state.profile.weightKg} kg · ${state.profile.age} 岁` : '还没填'}</em></span>
+        <span class="set-go">›</span>
+      </button>
+
+      <button class="set-row" data-set="ai">
+        <span class="set-ico">✨</span>
+        <span class="set-main"><b>AI 高级版</b><em>${cfg.configured ? `${cfg.presetName || ''} · ${cfg.model || ''}` : '未开启（现在是内置规则）'}</em></span>
+        <span class="set-go">›</span>
+      </button>
+
+      <button class="set-row" data-set="growth">
+        <span class="set-ico">${plant.stage.emoji}</span>
+        <span class="set-main"><b>我的成长</b><em>${a.unlocked.length} / ${a.list.length} 个徽章 · ${plant.stage.name}</em></span>
+        <span class="set-go">›</span>
+      </button>
+
+      <button class="set-row" data-set="backup">
+        <span class="set-ico">💾</span>
+        <span class="set-main"><b>数据与备份</b><em>存档 v${SCHEMA_VERSION}${backup ? ` · 有升级前快照（${String(backup.savedAt).slice(0, 10)}）` : ''}</em></span>
+        <span class="set-go">›</span>
+      </button>
+
+      <button class="set-row" data-set="about">
+        <span class="set-ico">ℹ️</span>
+        <span class="set-main"><b>关于</b><em>算得准不准、数据存在哪、更新怎么生效</em></span>
+        <span class="set-go">›</span>
+      </button>
+
+      <p class="tiny muted" style="margin:14px 0 0;text-align:center">
+        所有记录只存在这台手机上，不上传。<br>换手机或清缓存前，记得导出备份。
+      </p>`,
+    onMount: (body) => {
+      body.querySelectorAll('[data-set]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const which = el.dataset.set;
+          if (which === 'profile') { closeSheet(); openProfileSheet(); }
+          else if (which === 'ai') { closeSheet(); openAiSettingsSheet(); }
+          else if (which === 'growth') { closeSheet(); openGrowthSheet(); }
+          else if (which === 'backup') openBackupSheet();
+          else if (which === 'about') openAboutSheet();
+        });
+      });
+    },
+  });
+}
+
+/** 数据与备份 */
+function openBackupSheet() {
+  const backup = readBackup(localStorage);
+  const size = (() => {
+    try { return Math.round((localStorage.getItem(STORAGE_KEY) || '').length / 1024); } catch { return 0; }
+  })();
+  const days = Object.keys(state.days || {}).length;
+
+  openSheet({
+    title: '数据与备份',
+    body: `
+      <div class="warn info">
+        当前存档：<b>v${SCHEMA_VERSION}</b> · ${days} 天的记录 · 约 ${size} KB<br>
+        位置：这台手机的浏览器存储（不上传任何服务器）
+      </div>
+      <div class="set-note">
+        <b>为什么要有备份</b><br>
+        换手机、清浏览器缓存、卸载重装都会把本地记录清掉。导出一份存到微信收藏或网盘里最稳妥。
+      </div>
+      <button class="btn block" id="doExport">导出备份文件</button>
+      <div class="btn-row">
+        <button class="btn ghost grow" id="doImport">从文件导入</button>
+        <button class="btn ghost grow" id="doSnapshot">现在留一份快照</button>
+      </div>
+      ${backup ? `
+        <hr class="sep">
+        <div class="set-note">
+          <b>升级前的自动快照</b><br>
+          时间：${esc(String(backup.savedAt).slice(0, 16).replace('T', ' '))}<br>
+          来源版本：v${esc(String(backup.schemaVersion))}<br>
+          ${esc(backup.note || '')}
+        </div>
+        <div class="btn-row">
+          <button class="btn ghost grow" id="doRestore">回滚到这份快照</button>
+          <button class="btn ghost" id="doForget">删除快照</button>
+        </div>` : '<p class="tiny muted" style="margin-top:10px">还没有快照。下次存档结构升级时会自动留一份。</p>'}
+    `,
+    onMount: (body) => {
+      $('#doExport', body).addEventListener('click', exportData);
+      $('#doImport', body).addEventListener('click', importData);
+      $('#doSnapshot', body).addEventListener('click', () => {
+        saveBackup(localStorage, JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'), '手动留的快照');
+        toast('已留一份快照。');
+        openBackupSheet();
+      });
+      $('#doRestore', body)?.addEventListener('click', () => {
+        if (!confirm('用这份快照覆盖当前的记录？当前记录会先被导出保存（以防万一）。')) return;
+        const b = readBackup(localStorage);
+        if (!b) return toast('快照读不出来了。');
+        const migrated = migrateToCurrent(b.data);
+        if (!migrated.ok) return toast(migrated.error);
+        exportData();
+        state = migrated.data;
+        save();
+        closeSheet();
+        render();
+        toast('已回滚到快照。');
+      });
+      $('#doForget', body)?.addEventListener('click', () => {
+        if (!confirm('删除这份快照？删掉就不能回滚了。')) return;
+        clearBackup(localStorage);
+        openBackupSheet();
+      });
+    },
+  });
+}
+
+/** 关于：把「算得准不准」讲清楚 */
+function openAboutSheet() {
+  const t = targets();
+  openSheet({
+    title: '关于',
+    body: `
+      <div class="set-note">
+        <b>算得准不准</b><br>
+        基础代谢用国际通用的公式，误差一般 ±10%。食物热量里，包装食品最准（照标签填），
+        炒菜和外卖误差最大（同一道菜不同人放油差一倍）。<br>
+        所以真正准的是「体重」页的趋势判断 —— 它按她实际掉秤速度来校准，比任何公式都准。
+      </div>
+      <div class="set-note">
+        <b>数据存在哪</b><br>
+        只在这台手机的浏览器里，不上传、不需要注册。<br>
+        ${t ? `当前目标：约 ${t.targetCalories} kcal / 蛋白 ${Math.round(t.proteinG)} g` : ''}
+      </div>
+      <div class="set-note">
+        <b>更新怎么生效</b><br>
+        应用会自动更新。如果提示「有新版本」，刷新一次页面就生效 ——
+        记录不会丢，升级时还会自动留一份快照。
+      </div>
+      <div class="set-note">
+        <b>安全边界（写死在代码里的）</b><br>
+        每天不低于基础代谢的 1.1 倍、女生不低于 1200 kcal、每周掉秤不超过体重 1%、
+        偏瘦不给减脂方案、不满 18 岁拒绝计算。<br>
+        有疾病、怀孕哺乳、在吃影响体重的药，请先问医生。
+      </div>
+      <div class="set-note">
+        <b>版本</b><br>
+        存档结构 v${SCHEMA_VERSION} · 应用每次推送自动发布
+      </div>`,
+  });
+}
+
 /* ── 弹层：成长（成就墙 + 小植物 + 周报）───── */
 
 function openGrowthSheet() {
@@ -1937,8 +2108,13 @@ function importData() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result));
+        const migrated = migrateToCurrent(parsed);
+        if (!migrated.ok) {
+          toast(migrated.error);
+          return;
+        }
         if (!confirm('导入会覆盖现在这台设备上的所有记录，确定吗？')) return;
-        state = migrate(parsed);
+        state = migrated.data;
         save();
         render();
         toast('导入完成。');
@@ -2040,6 +2216,17 @@ if (bootParams.has('__selfcheck')) {
   bindCommon();
 } else {
   render();
+}
+
+// 启动时如果发生过数据迁移（或读不出来），第一时间告诉她 —— 这种信息不能藏
+if (startupNotice) {
+  setTimeout(() => {
+    if (startupNotice.kind === 'error') {
+      celebrate({ badge: '⚠️', title: '记录读取有问题', sub: startupNotice.text });
+    } else {
+      toast(startupNotice.text);
+    }
+  }, 600);
 }
 
 // 启动成功的标记：浏览器自检靠它判断「模块有没有炸掉导致白屏」

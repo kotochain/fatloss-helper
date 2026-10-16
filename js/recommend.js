@@ -286,108 +286,14 @@ export function trimMeal(items, budgetKcal, tolerance = 0.04) {
 }
 
 /**
- * 让「目标」和「餐单能做到的量」对齐。
+ * 说明：这里曾经有个 reconcileFatTarget / convergePlan，用来把「目标」改成「餐单实际能给的量」。
+ * 已经删除，原因是**错的**：那会让同一个人的目标随「换一套」变化
+ * （独立核验实测：脂肪目标在 36~69 克之间跳，还会压穿 0.6 g/kg 的安全线，9.67% 的正常体型中招）。
  *
- * 为什么需要这一步：目标里的脂肪是按体重算的（0.8~0.9 g/kg），但餐单是先保蛋白质和总热量、
- * 脂肪靠补烹调油（有 30 克上限）。两边各算各的，就会出现「你该吃 46 克脂肪，餐单只给你 35 克」
- * 这种自相矛盾 —— 实测下来脂肪普遍只达成 70%。
- *
- * 这里把脂肪目标拉回「餐单实际能给的范围」，并把差额补给碳水，
- * 保证四项加起来仍然等于目标热量。**只调脂肪，不动蛋白和总热量**：
- * 蛋白是保肌肉的关键，热量是决定减脂速度的关键，脂肪有安全下限兜底。
+ * 现在的分工：
+ *   - 目标只由 calcTargets 决定，永远稳定；
+ *   - 餐单给不到目标时，由 buildDeviationNote 如实说明差多少、怎么补。
  */
-export function reconcileFatTarget(targets, plan) {
-  if (!plan?.meals?.length || !(targets.fatG > 0)) return targets;
-
-  // 先对账蛋白质：餐单结构自带不少蛋白（燕麦、酸奶、米饭、蔬菜都含），
-  // 当餐单给的蛋白明显高于目标时，多出来的那部分会挤占碳水的热量，
-  // 让总热量怎么都追不上目标（实测 58 kg 维持期会差 19%）。
-  // 处理：既然她实际会吃到这么多蛋白（是好事），就把目标更新成实际值，
-  // 然后把差额从碳水里扣掉 —— 总热量保持不变。
-  const proteinDiff = plan.planProteinG - targets.proteinG;
-  if (proteinDiff > 5) {
-    const kcalShift = proteinDiff * 4;
-    const newCarb = Math.max(80, Math.round((targets.carbG - kcalShift / 4) * 10) / 10);
-    targets = {
-      ...targets,
-      proteinG: Math.round(plan.planProteinG * 10) / 10,
-      carbG: newCarb,
-      proteinNote: `蛋白质目标从 ${Math.round(targets.proteinG)} 克上调到 ${Math.round(plan.planProteinG)} 克 —— 这份餐单本来就含这么多蛋白（燕麦、酸奶、米饭里都有）。多吃蛋白对减脂是好事，多出来的热量从主食里扣掉。`,
-    };
-  }
-  const oilMax = plan.cookingOilG > 0 ? plan.cookingOilG : 25;
-  const achievable = plan.planFatG + oilMax;      // 这份餐单最多能给到多少脂肪
-  const safeFloor = Math.max(targets.weightKg * 0.6 || 0, achievable * 0.75);
-
-  // 目标在可达范围内就不用动
-  if (targets.fatG <= achievable * 1.02 && targets.fatG >= achievable * 0.8) return targets;
-
-  const newFat = Math.round(Math.min(Math.max(targets.fatG, safeFloor), achievable) * 10) / 10;
-  const deltaKcal = (targets.fatG - newFat) * 9;  // 脂肪少吃了，热量补给碳水
-  const adjusted = {
-    ...targets,
-    fatG: newFat,
-    carbG: Math.max(80, Math.round((targets.carbG + deltaKcal / 4) * 10) / 10),
-    fatNote: newFat < targets.fatG - 0.5
-      ? `脂肪目标从 ${Math.round(targets.fatG)} 克调整为 ${Math.round(newFat)} 克 —— 这是这份餐单实际能给到的量（再高就只能靠多放油了）。少掉的热量加到了主食上。`
-      : `脂肪目标从 ${Math.round(targets.fatG)} 克调整为 ${Math.round(newFat)} 克 —— 按体重算的理想值偏低，这里补到正常饮食的水平，热量从主食里扣。`,
-  };
-  // 保证四项加起来仍然等于目标热量
-  const sum = adjusted.proteinG * 4 + adjusted.fatG * 9 + adjusted.carbG * 4;
-  if (Math.abs(sum - adjusted.targetCalories) > 15) {
-    adjusted.carbG = Math.max(80, Math.round(((adjusted.targetCalories - adjusted.proteinG * 4 - adjusted.fatG * 9) / 4) * 10) / 10);
-  }
-  return adjusted;
-}
-
-/**
- * 迭代到收敛：反复「定目标 → 配餐单 → 用实际可达值修目标」，直到两边对上。
- *
- * 为什么不能只做一次：烹调油是按「脂肪缺口」算的，脂肪目标一降油也跟着降，
- * 于是第二遍的餐单又达不到第一遍算出来的目标（实测 100 kg 那组会差 20%）。
- * 迭代三四次就能稳定，代价是几毫秒的纯计算。
- *
- * @returns {{targets:object, plan:object, converged:boolean, rounds:number}}
- */
-export function convergePlan(rawTargets, options = {}) {
-  const seed = options.seed ?? 0;
-  const maxRounds = options.maxRounds ?? 6;
-  const kcalGap = (p, t) => Math.abs(p.planKcalWithOil - t.targetCalories) / t.targetCalories;
-
-  let targets = rawTargets;
-  let plan = buildMealPlan(targets, { seed });
-  let best = { targets, plan, gap: kcalGap(plan, targets) };
-  let rounds = 0;
-
-  for (let i = 0; i < maxRounds; i++) {
-    rounds = i + 1;
-    const ratio = plan.planFatWithOilG / targets.fatG;
-    if (ratio >= 0.95 && ratio <= 1.05) break;
-
-    const next = reconcileFatTarget(targets, plan);
-    if (Math.abs(next.fatG - targets.fatG) < 0.6) break;  // 目标已经稳定
-
-    const nextPlan = buildMealPlan(next, { seed });
-    const nextGap = kcalGap(nextPlan, next);
-    // 保险：只有「确实更接近热量目标」才接受新方案。
-    // 否则说明在震荡（脂肪目标一改、主食预算跟着变、热量反而偏离更多），就用当前最好的那份。
-    if (nextGap > best.gap + 0.02 && nextGap > 0.05) break;
-
-    targets = next;
-    plan = nextPlan;
-    if (nextGap < best.gap) best = { targets: next, plan: nextPlan, gap: nextGap };
-  }
-
-  const ratio = plan.planFatWithOilG / targets.fatG;
-  return {
-    targets,
-    plan,
-    fatRatio: ratio,
-    /** 收敛 = 脂肪目标与餐单基本一致（差距 5% 以内） */
-    converged: ratio >= 0.95 && ratio <= 1.05,
-    rounds,
-  };
-}
 
 /**
  * 生成一天的餐单
@@ -439,8 +345,13 @@ function composeMeals(targets, seed, carbBudgets) {
         grams = kcalCap;
         clampedBy = '热量额度';
       }
-      // 单个食物不超过 3 份（避免「4.5 个鸡蛋」这种不现实的量）
-      const maxServingsG = (food.servings?.[0]?.[1] || 100) * maxServingsFor(targets.targetCalories, 'protein');
+      // 主菜份量上限。注意不能用 servings[0] 当单位：虾的第一项是「一只 15 克」，
+      // 拿它乘份数会算出「午餐主菜 30 克（两只虾）」这种量（核验员抓到的）。
+      // 所以主菜用「一顿至少 80 克」和「按份数算的上限」取大者。
+      const servingUnit = (food.servings?.[0]?.[1] || 100) >= 40
+        ? (food.servings[0][1])
+        : Math.max(80, (food.servings?.[1]?.[1] || 100));
+      const maxServingsG = servingUnit * maxServingsFor(targets.targetCalories, 'protein');
       if (grams > maxServingsG) {
         grams = maxServingsG;
         clampedBy = clampedBy || '份量上限';
@@ -543,6 +454,40 @@ function composeMeals(targets, seed, carbBudgets) {
   return { meals, parts };
 }
 
+/**
+ * 餐单与目标的差距说明。
+ *
+ * 原则：**说实话**。热量差得多就说差多少、怎么补；蛋白不够就点出来（蛋白决定掉的是脂肪还是肌肉）；
+ * 脂肪不够就说用坚果/牛油果/多半勺油补。不能因为热量对上了就说「可以照这个吃」——
+ * 独立核验实测过：蛋白只达成 61~84% 时，原来的文案还在说「基本对得上」。
+ */
+export function buildDeviationNote({ deviation, planKcal, targets, planProteinG, planFatWithOilG, cookingOilG }) {
+  const lines = [];
+  const proteinRatio = targets.proteinG > 0 ? planProteinG / targets.proteinG : 1;
+  const fatRatio = targets.fatG > 0 ? planFatWithOilG / targets.fatG : 1;
+
+  if (deviation > 0.1) {
+    lines.push(`这份餐单比目标热量高约 ${Math.round(deviation * 100)}%，可以把主食减掉三分之一到一半。`);
+  } else if (deviation < -0.1) {
+    lines.push(`这份餐单按「三餐 + 加餐」的常规吃法给到约 ${planKcal} kcal，比目标少 ${Math.abs(Math.round(deviation * 100))}%（目标 ${targets.targetCalories} kcal 对这个结构来说偏高）。补法：把缺的部分用加餐补（一份酸奶 + 一把坚果约 250 kcal），或者每餐份量再加一半。`);
+  } else {
+    lines.push('热量和你的目标基本对得上（误差 10% 以内）。');
+  }
+
+  if (proteinRatio < 0.9) {
+    const gap = Math.max(0, Math.round(targets.proteinG - planProteinG));
+    lines.push(`但蛋白质差 ${gap} 克（只到目标的 ${Math.round(proteinRatio * 100)}%）。蛋白决定你掉的是脂肪还是肌肉，建议补：一勺乳清蛋白粉（约 25 克蛋白）或两份无糖希腊酸奶（约 27 克）。`);
+  }
+  if (fatRatio < 0.85) {
+    const gap = Math.max(0, Math.round(targets.fatG - planFatWithOilG));
+    lines.push(`脂肪也比目标少 ${gap} 克。补法：一小把坚果（约 25 克）或半个牛油果，也可以在炒菜里多加半勺油（5 克 ≈ 45 kcal）。`);
+  }
+  if (lines.length === 1 && deviation <= 0.1 && deviation >= -0.1) {
+    lines.push('可以照这个吃。');
+  }
+  return lines.join('');
+}
+
 /** 汇总整份餐单，并算出烹调油额度 */
 function finishPlan(meals, targets) {
   const sum = (k) => meals.reduce((a, m) => a + m[k], 0);
@@ -587,12 +532,7 @@ function finishPlan(meals, targets) {
     targetCalories: targets.targetCalories,
     proteinG: targets.proteinG,
     deviation: Math.round(deviation * 1000) / 10, // 百分比，正数表示餐单比目标多
-    deviationNote:
-      deviation > 0.1
-        ? '这份餐单比目标热量高一些，可以把主食减掉三分之一到一半。'
-        : deviation < -0.1
-          ? `这份餐单按「三餐 + 加餐」的常规吃法只能给到约 ${planKcal + oilKcal} kcal，比目标少 ${Math.abs(Math.round(deviation * 100))}%。原因是目标热量偏高，三餐装不下。两个办法：① 把缺的部分用加餐补（例如一份酸奶+一把坚果约 250 kcal）；② 直接把每餐份量加一半。`
-          : '这份餐单和你的目标基本对得上（误差 10% 以内），可以照这个吃。',
+    deviationNote: buildDeviationNote({ deviation, planKcal: planKcal + oilKcal, targets, planProteinG, planFatWithOilG: round(planFatG + cookingOilG, 1) }),
   };
 }
 
@@ -614,7 +554,7 @@ export function buildDailyTips(targets, oilFromPlan = null) {
     ];
   }
   return [
-    `炒菜用油全天 ${oilG} 克左右（大约${oilG <= 15 ? '一勺半' : oilG <= 24 ? '两勺' : '两勺半'}），这个量已经算进上面的餐单里了。外卖和食堂的菜普遍比这个油，吃到油腻的菜就用清水涮一下。`,
+    `炒菜用油全天 ${oilG} 克左右（约 ${(oilG / 10).toFixed(1).replace(/\.0$/, '')} 勺，一勺按 10 克算），这个量已经算进上面的餐单里了。外卖和食堂的菜普遍比这个油，吃到油腻的菜就用清水涮一下。`,
     '每天蔬菜 300~500 克，其中一半是深色叶菜。蔬菜几乎不占热量，但饱腹感靠它。',
     `蛋白质尽量吃够 ${targets.proteinG} 克，分成 3~4 餐吃比一顿全吃完更好吸收。`,
     '每天喝水 1500~2000 毫升。渴了经常被当成饿了。',

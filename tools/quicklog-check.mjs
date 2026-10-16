@@ -290,6 +290,33 @@ async function main() {
     console.log('（这一轮没有新徽章可解锁，跳过庆祝检查）');
   }
 
+  console.log('\n=== 一·六、设置页（我的）===');
+  await evaluate(`document.querySelector('#profileBtn').click()`);
+  await sleep(700);
+  const settings = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    条目: [...document.querySelectorAll('.set-row .set-main b')].map((e) => e.textContent.trim()),
+  }))()`);
+  console.log(`✅ 设置页：「${settings.标题}」包含 ${settings.条目.join('、')}`);
+  for (const must of ['AI 高级版', '数据与备份', '她的资料', '关于']) {
+    if (!settings.条目.includes(must)) problems.push(`设置页缺少「${must}」`);
+  }
+
+  // 备份页：导出/导入/快照都在
+  await evaluate(`[...document.querySelectorAll('.set-row')].find((r) => r.textContent.includes('数据与备份'))?.click()`);
+  await sleep(600);
+  const backup = await evaluate(`(() => ({
+    有导出: !!document.querySelector('#doExport'),
+    有导入: !!document.querySelector('#doImport'),
+    有快照按钮: !!document.querySelector('#doSnapshot'),
+    存档版本显示: (document.querySelector('#sheetBody')?.textContent || '').includes('v3'),
+  }))()`);
+  console.log(`✅ 备份页：导出 ${backup.有导出}｜导入 ${backup.有导入}｜手动快照 ${backup.有快照按钮}｜显示存档版本 ${backup.存档版本显示}`);
+  if (!backup.有导出 || !backup.有导入) problems.push('备份页缺少导出或导入');
+
+  await evaluate(`document.querySelector('#sheetClose').click()`);
+  await sleep(300);
+
   console.log('\n=== 二、按器械换有氧动作 ===');
   await evaluate(`document.querySelector('.tab[data-view="plan"]').click()`);
   await sleep(500);

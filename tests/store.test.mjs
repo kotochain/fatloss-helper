@@ -5,10 +5,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  emptyState, migrate, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
+  emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   updateFoodEntry, addExercise, removeExercise, addWeight, addCustomFood,
   weightTrend, analyzeProgress, demoProfile, demoEntries, STATE_VERSION,
 } from '../js/store.js';
+import { migrate } from '../js/schema.js';
 import { calcTargets, calcEntry } from '../js/calc.js';
 import { findFood } from '../js/foods.js';
 import { calculateTotals, groupByMeal, mealTotals, entryWarnings } from '../js/foodlog.js';
@@ -19,6 +20,7 @@ const egg = findFood('egg');
 test('空状态结构完整', () => {
   const s = emptyState();
   assert.equal(s.version, STATE_VERSION);
+  assert.equal(s.schemaVersion, STATE_VERSION, '两个版本号字段必须一致');
   assert.equal(s.profile, null);
   assert.deepEqual(s.days, {});
   assert.deepEqual(s.customFoods, []);
@@ -200,23 +202,22 @@ test('自定义食物：保存后能被搜索到', () => {
   assert.equal(f.category, 'custom');
 });
 
-test('存档迁移：旧版本数据缺字段也能打开', () => {
-  const old = { profile: demoProfile(), days: { '2026-10-16': { meals: { lunch: [] } } } };
+test('存档迁移：旧版本数据缺字段也能打开（迁移细节见 tests/schema.test.mjs）', () => {
+  const old = { profile: demoProfile(), days: { '2026-10-16': { meals: { lunch: [{ id: 'e1', food: rice, grams: 100 }] } } } };
   const m = migrate(old);
-  assert.equal(m.version, STATE_VERSION);
+  assert.equal(m.schemaVersion, STATE_VERSION);
   assert.deepEqual(m.customFoods, []);
   assert.deepEqual(m.weights, []);
   assert.equal(m.settings.trainDays, 3);
-  // 缺失的餐位会被补齐
   const day = getDay(m, '2026-10-16');
   for (const k of ['breakfast', 'lunch', 'dinner', 'snack']) assert.ok(Array.isArray(day.meals[k]));
+  assert.equal(day.meals.lunch[0].meal, 'lunch', '老记录要补上「哪一餐」');
 });
 
-test('存档迁移：乱七八糟的输入也不会崩', () => {
-  assert.deepEqual(migrate(null).days, {});
-  assert.deepEqual(migrate('字符串').days, {});
-  assert.deepEqual(migrate({ days: '不是对象' }).days, {});
-  assert.deepEqual(migrate({ customFoods: '不是数组' }).customFoods, []);
+test('存档迁移：乱七八糟的输入要报错，而不是「尽力解析」出空数据把人家的记录抹掉', () => {
+  for (const junk of [null, '字符串', { days: '不是对象' }, 42, []]) {
+    assert.throws(() => migrate(junk), /存档|格式|不是本工具/, `${JSON.stringify(junk)} 应当报错`);
+  }
 });
 
 test('存档能被 JSON 完整还原（导出/导入不会丢东西）', () => {

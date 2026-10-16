@@ -1,12 +1,15 @@
 import { round } from './calc.js';
 import { buildMealPlan } from './recommend.js';
 
-export const STATE_VERSION = 2;
+/** 结构版本号由 js/schema.js 统一管理（那里有完整的迁移链），这里只是本地别名 */
+import { SCHEMA_VERSION } from './schema.js';
+export const STATE_VERSION = SCHEMA_VERSION;
 
 /** 空状态：还没填资料 */
 export function emptyState() {
   return {
-    version: STATE_VERSION,
+    version: 3,           // 历史字段（老代码读它）；现在统一用 schemaVersion
+    schemaVersion: 3,
     profile: null,
     settings: { trainDays: 3, stepsKey: 'mid' },
     days: {},

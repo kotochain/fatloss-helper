@@ -164,12 +164,32 @@ test('维持体重模式：缺口为 0', () => {
   nearly(t.targetCalories, t.tdee, 1);
 });
 
+test('脂肪按 0.8（减脂）/ 0.9（维持）g/kg 给，热量不够时才降到 0.6 的下限', () => {
+  // 这条是补的：原来只断言「不低于 0.6 g/kg」，而 0.6 正好是下限值，
+  // 所以就算把理想值错写成 0.05 g/kg，测试也照样通过（反向验证抓出来的漏）。
+  // 现在同时断言上界：热量够用时必须给到理想值。
+  for (const w of [45, 58, 75, 95, 120]) {
+    for (const goal of ['lose', 'maintain']) {
+      const t = calcTargets({ sex: w > 80 ? 'male' : 'female', weightKg: w, heightCm: 170, age: 30, activity: 'light', pace: 'standard', goal });
+      const idealPerKg = goal === 'lose' ? 0.8 : 0.9;
+      const ideal = w * idealPerKg;
+      const floor = w * 0.6;
+      assert.ok(t.fatG >= floor, `${w}kg/${goal}：脂肪 ${t.fatG}g 低于 0.6 g/kg 的下限 ${floor.toFixed(1)}g`);
+      // 热量够（蛋白按 35% 上限 + 碳水 80 克底线之后还有余量）时必须给到理想值
+      const roomForIdeal = t.targetCalories - (t.targetCalories * 0.35) - 80 * 4;
+      if (roomForIdeal / 9 >= ideal) {
+        assert.ok(t.fatG >= ideal - 0.1, `${w}kg/${goal}：热量够用，脂肪应当至少给到理想值 ${ideal.toFixed(1)}g，实际 ${t.fatG}g`);
+      }
+    }
+  }
+});
+
 test('脂肪不低于 0.6 g/kg，碳水不低于 80 g', () => {
   for (const w of [45, 58, 75, 95, 120]) {
     const t = calcTargets({
       sex: w > 80 ? 'male' : 'female', weightKg: w, heightCm: 170, age: 30, activity: 'light', pace: 'fast', goal: 'lose',
     });
-    assert.ok(t.fatG >= w * 0.6 - 0.2, `${w}kg 的脂肪目标 ${t.fatG}g 低于下限`);
+    assert.ok(t.fatG >= w * 0.6, `${w}kg 的脂肪目标 ${t.fatG}g 低于 0.6 g/kg 下限（${(w * 0.6).toFixed(1)}g）`);
     assert.ok(t.carbG >= 80 - 0.2, `${w}kg 的碳水目标 ${t.carbG}g 低于下限`);
   }
 });
