@@ -224,10 +224,12 @@ async function main() {
   const welcome = await evaluate(`({
     文字: document.querySelector('#app')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 46),
     有引导按钮: !!document.querySelector('[data-act="onboard"]'),
+    有直接填资料: !!document.querySelector('[data-act="edit-profile"]'),
     有示例按钮: !!document.querySelector('[data-act="demo"]'),
   })`);
   console.log(`✅ 首次打开看到欢迎页：${welcome.文字}`);
-  console.log(`   引导入口 ${welcome.有引导按钮}｜示例入口 ${welcome.有示例按钮}`);
+  console.log(`   引导入口 ${welcome.有引导按钮}｜直接填资料 ${welcome.有直接填资料}｜示例入口 ${welcome.有示例按钮}`);
+  if (!welcome.有直接填资料) problems.push('欢迎页缺少「直接填资料」（老用户重装时不该被迫重看引导）');
   if (!welcome.有引导按钮) problems.push('首次打开没有引导入口');
 
   await evaluate(`document.querySelector('[data-act="onboard"]')?.click()`);
@@ -757,6 +759,20 @@ async function main() {
   if (train.估算文案.includes('可以多吃') || train.估算文案.includes('奖励')) problems.push('运动面板的文案在暗示「练了可以多吃」');
   if (train.统计.length !== 3) problems.push('运动记录里缺少「今天 / 这周 / 累计」三个数字');
 
+  // 版面：手机宽度下不许横向溢出（器械 + 动作 + 时长 + 强度全是 chips，换行写错就会撑破屏幕）
+  const layout = await evaluate(`(() => {
+    const de = document.documentElement;
+    const cutOff = [...document.querySelectorAll('#app button, #app .btn, #app .chip, #app .card, #app input')]
+      .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.right > window.innerWidth + 0.6 || r.left < -0.6); })
+      .map((el) => (el.textContent || el.tagName).trim().slice(0, 16));
+    return { 视口: window.innerWidth, 文档宽: de.scrollWidth, 横向溢出: de.scrollWidth > window.innerWidth + 1, 跑出屏幕: [...new Set(cutOff)].slice(0, 5) };
+  })()`);
+  console.log(layout.横向溢出 || layout.跑出屏幕.length
+    ? `❌ 「练的」版面：文档宽 ${layout.文档宽} / 视口 ${layout.视口}，跑出屏幕：${layout.跑出屏幕.join('、')}`
+    : `✅ 「练的」版面：${layout.视口}px 宽下没有横向溢出，也没有元素跑出屏幕`);
+  if (layout.横向溢出) problems.push('「练的」面板在手机宽度下横向溢出');
+  if (layout.跑出屏幕.length) problems.push(`「练的」面板有 ${layout.跑出屏幕.length} 个元素跑出屏幕`);
+
   // 改时长：估算必须立刻跟着变（不能等点了「记上」才重算）
   const kcalBefore = Number(train.估算数字);
   await evaluate(`(() => {
@@ -816,7 +832,7 @@ async function main() {
     剩余: document.querySelector('.ring-center .big')?.textContent || null,
     标签: document.querySelector('.ring-center .cap')?.textContent || null,
     已吃: document.querySelector('.hero .sub')?.textContent.replace(/\\s+/g, ' ').trim() || null,
-    有奖励胶囊: !!document.querySelector('.bonus-pill'),
+    运动胶囊: document.querySelector('.bonus-pill')?.textContent.replace(/\\s+/g, ' ').trim() || null,
     今天运动: [...document.querySelectorAll('.hero .stat')].map((s) => s.textContent.replace(/\\s+/g, ' ').trim()).find((t) => t.includes('运动')) || null,
     运动卡片: (() => {
       const card = [...document.querySelectorAll('.card')].find((c) => c.textContent.includes('今天的运动'));
@@ -825,11 +841,15 @@ async function main() {
   }))()`);
   console.log(`   记运动后：${heroAfter.标签} ${heroAfter.剩余} kcal ｜ ${heroAfter.已吃}`);
   console.log(`   今天页运动：${heroAfter.今天运动}｜${(heroAfter.运动卡片 || '').slice(0, 78)}…`);
+  console.log(`   运动胶囊：${heroAfter.运动胶囊 || '（没有）'}`);
   if (heroAfter.剩余 !== heroBefore.剩余 || heroAfter.标签 !== heroBefore.标签) {
     problems.push(`记运动把「${heroBefore.标签} ${heroBefore.剩余}」变成了「${heroAfter.标签} ${heroAfter.剩余}」—— 运动消耗不许加回当天可吃的额度`);
   }
   if (heroAfter.已吃 !== heroBefore.已吃) problems.push('什么都没吃，已吃热量却变了');
-  if (heroAfter.有奖励胶囊) problems.push('首页还有「运动奖励 … 已计入」的胶囊（红线：不许加回额度）');
+  // 运动胶囊本身可以有，但不许出现「奖励 / 已计入」这种「练了可以多吃」的暗示
+  if (heroAfter.运动胶囊 && /奖励|已计入|可以多吃/.test(heroAfter.运动胶囊)) {
+    problems.push(`首页的运动胶囊还在暗示「练了可以多吃」：${heroAfter.运动胶囊}`);
+  }
   if (!(heroAfter.今天运动 || '').includes('40')) problems.push('今天页没有显示刚记的 40 分钟运动');
 
   // 分段要记住：重新打开还停在「练的」
@@ -912,9 +932,9 @@ async function main() {
     for (const p of problems) console.log('  -', p);
     process.exitCode = 1;
   } else {
-    console.log('✅ 说一句记录 + 按器械换动作，两条流程都跑通');
+    console.log('✅ 说一句记录 + 按器械换动作 + 运动记录（含「额度不许变」的红线），三条流程都跑通');
   }
-  console.log(`截图：${outDir}/shot-quicklog.png、shot-portion.png（份量反问那块）、shot-cardio.png`);
+  console.log(`截图：${outDir}/shot-quicklog.png、shot-portion.png（份量反问那块）、shot-cardio.png、shot-training.png（练的那一半）`);
   void errors;
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill()]);
 }

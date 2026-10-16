@@ -1014,3 +1014,36 @@ details[open] summary { margin-bottom: 4px; }
   font-variant-numeric: tabular-nums;
   margin: 0 2px;
 }
+
+/* 器械选择器：平时收起来。
+   20 个器械摊开要占 7 行，而器械一周也未必换一次 —— 记录页要的是「几步就记上」。
+   收起时那一行仍然写着当前勾了哪些，不会让人不知道在按什么筛选。 */
+.train-equip { border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
+.train-equip > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.train-equip > summary::-webkit-details-marker { display: none; }
+.train-equip > summary .te-label { flex: none; }
+.train-equip > summary em {
+  font-style: normal;
+  color: var(--ink-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.train-equip > summary::after {
+  content: '改动 ›';
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  color: var(--rose-deep);
+}
+.train-equip[open] > summary::after { content: '收起 ›'; }
+.train-equip[open] > summary { margin-bottom: 8px; }

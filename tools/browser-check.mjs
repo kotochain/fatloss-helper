@@ -374,6 +374,10 @@ const hardTimer = setTimeout(() => {
 }, HARD_TIMEOUT_MS);
 
 main().catch((err) => {
+  // 失败也要立刻退出并带走 Chrome：只设 exitCode 的话进程会挂着，
+  // 卡到硬超时才被杀（表现为「跑了 150 秒才报错」，排查时很误导）
+  clearTimeout(hardTimer);
   console.error('自检失败：', err.message);
-  process.exitCode = 1;
+  try { execSync('pkill -9 -f chrome-profile || true'); } catch { /* 忽略 */ }
+  process.exit(1);
 });

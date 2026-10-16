@@ -62,6 +62,8 @@ let cardioPick = { equipment: ['treadmill', 'elliptical', 'bike', 'bodyweight'],
  * 放在模块里而不是当场读输入框：换分段、切换器械重绘之后，已经填好的时长和备注不能丢。
  */
 let trainingPick = { cardioId: null, exerciseKey: null, minutes: 30, intensity: '', note: '' };
+/** 器械选择器展开着没有 —— 展开时点一个器械会重绘，重绘不该把它又收起来 */
+let trainingEquipOpen = false;
 const app = $('#app');
 
 /* ── 存档 ────────────────────────────────── */
@@ -435,7 +437,8 @@ function renderWelcome() {
       </p>
       <button class="btn block" data-act="onboard">开始（约 1 分钟）</button>
       <div class="btn-row">
-        <button class="btn ghost grow" data-act="demo">先看一个填好的例子</button>
+        <button class="btn ghost grow" data-act="edit-profile">直接填资料</button>
+        <button class="btn ghost grow" data-act="demo">看一个填好的例子</button>
       </div>
       <p class="tiny muted" style="margin:12px 0 0">
         它只做估算和记录，不是医疗建议。如果你怀孕/哺乳、有甲状腺或肾脏问题、在吃影响体重的药，
@@ -472,11 +475,20 @@ function renderToday() {
     return acc;
   }, { kcal: 0, protein: 0, fat: 0, carb: 0 });
 
-  const exerciseKcal = day.exercises.reduce((a, x) => a + calcExerciseKcal({
-    mets: EXERCISES[x.exerciseKey]?.mets ?? 4, weightKg: state.profile.weightKg, minutes: x.minutes,
-  }), 0);
-  const bonus = Math.round(exerciseKcal * 0.5); // 只算一半，运动消耗普遍被高估
-  const budget = t.targetCalories + bonus;
+  // 运动消耗按记录里的 METs 算（老记录没有 mets 时退回旧池），跟记录页/计划页同一套
+  const exerciseKcal = day.exercises.reduce((a, x) => a + estimateTrainingKcal(x, state.profile.weightKg), 0);
+  /**
+   * 当天可吃的额度就是目标热量，不加任何运动补偿。
+   *
+   * 这里曾经把消耗的一半加进额度，去掉了，原因是它把同一次运动算了两遍：
+   * 她的活动量在资料里已经算过一次（选「轻度活动」= BMR × 1.375，已包含平时的走动）。
+   * 再加回来额度就凭空变多 —— 58 kg 的人爬坡走 30 分钟多出 91 kcal，一周 640 kcal，
+   * 够把「每周减 0.5%」变成「几乎不减」。而且这是这类 App 最坑人的地方：
+   * 练了就奖励自己多吃，缺口全抹平，还觉得自己很努力。
+   *
+   * 现在她每天都吃同一个数，最容易执行；动的那天缺口自然更大。
+   */
+  const budget = t.targetCalories;
   const remaining = Math.round(budget - totals.kcal);
   const pct = Math.min(100, Math.round((totals.kcal / budget) * 100));
   const cls = totals.kcal > budget * 1.05 ? 'over' : totals.kcal < budget * 0.8 ? 'under' : 'ok';
@@ -518,7 +530,7 @@ function renderToday() {
         </div>
       </div>
       <div class="sub">已吃 <b>${Math.round(totals.kcal)}</b> / 目标约 ${budget} kcal</div>
-      ${bonus ? `<div class="bonus-pill"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>运动奖励 ${bonus} kcal 已计入</div>` : ''}
+      ${exerciseKcal >= 30 ? `<div class="bonus-pill"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>今天动了 ${exerciseMin} 分钟 · 约 ${Math.round(exerciseKcal)} kcal（估算，不用吃回来）</div>` : ''}
 
       <div class="macro-list">
         ${macros.map((d) => {
@@ -599,16 +611,15 @@ function renderToday() {
     <div class="card">
       <div class="card-title">今天的运动 <span class="tiny muted">消耗按体重和时长估算</span></div>
       ${day.exercises.map((x) => {
-        const ex = EXERCISES[x.exerciseKey] || { name: x.exerciseKey, mets: 4 };
-        const kcal = calcExerciseKcal({ mets: ex.mets, weightKg: state.profile.weightKg, minutes: x.minutes });
+        const info = describeTraining(x, state.profile.weightKg);
         return `<div class="entry">
-          <span class="name">${esc(ex.name)}<em>${x.minutes} 分钟</em></span>
-          <span class="kcal">约 ${Math.round(kcal)} kcal</span>
+          <span class="name">${esc(info.name)}<em>${info.minutes} 分钟${info.intensityName ? ` · ${esc(info.intensityName)}` : ''}</em></span>
+          <span class="kcal">约 ${info.kcal} kcal</span>
           <button class="del" data-act="del-exercise" data-id="${x.id}" aria-label="删除">✕</button>
         </div>`;
       }).join('') || '<div class="tiny muted">还没记（走路也算，记上会更准）</div>'}
       <button class="add-line" data-act="add-exercise">＋ 加运动</button>
-      <p class="tiny muted" style="margin:8px 0 0">手环给的消耗通常偏高，所以这里只把估算值的一半算进「可以多吃」的额度。</p>
+      <p class="tiny muted" style="margin:8px 0 0">消耗是按体重和时长估的（手环通常偏高）。这部分不会加进你能吃的额度 —— 动了就多吃，缺口就白练了。</p>
     </div>
 
 `;
@@ -843,11 +854,16 @@ function renderTrainingPane() {
     <div class="card">
       <div class="card-title">记一次运动 <span class="tiny muted">消耗是估算，不是实测</span></div>
 
-      <label class="field"><span>今天能用的器械（可多选，和「计划」页共用）</span>
+      <details class="train-equip" id="trainEquipBox"${trainingEquipOpen ? ' open' : ''}>
+        <summary>
+          <span class="te-label">今天能用的器械</span>
+          <em>${esc(cardioPick.equipment.map((k) => EQUIPMENT[k]?.name || k).join('、'))}</em>
+        </summary>
         <div class="chips" id="trainEquip">
           ${listEquipment().map((eq) => `<button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-train-eq="${eq.key}">${eq.icon} ${eq.name}</button>`).join('')}
         </div>
-      </label>
+        <p class="tiny muted" style="margin:8px 0 0">勾了哪些，下面就只列哪些做得了的动作（和「计划」页共用同一份勾选）。</p>
+      </details>
 
       <div class="tiny muted" style="margin:12px 0 6px">练了什么？<span class="muted">（只列出现在勾的器械做得了的动作）</span></div>
       <div class="chips" id="trainCardio">
@@ -909,6 +925,9 @@ function renderTrainingPane() {
 /** 「练的」那一半的交互：挑动作、改时长、记上 */
 function bindTrainingPane() {
   drawTrainingEstimate();
+  // 器械选择器收起来时也要记住状态：展开着点器械 → 重绘 → 还要是展开的
+  const equipBox = $('#trainEquipBox');
+  equipBox?.addEventListener('toggle', () => { trainingEquipOpen = equipBox.open; });
   const markMinutes = () => {
     app.querySelectorAll('[data-train-min]').forEach((c) => {
       c.classList.toggle('on', Number(c.dataset.trainMin) === Number(trainingPick.minutes));

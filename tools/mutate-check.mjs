@@ -68,6 +68,13 @@ const MUTATIONS = [
   { file: 'js/mealparse.js', from: '  const below = nearest(true) || { label: labels[0], grams: round5(g * smallK) };', to: '  const below = nearest(true) || { label: labels[0], grams: g };', why: '档位的最小档必须真的比当前值小（否则点了没变化，等于白问）' },
   { file: 'js/mealparse.js', from: '  const above = nearest(false) || { label: labels[2], grams: round5(g * largeK) };', to: '  const above = nearest(false) || { label: labels[2], grams: g };', why: '档位的最大档必须真的比当前值大（否则点了没变化）' },
   { file: 'js/mealparse.js', from: "  if (portion.counting || !portion.portionWord) return { confidence: 'high', reason: null };", to: "  if (portion.counting) return { confidence: 'high', reason: null };", why: '她说了确切克数（「200克米饭」）就是说清了，不能再问' },
+  // ── 第八轮：运动记录与统计 ──
+  { file: 'js/exercise.js', from: 'if (key >= start && key <= end) {', to: 'if (key >= start) {', why: '「这周」必须两头都限制（只卡开始日期的话，下周一的记录会被算进这周）' },
+  { file: 'js/exercise.js', from: 'minutes += Math.round(Number(x?.minutes) || 0);', to: 'minutes += 1;', why: '运动统计要加时长而不是数次数（今天几分钟、累计几分钟全靠它）' },
+  { file: 'js/exercise.js', from: 'if (Number.isFinite(stored) && stored > 0) return stored;', to: 'if (false) return stored;', why: '记录里存下的 METs 必须优先用（否则爬坡走会被按快走的强度算）' },
+  { file: 'js/exercise.js', from: 'return pool?.mets ?? 4;', to: 'return 4;', why: '老记录没有 METs 时要退回旧 METs 池（跳绳 11 ≠ 快走 4）' },
+  { file: 'js/exercise.js', from: 'cardio: CARDIO.filter((e) => e.equipment.some((q) => avail.has(q))),', to: 'cardio: CARDIO.filter(() => true),', why: '只给今天器械做得了的动作（不能推荐跑步机的动作给只有椭圆机的人）' },
+  { file: 'js/exercise.js', from: 'const sinceMonday = (dt.getDay() + 6) % 7;', to: 'const sinceMonday = dt.getDay();', why: '一周从周一算起（写成 getDay 就成了周日算起，周日的记录会串到上一周）' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，
