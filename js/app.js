@@ -44,6 +44,15 @@ import {
 const STORAGE_KEY = 'fatloss.state.v2';
 const $ = (sel, root = document) => root.querySelector(sel);
 
+/**
+ * 启动时的提示（数据迁移、读取失败）。
+ * **必须声明在 load() 之前**：load() 会在模块顶层立刻执行，而它要给这个变量赋值。
+ * 之前它写在 200 行之后，结果是 —— 只要手机里有存档，一打开就白屏
+ * （`Cannot access 'startupNotice' before initialization`），而且新用户不受影响，
+ * 所以本地跑测试一直没暴露。这是最该记住的一课：模块顶层调用的函数，不能用后面才声明的 let。
+ */
+let startupNotice = null;
+
 let state = load();
 let view = 'today';
 let dateKey = todayKey();
@@ -67,9 +76,6 @@ let trainingEquipOpen = false;
 const app = $('#app');
 
 /* ── 存档 ────────────────────────────────── */
-
-/** 存档读取结果（用于启动后提示「已升级、数据都在」） */
-let startupNotice = null;
 
 function load() {
   const res = loadState(localStorage, { key: STORAGE_KEY });
@@ -191,6 +197,36 @@ document.querySelectorAll('.tab').forEach((btn) => {
   });
 });
 
+/**
+ * 界面坏了时的兜底页。
+ *
+ * 设计原则：**绝不让人卡在点不动的页面**。所以这里给三个出口，
+ * 而且第一个是最安全的（先让她能用），最后才是清数据（会丢记录，必须她说清才做）。
+ */
+function renderCrash(err, which) {
+  const where = { today: '今天', log: '记录', plan: '计划', progress: '我的' }[which] || which;
+  app.innerHTML = `
+    <div class="card">
+      <div class="card-title">这一页出了点问题</div>
+      <p class="small muted" style="margin:0 0 12px">
+        「${esc(where)}」这一页没能显示出来。你的记录还在，不用怕 —— 先试试下面第一个按钮。
+      </p>
+      <button class="btn block" data-act="crash-retry">重新打开这一页</button>
+      <div class="btn-row">
+        <button class="btn ghost grow" data-act="crash-other">回到今天</button>
+        <button class="btn ghost grow" data-act="crash-export">先导出备份</button>
+      </div>
+      <details style="margin-top:14px">
+        <summary class="tiny muted" style="cursor:pointer">技术信息（可以截图发给我）</summary>
+        <p class="tiny muted" style="word-break:break-all;margin:8px 0 0">${esc(String(err && err.message || err))}</p>
+      </details>
+      <p class="tiny muted" style="margin:14px 0 0">
+        如果一直打不开，可以用「我的 → 设置 → 数据与备份」导出记录，然后重新开始。
+      </p>
+    </div>`;
+  bindCommon();
+}
+
 /* ── 主渲染 ──────────────────────────────── */
 
 function render() {
@@ -204,15 +240,34 @@ function render() {
     nameTag.hidden = !who;   // 没填称呼就不显示，不硬塞一个名字
   }
   if (!state.profile && view !== 'progress') {
-    renderWelcome();
+    try {
+      renderWelcome();
+    } catch (err) {
+      console.error('欢迎页渲染失败：', err);
+      renderCrash(err, 'welcome');
+      return;
+    }
+    // 这个 return 曾经直接跳过了末尾的 bindCommon()，
+    // 于是欢迎页上所有 [data-act] 按钮都点不动 —— 用户报的「卡页面死机点都点不了」就是它。
+    // 教训：渲染函数和「绑事件」必须成对，不能让中间某个 return 把绑定漏掉。
+    bindCommon();
     return;
   }
   // 有资料但没走完引导：补一句提示，不硬拦（她可能只是想先看看）
   // 引导入口固定放在欢迎页和「我的 → 设置」里，不重复弹窗打扰。
-  if (view === 'today') renderToday();
-  else if (view === 'log') renderLog();
-  else if (view === 'plan') renderPlan();
-  else renderProgress();
+  // 错误边界：任何一个界面抛异常，都不许让应用变成点不动的砖头。
+  // 之前没有这层保护 —— renderToday 里任何一处报错都会让页面停在半渲染状态，
+  // 表现就是用户说的「卡页面死机点都点不了」。宁可显示一个能救回来的界面。
+  try {
+    if (view === 'today') renderToday();
+    else if (view === 'log') renderLog();
+    else if (view === 'plan') renderPlan();
+    else renderProgress();
+  } catch (err) {
+    console.error('界面渲染失败：', err);
+    renderCrash(err, view);
+    return;
+  }
   bindCommon();
   if (view === 'today') {
     bindQuickLog();
@@ -220,9 +275,27 @@ function render() {
   }
 }
 
+/**
+ * 给当前页面里所有 [data-act] 按钮绑事件。
+ *
+ * 幂等：同一个按钮只绑一次（用 dataset.bound 记着）。
+ * 为什么需要幂等：renderCrash、欢迎页、正常渲染都各自要绑，
+ * 万一哪条路径重复调用，按钮就会被绑两次 —— 点一下执行两次（表现是"记了两笔"）。
+ */
 function bindCommon() {
   app.querySelectorAll('[data-act]').forEach((el) => {
-    el.addEventListener('click', () => handleAction(el.dataset.act, el.dataset));
+    if (el.dataset.bound === '1') return;
+    el.dataset.bound = '1';
+    el.addEventListener('click', () => {
+      // 点了没反应是最难查的问题（用户只会说「点不动」）。
+      // 所以这里兜住异常：至少弹一句，让她知道发生了什么。
+      try {
+        handleAction(el.dataset.act, el.dataset);
+      } catch (err) {
+        console.error(`操作失败（${el.dataset.act}）：`, err);
+        toast('这一步没能完成，可以再试一次。');
+      }
+    });
   });
 }
 
@@ -231,6 +304,11 @@ function handleAction(act, data) {
     case 'add-food': return openFoodSheet(data.meal);
     case 'growth': return openGrowthSheet();
     case 'insights': return openInsightsSheet();
+    case 'crash-retry': view = view || 'today'; return render();
+    case 'crash-other': return goView('today');
+    case 'crash-export': return exportData();
+    case 'recover': return openRecoverSheet();
+    case 'wipe': return openWipeSheet();
     case 'onboard': return onboard({ step: 'intro' });
     case 'go-log':
       // 这两条都是「记吃」的入口，所以要把记录页切回「吃的」那一半 ——
@@ -295,15 +373,25 @@ function handleAction(act, data) {
 
 const ONBOARD_STEPS = ['intro', 'profile', 'mode', 'first'];
 
-function onboard({ step, targets: t = null } = {}) {
-  if (step === 'intro') return onboardIntro();
-  if (step === 'profile') return openProfileSheet({ firstTime: true, onSaved: (tt) => onboard({ step: 'mode', targets: tt }) });
-  if (step === 'mode') return onboardMode(t);
-  if (step === 'first') return onboardFirst();
-  return onboardIntro();
+/**
+ * 新手引导。
+ * @param {{step?:string, targets?:object, review?:boolean}} options
+ *   review=true 表示「重看一遍」：走完回设置页，而且**不要**重置已经选好的模式、
+ *   也不要把她推到记录页（她只是忘了怎么用，不是新人）。
+ */
+function onboard({ step, targets: t = null, review = false } = {}) {
+  if (step === 'intro') return onboardIntro(review);
+  if (step === 'profile') {
+    // 重看时不逼她重填资料：有资料就直接跳到模式那一步
+    if (review && state.profile) return onboard({ step: 'mode', targets: calcTargets(state.profile), review });
+    return openProfileSheet({ firstTime: true, onSaved: (tt) => onboard({ step: 'mode', targets: tt, review }) });
+  }
+  if (step === 'mode') return onboardMode(t, review);
+  if (step === 'first') return onboardFirst(review);
+  return onboardIntro(review);
 }
 
-function onboardIntro() {
+function onboardIntro(review = false) {
   openSheet({
     title: '先说三件事',
     body: `
@@ -324,20 +412,21 @@ function onboardIntro() {
         <p>不联网、不上传、不需要注册。换手机或清缓存前记得导出备份（在「我的」里）。
         它只做估算和记录，不是医疗建议。</p>
       </div>`,
-    foot: '<button class="btn block" id="obNext">开始</button>',
+    foot: `<button class="btn block" id="obNext">${review ? '继续' : '开始'}</button>`,
     onMount: (_b, foot) => {
-      $('#obNext', foot).addEventListener('click', () => onboard({ step: 'profile' }));
+      $('#obNext', foot).addEventListener('click', () => onboard({ step: 'profile', review }));
     },
   });
 }
 
-function onboardMode(t) {
+function onboardMode(t, review = false) {
   const kcal = t ? Math.round(t.targetCalories / 10) * 10 : null;
   openSheet({
     title: '选一个模式',
     body: `
       <div class="onboard-step">3 / 4</div>
       ${kcal ? `<div class="warn info">你每天的目标大约是 <b>${kcal} kcal</b>。下面两种模式都能用这个目标。</div>` : ''}
+      ${review ? `<p class="tiny muted">现在是<b>${useMode() === 'ai' ? 'AI 模式' : '普通模式'}</b>，想换就点另一个。</p>` : ''}
       <button class="mode-chip big" data-pick="basic">
         <b>普通模式</b>
         <em>不用配任何东西，打开就能用。
@@ -364,9 +453,9 @@ function onboardMode(t) {
           if (pick === 'ai') {
             // 选 AI 就直接带她去配密钥，别让她自己找
             closeSheet();
-            openAiSettingsSheet({ then: () => onboard({ step: 'first' }) });
+            openAiSettingsSheet({ then: () => onboard({ step: 'first', review }) });
           } else {
-            onboard({ step: 'first' });
+            onboard({ step: 'first', review });
           }
         });
       });
@@ -374,14 +463,14 @@ function onboardMode(t) {
   });
 }
 
-function onboardFirst() {
+function onboardFirst(review = false) {
   openSheet({
     title: '最后一步',
     body: `
       <div class="onboard-step">4 / 4</div>
       <div class="onboard-hero">🌱</div>
       <div class="onboard-h">
-        <b>记下第一笔，就开始了</b>
+        <b>${review ? '记一笔试试' : '记下第一笔，就开始了'}</b>
         <p>不用追求记得准。第一笔随便记点什么 —— 早饭、一杯奶茶、一顿外卖都行。
         记录本身就会让它越来越懂你：记满 4 天，「你的规律」里就会出现只属于你的结论。</p>
       </div>
@@ -394,24 +483,25 @@ function onboardFirst() {
       <button class="btn ghost block" id="obLater" style="margin-top:8px">我先随便看看</button>`,
     onMount: (_b, foot) => {
       $('#obGo', foot).addEventListener('click', () => {
-        finishOnboarding();
+        finishOnboarding(review);
         goView('log');
         setTimeout(() => { $('#quickText')?.focus(); }, 300);
       });
       $('#obLater', foot).addEventListener('click', () => {
-        finishOnboarding();
-        goView('today');
+        finishOnboarding(review);
+        goView(review ? 'progress' : 'today');
       });
     },
   });
 }
 
 /** 引导只做一次；记在存档里，换设备要重新走（数据不在，走了才有意义） */
-function finishOnboarding() {
+function finishOnboarding(review = false) {
   state.settings = { ...(state.settings || {}), onboarded: true };
   save();
   closeSheet();
   render();
+  if (review) return; // 重看一遍不需要再提示一遍目标
   setTimeout(() => {
     const t = targets();
     if (t) toast(`记一笔试试。你今天的目标是约 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
@@ -439,6 +529,9 @@ function renderWelcome() {
       <div class="btn-row">
         <button class="btn ghost grow" data-act="edit-profile">直接填资料</button>
         <button class="btn ghost grow" data-act="demo">看一个填好的例子</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost grow" data-act="recover">已经用过？点这里找回记录</button>
       </div>
       <p class="tiny muted" style="margin:12px 0 0">
         它只做估算和记录，不是医疗建议。如果你怀孕/哺乳、有甲状腺或肾脏问题、在吃影响体重的药，
@@ -1934,9 +2027,15 @@ function openSettingsSheet() {
         <span class="set-go">›</span>
       </button>
 
+      <button class="set-row" data-set="wipe">
+        <span class="set-ico">🧹</span>
+        <span class="set-main"><b>从头开始</b><em>清掉这台手机上的记录，重新走一遍新手引导</em></span>
+        <span class="set-go">›</span>
+      </button>
+
       <button class="set-row" data-set="guide">
         <span class="set-ico">🧭</span>
-        <span class="set-main"><b>重新看一遍新手引导</b><em>忘了它是怎么算的、想改模式，都从这里</em></span>
+        <span class="set-main"><b>重看新手引导</b><em>忘了怎么用、想换模式，都从这里（不会动你的记录）</em></span>
         <span class="set-go">›</span>
       </button>
 
@@ -1971,8 +2070,154 @@ function openSettingsSheet() {
           else if (which === 'growth') { closeSheet(); openGrowthSheet(); }
           else if (which === 'backup') openBackupSheet();
           else if (which === 'about') openAboutSheet();
-          else if (which === 'guide') { closeSheet(); setTimeout(() => onboard({ step: 'intro' }), 250); }
+          else if (which === 'guide') { closeSheet(); setTimeout(() => onboard({ step: 'intro', review: true }), 250); }
+          else if (which === 'wipe') openWipeSheet();
         });
+      });
+    },
+  });
+}
+
+/* ── 找回记录 / 清除数据 ────────────────────
+   这一对是给「用不下去了」准备的，两个都要有：
+   · 找回：记录其实还在，只是进了欢迎页（读取出问题、或换了键名）
+   · 清除：记录确实不想要了（试用期的乱数据），想从头走一遍
+   ─────────────────────────────────────────── */
+
+/** 存档在不在（顺便看有几个键里有东西） */
+function inspectStorage() {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith('fatloss')) continue;
+      const val = localStorage.getItem(key) || '';
+      let days = 0;
+      let hasProfile = false;
+      try {
+        const parsed = JSON.parse(val);
+        days = Object.keys(parsed?.days || {}).length;
+        hasProfile = Boolean(parsed?.profile);
+      } catch { /* 坏数据就只报大小 */ }
+      out.push({ key, kb: Math.round(val.length / 1024), days, hasProfile });
+    }
+  } catch { /* 隐私模式下读不到 */ }
+  return out;
+}
+
+function openRecoverSheet() {
+  const found = inspectStorage();
+  const backup = readBackup(localStorage);
+  openSheet({
+    title: '找回记录',
+    body: `
+      <div class="set-note">
+        <b>先别急着重来</b><br>
+        记录一般都还在手机里。下面这几步从上往下试，能找回来就不用重来。
+      </div>
+
+      <div class="set-note">
+        <b>这台手机上找到的东西</b><br>
+        ${found.length
+          ? found.map((f) => `· ${esc(f.key)}：约 ${f.kb} KB${f.days ? `，${f.days} 天记录` : ''}${f.hasProfile ? '，有资料' : ''}`).join('<br>')
+          : '（没找到任何记录）'}
+      </div>
+
+      ${backup ? `
+        <button class="btn block" data-recover="backup">用升级前的快照恢复（${esc(String(backup.savedAt).slice(0, 10))}）</button>
+        <p class="tiny muted" style="margin:6px 0 12px">${esc(backup.note || '')}</p>` : ''}
+
+      <button class="btn block" data-recover="reload">重新读一次存档</button>
+      <button class="btn ghost block" style="margin-top:8px" data-recover="import">从备份文件导入</button>
+
+      <hr class="sep">
+      <p class="tiny muted">
+        都不行的话，可以「先导出备份」把现在的内容存下来发给我看，
+        然后去「数据与备份」里从头开始（会清掉这台手机上的记录）。
+      </p>`,
+    onMount: (body) => {
+      body.querySelectorAll('[data-recover]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const how = el.dataset.recover;
+          if (how === 'backup') {
+            const b = readBackup(localStorage);
+            if (!b) return toast('快照读不出来了。');
+            const migrated = migrateToCurrent(b.data);
+            if (!migrated.ok) return toast(migrated.error);
+            if (!confirm('用这份快照覆盖现在的记录？（当前内容会先导出保存）')) return;
+            exportData();
+            state = migrated.data;
+            save();
+            closeSheet();
+            render();
+            return toast('已从快照恢复。');
+          }
+          if (how === 'reload') {
+            const res = loadState(localStorage, { key: STORAGE_KEY });
+            if (!res.ok) return toast(res.error);
+            if (!res.data) return toast('这台手机上确实没有记录。');
+            state = res.data;
+            save();
+            closeSheet();
+            render();
+            return toast('读到了，记录已经回来。');
+          }
+          if (how === 'import') { closeSheet(); return importData(); }
+          return undefined;
+        });
+      });
+    },
+  });
+}
+
+/**
+ * 从头开始（清掉记录）。
+ *
+ * 为什么单独做这个：试用期记的乱数据会一直影响目标、洞察和徽章，
+ * 想干净地走一遍新手引导，就必须能清。
+ * 但它会删掉真实记录，所以**要求输入「清除」两个字**，而不是点一下 confirm 就没了。
+ */
+function openWipeSheet() {
+  const found = inspectStorage();
+  const totalDays = found.reduce((a, f) => a + f.days, 0);
+  openSheet({
+    title: '从头开始',
+    body: `
+      <div class="warn">
+        这会删掉这台手机上的<b>全部记录</b>：${totalDays ? `${totalDays} 天的饮食和运动、` : ''}体重、徽章、设置。
+        <br>删掉之后不能撤销。
+      </div>
+      <div class="set-note">
+        <b>开始之前建议先导出</b><br>
+        导出的是一个文件，以后想恢复（或想让我看看到底哪里出错）都能用。
+      </div>
+      <button class="btn block" data-wipe="export">先导出备份</button>
+      <hr class="sep">
+      <label class="field"><span>确认的话，输入「清除」两个字</span>
+        <input type="text" id="wipeConfirm" placeholder="清除" autocomplete="off">
+      </label>`,
+    foot: '<button class="btn ghost block" id="wipeGo" disabled>清除全部记录，从头开始</button>',
+    onMount: (body, foot) => {
+      const input = $('#wipeConfirm', body);
+      const go = $('#wipeGo', foot);
+      body.querySelector('[data-wipe="export"]').addEventListener('click', exportData);
+      input.addEventListener('input', () => { go.disabled = input.value.trim() !== '清除'; });
+      go.addEventListener('click', () => {
+        if (input.value.trim() !== '清除') return;
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+          clearBackup(localStorage);
+        } catch (err) {
+          return toast(`没能清掉：${err.message}`);
+        }
+        state = emptyState();
+        save();
+        closeSheet();
+        // 清完直接进新手引导 —— 她的目的就是「从头开始」
+        render();
+        toast('已经清空，我们从头来一遍。');
+        setTimeout(() => onboard({ step: 'intro' }), 400);
+        return undefined;
       });
     },
   });
@@ -2805,7 +3050,23 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // 问一次服务端「AI 配好了没」。没配也不影响使用，只是走离线解析。
 aiStatus().then((st) => { ai = { ...st, checked: true }; if (view === 'log') render(); }).catch(() => {});
 
+/** 启动失败的兜底：不让用户看到一片空白 */
+function renderBootFailure(err) {
+  console.error('启动失败：', err);
+  const box = document.getElementById('bootFail');
+  if (box) {
+    box.hidden = false;
+    const detail = document.getElementById('bootFailDetail');
+    if (detail) detail.textContent = String(err && (err.stack || err.message) || err).slice(0, 300);
+    return;
+  }
+  // 连兜底块都没有（老版本 index.html 被缓存）：至少往页面里写一句
+  const main = document.getElementById('app');
+  if (main) main.innerHTML = '<div class="card"><div class="card-title">没能打开</div><p class="small muted">请刷新一次页面。如果一直这样，清理本站数据后重试。</p></div>';
+}
+
 const bootParams = new URLSearchParams(location.search);
+try {
 if (bootParams.has('__selfcheck')) {
   selfCheck();
 } else if (bootParams.get('demo') === '1') {
@@ -2819,12 +3080,16 @@ if (bootParams.has('__selfcheck')) {
   save();
   render();
 } else if (!state) {
+  // 空存档：只负责建状态，界面交给 render() —— 它才会绑按钮。
+  // 之前这里直接调 renderWelcome() 并且只补了 bindCommon()，
+  // 后来的改动让页面结构变了，欢迎页的按钮就变成点不动了（用户报的「点都点不了」）。
   state = emptyState();
-  renderWelcome();
-  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
-  bindCommon();
+  render();
 } else {
   render();
+}
+} catch (err) {
+  renderBootFailure(err);
 }
 
 // 启动时如果发生过数据迁移（或读不出来），第一时间告诉她 —— 这种信息不能藏

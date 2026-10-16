@@ -215,6 +215,58 @@ async function main() {
   console.log(apiNotCached === 0 ? '✅ 接口请求没有被离线缓存接管' : `❌ 有 ${apiNotCached} 个 /api 请求被缓存了`);
   if (apiNotCached !== 0) problems.push('/api 请求被离线缓存接管，设置页会读到旧状态');
 
+  console.log('\n=== 〇·一、白屏与「点不动」的回归测试（用户真机上踩到过）===');
+  /*
+   * 守两次真机事故：
+   *  1) 手机里有存档时一打开就白屏 —— load() 在模块顶层跑，却赋值给一个后面才声明的 let
+   *     （Cannot access 'startupNotice' before initialization）。新用户没存档，本地测试一直没暴露。
+   *  2) 欢迎页所有按钮点不动 —— render() 在欢迎页分支里 return，跳过了末尾的 bindCommon()。
+   * 这两条都不会让单元测试变红（单元测试加载不了 app.js），只能靠真浏览器守。
+   */
+  await evaluate(`(() => {
+    // 老版本存档：有记录、没有 profile（她之前用过的版本就是这种形状）
+    const old = {
+      version: 1,
+      days: { '2026-10-10': { meals: { lunch: [{ id: 'e1', food: { id: 'rice_cooked', name: '米饭（熟）', kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9 }, grams: 200 }] }, exercises: [] } },
+      weights: [{ date: '2026-10-10', kg: 58 }],
+      customFoods: [],
+    };
+    localStorage.clear();
+    localStorage.setItem('fatloss.state.v2', JSON.stringify(old));
+    return true;
+  })()`);
+  await client.send('Page.navigate', { url: BASE + '/' });
+  await sleep(2000);
+  const oldSave = await evaluate(`({
+    启动成功: window.__appReady === true,
+    有内容: (document.querySelector('#app')?.textContent || '').trim().length > 10,
+    按钮数: document.querySelectorAll('#app [data-act]').length,
+    记录天数: (() => { try { const s = JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}'); return Object.keys(s.days || {}).length; } catch { return -1; } })(),
+  })`);
+  console.log(`✅ 手机里有老存档时打开：启动 ${oldSave.启动成功}｜有内容 ${oldSave.有内容}｜按钮 ${oldSave.按钮数} 个｜记录还在 ${oldSave.记录天数} 天`);
+  if (!oldSave.启动成功 || !oldSave.有内容) problems.push('有存档时页面没渲染出来（白屏）—— 用户真机上发生过');
+  if (oldSave.记录天数 < 1) problems.push('打开后老记录不见了');
+
+  // 欢迎页的按钮必须真的能点（点了要开弹层）
+  const clickable = await evaluate(`(async () => {
+    const out = [];
+    for (const act of ['recover', 'onboard']) {
+      const b = [...document.querySelectorAll('#app [data-act]')].find((x) => x.dataset.act === act);
+      if (!b) { out.push([act, '按钮不在']); continue; }
+      b.click();
+      await new Promise((r) => setTimeout(r, 500));
+      out.push([act, document.querySelector('#sheetRoot')?.classList.contains('hidden') ? '点了没反应' : '弹层开了']);
+      document.querySelector('#sheetClose')?.click();
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return out;
+  })()`);
+  for (const [act, res] of clickable) {
+    console.log(`   ${res === '弹层开了' ? '✅' : '❌'} 欢迎页按钮「${act}」→ ${res}`);
+    if (res !== '弹层开了') problems.push(`欢迎页按钮「${act}」点了没反应（用户报过的「点都点不了」）`);
+  }
+
+
   console.log('\n=== 一·〇、新手引导（第一次打开的人看到的）===');
   // 清空存储，模拟「第一次打开」
   await evaluate(`(async () => { localStorage.clear(); const r = await navigator.serviceWorker.getRegistrations(); await Promise.all(r.map((x) => x.unregister())); for (const n of await caches.keys()) await caches.delete(n); return true; })()`);

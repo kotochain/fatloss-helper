@@ -14,6 +14,27 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+<!--
+  最外层兜底：如果 js/app.js 根本没跑起来（语法/加载/早期异常），页面上要有人话，
+  而不是一片空白。用户只会说「卡死了、点不动」—— 这正是这个应用最该避免的体验。
+  这段必须内联、不依赖任何模块，因为它要处理的正是「模块没起来」。
+-->
+<script>
+  window.__appReady = false;
+  window.addEventListener('error', function (e) {
+    if (window.__appReady) return;            // 已经正常启动，交给应用自己处理
+    var box = document.getElementById('bootFail');
+    if (!box) return;
+    box.hidden = false;
+    var detail = document.getElementById('bootFailDetail');
+    if (detail) detail.textContent = String((e && (e.message || e.error)) || '未知错误');
+  });
+  setTimeout(function () {
+    if (window.__appReady) return;
+    var box = document.getElementById('bootFail');
+    if (box) box.hidden = false;
+  }, 4000);
+</script>
 
 <!-- 图标：内联 SVG，避免依赖外部图标库，也保证离线可用 -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
