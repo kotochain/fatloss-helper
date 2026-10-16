@@ -130,30 +130,34 @@ async function main() {
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('#quickParse').click();
   })()`);
-  await waitFor(() => evaluate(`document.querySelectorAll('#quickResult .entry').length || null`), { what: '解析结果出现' });
+  await waitFor(() => evaluate(`document.querySelectorAll('#draftHost .entry').length || null`), { what: '解析结果出现（弹层）' });
+  const inSheet = await evaluate(`!document.querySelector('#sheetRoot').classList.contains('hidden')`);
   const draft = await evaluate(`(() => {
-    const rows = [...document.querySelectorAll('#quickResult .entry')];
+    const rows = [...document.querySelectorAll('#draftHost .entry')];
     return {
+      弹层标题: document.querySelector('#sheetTitle')?.textContent || null,
       条数: rows.length,
       条目: rows.map((r) => r.querySelector('.name').textContent.trim().replace(/\\s+/g, ' ')),
-      合计: document.querySelector('#quickResult .row.between b')?.textContent || null,
+      合计: document.querySelector('#draftHost .row.between b')?.textContent || null,
       有餐次选择: !!document.querySelector('#draftMeal'),
       有确认按钮: !!document.querySelector('#draftSave'),
     };
   })()`);
+  console.log(inSheet ? '✅ 解析结果用弹层展示（不用往下滚去找）' : '❌ 解析结果没在弹层里');
+  console.log(`   弹层标题：「${draft.弹层标题}」`);
   console.log(`✅ 解析出 ${draft.条数} 条：${draft.条目.join('、')}｜合计 ${draft.合计} kcal｜可改份量/餐次 ${draft.有餐次选择}`);
   if (draft.条数 === 0) problems.push('一句话没解析出任何条目');
   if (!draft.有确认按钮) problems.push('缺少「记上」按钮');
 
   // 改份量：把第一条改成 800 克，看合计有没有跟着变
-  const before = await evaluate(`document.querySelector('#quickResult .row.between b').textContent`);
+  const before = await evaluate(`document.querySelector('#draftHost .row.between b').textContent`);
   await evaluate(`(() => {
-    const inp = document.querySelector('#quickResult .draft-grams');
+    const inp = document.querySelector('#draftHost .draft-grams');
     inp.value = '800';
     inp.dispatchEvent(new Event('input', { bubbles: true }));
   })()`);
   await sleep(200);
-  const after = await evaluate(`document.querySelector('#quickResult .row.between b').textContent`);
+  const after = await evaluate(`document.querySelector('#draftHost .row.between b').textContent`);
   console.log(`✅ 改份量后合计从 ${before} 变成 ${after} kcal`);
   if (before === after) problems.push('改份量没有重算热量');
 

@@ -15,20 +15,50 @@
 </head>
 <body>
 
+<!-- 图标：内联 SVG，避免依赖外部图标库，也保证离线可用 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-today"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3 2"/></g>
+    <g id="i-pencil"><path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4 16.5V20z"/><path d="M13.5 6.5 17.5 10.5"/></g>
+    <g id="i-plan"><path d="M5 4.5h14v15H5z"/><path d="M5 9.5h14M9 4.5v15"/></g>
+    <g id="i-trend"><path d="M4 17l5-5 3.5 3.5L20 8"/><path d="M15 8h5v5"/></g>
+    <g id="i-left"><path d="M14.5 6 9 12l5.5 6"/></g>
+    <g id="i-right"><path d="M9.5 6 15 12l-5.5 6"/></g>
+    <g id="i-cal"><path d="M4.5 6.5h15v13h-15z"/><path d="M4.5 10.5h15M9 4v4M15 4v4"/></g>
+    <g id="i-cog"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M4.9 7.5l1.9 1.1M17.2 15.4l1.9 1.1M4.9 16.5l1.9-1.1M17.2 8.6l1.9-1.1"/></g>
+    <g id="i-plus"><path d="M12 5.5v13M5.5 12h13"/></g>
+    <g id="i-close"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></g>
+    <g id="i-chat"><path d="M4.5 6.5h15v10h-9l-6 4z"/></g>
+    <g id="i-fire"><path d="M12 3.5c3 3.5 5.5 5.6 5.5 9a5.5 5.5 0 0 1-11 0c0-2 .8-3.2 2-4.7.4 1.4 1 2.2 2 2.6-.6-2.6.3-5 1.5-6.9z"/></g>
+    <g id="i-pin"><path d="M12 21s6.5-5.7 6.5-10.5A6.5 6.5 0 0 0 5.5 10.5C5.5 15.3 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.4"/></g>
+  </defs>
+</svg>
+
 <header class="topbar">
-  <button id="prevDay" class="icon-btn" aria-label="前一天">‹</button>
-  <button id="dateLabel" class="date-label">今天</button>
-  <button id="nextDay" class="icon-btn" aria-label="后一天">›</button>
+  <button id="prevDay" class="icon-btn" aria-label="前一天">
+    <svg viewBox="0 0 24 24" class="ic"><use href="#i-left"/></svg>
+  </button>
+  <button id="dateLabel" class="date-label">
+    <svg viewBox="0 0 24 24" class="ic"><use href="#i-cal"/></svg>
+    <span id="dateText">今天</span>
+  </button>
+  <button id="nextDay" class="icon-btn" aria-label="后一天">
+    <svg viewBox="0 0 24 24" class="ic"><use href="#i-right"/></svg>
+  </button>
   <button id="profileBtn" class="avatar" aria-label="我的资料">我</button>
 </header>
 
 <main id="app"></main>
 
 <nav class="tabbar">
-  <button data-view="today" class="tab active"><span class="tab-icon">◎</span>今天</button>
-  <button data-view="log" class="tab"><span class="tab-icon">✎</span>记录</button>
-  <button data-view="plan" class="tab"><span class="tab-icon">☰</span>推荐</button>
-  <button data-view="progress" class="tab"><span class="tab-icon">↗</span>体重</button>
+  <button data-view="today" class="tab active">
+    <svg viewBox="0 0 24 24" class="ic"><use href="#i-today"/></svg>今天</button>
+  <button data-view="log" class="tab">
+    <svg viewBox="0 0 24 24" class="ic"><use href="#i-pencil"/></svg>记录</button>
+  <button data-view="plan" class="tab">
+    <svg viewBox="0 0 24 24" class="ic"><use href="#i-plan"/></svg>推荐</button>
+  <button data-view="progress" class="tab">
+    <svg viewBox="0 0 24 24" class="ic"><use href="#i-trend"/></svg>体重</button>
 </nav>
 
 <div id="sheetRoot" class="sheet-root hidden" aria-hidden="true">

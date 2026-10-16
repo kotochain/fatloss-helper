@@ -82,14 +82,15 @@ function esc(s) {
 
 function toast(msg) {
   const el = document.createElement('div');
-  el.className = 'warn info';
-  // 弹层打开时，提示条要挪到弹层上方，否则会盖住弹层里的按钮
-  const sheetOpen = !$('#sheetRoot').classList.contains('hidden');
-  const bottom = sheetOpen ? 'min(78vh, 640px)' : '96px';
-  el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);z-index:80;max-width:440px;width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.14);bottom:calc(' + bottom + ' + env(safe-area-inset-bottom))';
+  el.className = 'toast';
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3200);
+  // 从顶部滑下来：底部是会放输入框和按钮的地方，挡住最常用的操作很烦
+  requestAnimationFrame(() => el.classList.add('in'));
+  setTimeout(() => {
+    el.classList.remove('in');
+    setTimeout(() => el.remove(), 260);
+  }, 2800);
 }
 
 function weekdayLabel(key) {
@@ -286,38 +287,66 @@ function renderToday() {
   const split = macroSplit(totals);
   const tip = suggestNext(totals, t, remaining);
 
+  const R = 78;                       // 圆环半径
+  const CIRC = 2 * Math.PI * R;
+  const ringPct = Math.max(0, Math.min(1, totals.kcal / budget));
+  const offset = CIRC * (1 - ringPct);
+  const settled = remaining < 0;      // 超了就把圆环走满
+  const streak = streakDays(state);
+  const exerciseMin = day.exercises.reduce((a, x) => a + x.minutes, 0);
+  const macros = diff.filter((d) => d.key !== 'kcal');
+
   app.innerHTML = `
-    <div class="card hero state-${cls}">
-      <div class="big">${remaining >= 0 ? remaining : '+' + Math.abs(remaining)}<small>kcal ${remaining >= 0 ? '还可以吃' : '已超出'}</small></div>
-      <div class="sub">已吃 ${Math.round(totals.kcal)} / 目标约 ${budget}${bonus ? `（含运动奖励 ${bonus}）` : ''}</div>
-      <div class="progress ${cls === 'ok' ? '' : cls}"><i style="width:${pct}%"></i></div>
-      <div class="macros">
-        ${diff.filter((d) => d.key !== 'kcal').map((d) => `
-          <div class="macro ${d.status}">
-            <div class="label">${d.label}</div>
-            <div class="value">${fmt(d.eaten, d.unit === 'g' ? 0 : 0)}<small> / ${fmt(d.target)} g</small></div>
-            <div class="tiny muted">${d.remaining >= 0 ? '还差 ' + fmt(d.remaining) : '超 ' + fmt(-d.remaining)} g</div>
-          </div>`).join('')}
+    <div class="card hero">
+      <div class="ring-wrap">
+        <svg class="ring" viewBox="0 0 190 190" aria-hidden="true">
+          <defs>
+            <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="${settled ? '#F2A08A' : '#FF9E7A'}"/>
+              <stop offset="100%" stop-color="${settled ? '#E4572E' : '#E86A82'}"/>
+            </linearGradient>
+          </defs>
+          <circle class="track" cx="95" cy="95" r="${R}"/>
+          <circle class="bar" cx="95" cy="95" r="${R}"
+            stroke-dasharray="${CIRC.toFixed(1)}"
+            stroke-dashoffset="${(settled ? 0 : offset).toFixed(1)}"/>
+        </svg>
+        <div class="ring-center">
+          <span class="big ${settled ? 'over' : ''}">${Math.abs(remaining)}</span>
+          <span class="unit">kcal</span>
+          <span class="cap">${settled ? '已超出' : '今天还可以吃'}</span>
+        </div>
       </div>
-      <div class="split">
-        <span class="p" style="width:${split.protein}%"></span>
-        <span class="f" style="width:${split.fat}%"></span>
-        <span class="c" style="width:${split.carb}%"></span>
+      <div class="sub">已吃 <b>${Math.round(totals.kcal)}</b> / 目标约 ${budget} kcal</div>
+      ${bonus ? `<div class="bonus-pill"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>运动奖励 ${bonus} kcal 已计入</div>` : ''}
+
+      <div class="macro-list">
+        ${macros.map((d) => {
+          const map = { protein: ['p', '蛋白'], fat: ['f', '脂肪'], carb: ['c', '碳水'] };
+          const [cls2, label] = map[d.key];
+          const pct = Math.min(100, d.pct);
+          return `
+          <div class="macro-row ${cls2} ${d.status === 'over' ? 'over' : ''}">
+            <span class="mlabel">${label}</span>
+            <span class="mbar"><i style="width:${pct}%"></i></span>
+            <span class="mval"><b>${fmt(d.eaten)}</b>/${fmt(d.target)} g</span>
+          </div>`;
+        }).join('')}
       </div>
-      <div class="legend">
-        <span><i style="background:#2563eb"></i>蛋白 ${split.protein}%</span>
-        <span><i style="background:#f59e0b"></i>脂肪 ${split.fat}%</span>
-        <span><i style="background:#16a34a"></i>碳水 ${split.carb}%</span>
+
+      <div class="stats">
+        ${streak > 1 ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>连续记录 <b>${streak}</b> 天</span>` : ''}
+        ${exerciseMin ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-today"/></svg>今天运动 <b>${exerciseMin}</b> 分钟</span>` : ''}
+        <span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-pin"/></svg>蛋白达标 <b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
       </div>
-      <p class="tiny muted" style="margin:10px 0 0">比例按热量算。蛋白 25~35%、脂肪 20~30%、碳水 40~55% 是比较稳的区间。</p>
     </div>
 
     ${tip ? `<div class="warn info">${tip}</div>` : ''}
 
     <div class="card">
       <div class="card-title">说一句就记上
-        <button class="btn ghost" id="aiSettingsBtn" style="padding:3px 10px;font-size:12px">
-          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已启用 ⚙' : 'AI 设置 ⚙'}
+        <button class="btn ghost" id="aiSettingsBtn" style="padding:4px 11px;font-size:12px">
+          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已开启' : '去设置 AI'}
         </button>
       </div>
       <textarea id="quickText" rows="2" placeholder="今天中午在食堂吃了碗牛肉面，加了个蛋"></textarea>
@@ -398,7 +427,7 @@ function renderLog() {
     <div class="card">
       <div class="card-title">说一句就记上
         <button class="btn ghost" id="aiSettingsBtn" style="padding:3px 10px;font-size:12px">
-          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已启用 ⚙' : 'AI 设置 ⚙'}
+          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已开启' : '去设置 AI'}
         </button>
       </div>
       <textarea id="quickText" rows="3" placeholder="今天吃了什么？例如：中午吃了碗牛肉面，加了个蛋"></textarea>
@@ -500,6 +529,18 @@ function bindQuickLog() {
   if (draft) drawDraft();
 }
 
+/** 解析结果用弹层展示：在「今天」页结果本来会被挤到屏幕下面，得滚才看得到 */
+function openDraftSheet() {
+  if (!draft) return;
+  openSheet({
+    title: '这样记对吗？',
+    body: '<div id="draftHost"></div>',
+    onMount: () => {
+      drawDraft();
+    },
+  });
+}
+
 async function runQuickParse(text) {
   const meal = quickMealHint || guessMeal();
   let items = [];
@@ -546,12 +587,12 @@ async function runQuickParse(text) {
     aiError,
     note: aiNote,
   };
-  drawDraft();
+  openDraftSheet();
 }
 
 /** 把解析结果画成「可以改的清单」 */
 function drawDraft() {
-  const box = $('#quickResult');
+  const box = $('#draftHost') || $('#quickResult');
   if (!box || !draft) return;
   if (!draft.items.length && !draft.questions.length) {
     box.innerHTML = '<div class="warn" style="margin-top:10px">这句我没认出来。可以换种说法（比如「一碗牛肉面」），或者用下面的手动记一笔。</div>';
@@ -587,8 +628,8 @@ function drawDraft() {
       </div>
     </label>
     <div class="btn-row">
-      <button class="btn grow" id="draftSave" ${needsCheck ? '' : ''}>就这样，记上</button>
-      <button class="btn ghost" id="draftCancel">算了</button>
+      <button class="btn grow" id="draftSave">就这样，记上</button>
+      <button class="btn ghost" id="draftCancel">重写</button>
     </div>
     ${needsCheck ? '<p class="tiny muted" style="margin:8px 0 0">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
 
@@ -633,12 +674,14 @@ function drawDraft() {
     save();
     const n = draft.items.length;
     draft = null;
+    closeSheet();
     render();
-    toast(`记上了 ${n} 条，可以随时改份量或删掉。`);
+    toast(`记上了 ${n} 条，可以随时改份量`);
   });
   $('#draftCancel', box)?.addEventListener('click', () => {
     draft = null;
-    drawDraft();
+    closeSheet();
+    render();
   });
 }
 

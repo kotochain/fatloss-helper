@@ -235,11 +235,13 @@ async function main() {
   })()`);
   await sleep(3000);
   const parsed = await evaluate(`(() => ({
-    方式: document.querySelector('#quickResult .warn')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 40) || '',
-    条目: [...document.querySelectorAll('#quickResult .entry .name')].map((n) => n.textContent.trim().replace(/\\s+/g, ' ')),
-    合计: document.querySelector('#quickResult .row.between b')?.textContent || null,
+    方式: document.querySelector('#draftHost .warn')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 40) || '',
+    条目: [...document.querySelectorAll('#draftHost .entry .name')].map((n) => n.textContent.trim().replace(/\\s+/g, ' ')),
+    合计: document.querySelector('#draftHost .row.between b')?.textContent || null,
   }))()`);
   console.log('解析结果 →', JSON.stringify(parsed));
+  const shotDraft = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-draft-sheet.png'), Buffer.from(shotDraft.data, 'base64'));
   if (!parsed.方式.includes('AI 识别')) problems.push(`没有走 AI 直连，实际：${parsed.方式}`);
   if (parsed.条目.length < 2) problems.push('解析结果不完整');
 
