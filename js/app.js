@@ -5,7 +5,7 @@
 
 import {
   calcTargets, calcEntry, calcExerciseKcal, diffAgainstTargets, macroSplit,
-  defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, round,
+  defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, LIMITS, round,
 } from './calc.js';
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount } from './foods.js';
 import { searchFoods, MEAL_SLOTS } from './foodlog.js';
@@ -248,7 +248,7 @@ function renderToday() {
   app.innerHTML = `
     <div class="card hero state-${cls}">
       <div class="big">${remaining >= 0 ? remaining : '+' + Math.abs(remaining)}<small>kcal ${remaining >= 0 ? '还可以吃' : '已超出'}</small></div>
-      <div class="sub">已吃 ${Math.round(totals.kcal)} / 目标 ${budget}${bonus ? `（含运动奖励 ${bonus}）` : ''}</div>
+      <div class="sub">已吃 ${Math.round(totals.kcal)} / 目标约 ${budget}${bonus ? `（含运动奖励 ${bonus}）` : ''}</div>
       <div class="progress ${cls === 'ok' ? '' : cls}"><i style="width:${pct}%"></i></div>
       <div class="macros">
         ${diff.filter((d) => d.key !== 'kcal').map((d) => `
@@ -425,15 +425,20 @@ function renderPlan() {
 
   app.innerHTML = `
     <div class="card">
-      <div class="card-title">一天怎么吃 <span class="tiny muted">按 ${t.targetCalories} kcal / 蛋白 ${t.proteinG} g 配</span></div>
+      <div class="card-title">一天怎么吃 <span class="tiny muted">按约 ${Math.round(t.targetCalories / 10) * 10} kcal / 蛋白 ${Math.round(t.proteinG)} g 配</span></div>
       <div class="row between small" style="margin-bottom:6px">
-        <span>这份餐单合计 <b>${plan.planKcal}</b> kcal、蛋白 <b>${plan.planProteinG}</b> g</span>
-        <span class="tag ${Math.abs(plan.deviation) <= 10 ? 'green' : 'amber'}">${plan.deviation > 0 ? '+' : ''}${plan.deviation}%</span>
+        <span>这份餐单合计约 <b>${Math.round(plan.planKcalWithOil / 10) * 10}</b> kcal、蛋白约 <b>${Math.round(plan.planProteinG)}</b> g</span>
+        <span class="tag ${Math.abs(plan.deviation) <= 10 ? 'green' : 'amber'}">${plan.deviation > 0 ? '+' : ''}${Math.round(plan.deviation)}%</span>
       </div>
+      ${plan.cookingOilG > 0 ? `<div class="warn info" style="margin-bottom:8px">
+        这份餐单里的菜是按下面这个油量做的：全天<b>烹调油 ${plan.cookingOilG} 克</b>（约 ${plan.cookingOilKcal} kcal），
+        大约 ${plan.meals.filter((m) => m.oilG > 0).map((m) => `${m.name} ${m.oilG} 克`).join('、')}。
+        这个量已经算进上面的总数里了，不用另外再加。
+      </div>` : ''}
       <p class="tiny muted" style="margin:0 0 10px">${esc(plan.deviationNote)}</p>
       ${plan.meals.map((m) => `
         <div class="session">
-          <h4>${m.name} <span class="tiny muted">${m.kcal} kcal / 蛋白 ${m.proteinG} g</span></h4>
+          <h4>${m.name} <span class="tiny muted">${m.kcal} kcal / 蛋白 ${m.proteinG} g${m.oilG ? ` / 油 ${m.oilG} g` : ''}</span></h4>
           <div class="small muted" style="margin-bottom:4px">${esc(m.dishName)}</div>
           <ul>${m.items.map((it) => `<li>${esc(it.food.name)} ${esc(it.desc)}${it.clampedBy ? ' <span class="tag amber">已按热量封顶</span>' : ''}</li>`).join('')}</ul>
         </div>`).join('')}
@@ -447,7 +452,7 @@ function renderPlan() {
     <div class="card">
       <div class="card-title">每天的固定提醒</div>
       <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
-        ${buildDailyTips(t).map((x) => `<li style="margin-bottom:4px">${esc(x)}</li>`).join('')}
+        ${buildDailyTips(t, plan.cookingOilG).map((x) => `<li style="margin-bottom:4px">${esc(x)}</li>`).join('')}
       </ul>
     </div>
 
@@ -529,9 +534,9 @@ function renderProgress() {
       </div>
       <hr class="sep">
       <div class="small">
-        目标体重 ${t.targetWeightKg} kg，还要减 ${t.toLoseKg} kg。<br>
+        目标体重约 ${t.targetWeightKg} kg，还要减约 ${t.toLoseKg} kg。<br>
         按现在的节奏大约每周减 ${t.weeklyLossKg} kg${t.estimatedWeeks ? `，大概 ${t.estimatedWeeks} 周达到目标` : ''}。<br>
-        蛋白质 ${t.proteinG} g · 脂肪 ${t.fatG} g · 碳水 ${t.carbG} g。
+        蛋白质约 ${Math.round(t.proteinG)} g · 脂肪约 ${Math.round(t.fatG)} g · 碳水约 ${Math.round(t.carbG)} g。
       </div>
       ${t.warnings.map((w) => `<div class="warn" style="margin-top:10px">${esc(w)}</div>`).join('')}
     </div>` : ''}
@@ -783,6 +788,38 @@ function openCustomFoodSheet() {
 
 /* ── 弹层：资料 ──────────────────────────── */
 
+/**
+ * 资料校验。界面上的红字提示只是提示，保存前必须真的挡住，
+ * 否则清空身高会存进 heightCm:0，目标热量静默掉到 1200 而用户不知道。
+ * @returns {string|null} 有问题就返回说明，没问题返回 null
+ */
+export function validateProfile(form) {
+  const ranges = {
+    age: [LIMITS.ageYears[0], LIMITS.ageYears[1], '年龄'],
+    heightCm: [LIMITS.heightCm[0], LIMITS.heightCm[1], '身高'],
+    weightKg: [LIMITS.weightKg[0], LIMITS.weightKg[1], '体重'],
+  };
+  for (const [key, [lo, hi, label]] of Object.entries(ranges)) {
+    const v = form[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) return `${label}要填一个数字。`;
+    if (v < lo || v > hi) return `${label}要在 ${lo}~${hi} 之间。`;
+  }
+  if (form.age < 18) return '这个工具只适合 18 岁以上使用，未成年人请先问医生。';
+  if (form.bodyFatPct !== null && form.bodyFatPct !== undefined) {
+    const bf = form.bodyFatPct;
+    if (typeof bf !== 'number' || !Number.isFinite(bf) || bf < 3 || bf > 60) {
+      return '体脂率要么留空，要么填 3~60 之间的数（填的是百分数，例如 25）。';
+    }
+  }
+  if (form.targetWeightKg !== null && form.targetWeightKg !== undefined) {
+    if (typeof form.targetWeightKg !== 'number' || !Number.isFinite(form.targetWeightKg)) return '目标体重要么留空，要么填数字。';
+    if (form.targetWeightKg < LIMITS.weightKg[0] || form.targetWeightKg > LIMITS.weightKg[1]) {
+      return `目标体重要在 ${LIMITS.weightKg[0]}~${LIMITS.weightKg[1]} 之间。`;
+    }
+  }
+  return null;
+}
+
 function openProfileSheet() {
   const p = state.profile || {
     sex: 'female', age: 25, heightCm: 163, weightKg: 58, bodyFatPct: null,
@@ -846,21 +883,18 @@ function openProfileSheet() {
       const preview = $('#profilePreview', body);
       const update = () => {
         const f = form();
-        for (const [k, [lo, hi]] of Object.entries({ age: [18, 80], heightCm: [130, 220], weightKg: [30, 250] })) {
-          if (!(f[k] >= lo && f[k] <= hi)) {
-            preview.className = 'warn';
-            preview.textContent = k === 'age' ? '年龄请填 18~80。这个工具不适合未成年人使用。'
-              : k === 'heightCm' ? '身高请填 130~220 cm。'
-                : '体重请填 30~250 kg。';
-            return;
-          }
+        const invalid = validateProfile(f);
+        if (invalid) {
+          preview.className = 'warn';
+          preview.textContent = invalid;
+          return;
         }
         try {
           const t = calcTargets({ ...f, targetWeightKg: f.targetWeightKg });
           const tw = f.targetWeightKg || defaultTargetWeight(f);
           preview.className = 'warn info';
-          preview.innerHTML = `每天吃 <b>${t.targetCalories} kcal</b>（消耗 ${t.tdee} − 缺口 ${t.deficit}）·
-            蛋白 ${t.proteinG} g / 脂肪 ${t.fatG} g / 碳水 ${t.carbG} g<br>
+          preview.innerHTML = `每天大约吃 <b>${Math.round(t.targetCalories / 10) * 10} kcal</b>（消耗约 ${Math.round(t.tdee / 10) * 10} − 缺口约 ${Math.round(t.deficit / 10) * 10}）·
+            蛋白约 ${Math.round(t.proteinG)} g / 脂肪约 ${Math.round(t.fatG)} g / 碳水约 ${Math.round(t.carbG)} g<br>
             BMI ${t.bmi}（${t.bmiClass.label}）· 目标 ${round(tw, 1)} kg ·
             ${t.weeklyLossKg > 0 ? `预计每周减 ${t.weeklyLossKg} kg` : '维持体重'}
             ${t.estimatedWeeks ? `，约 ${t.estimatedWeeks} 周达成` : ''}`;
@@ -884,6 +918,11 @@ function openProfileSheet() {
       });
       $('#pSave', foot).addEventListener('click', () => {
         const f = form();
+        const invalid = validateProfile(f);
+        if (invalid) {
+          toast(invalid);
+          return;
+        }
         try {
           const t = calcTargets({ ...f, targetWeightKg: f.targetWeightKg });
           state.profile = { ...f, targetWeightKg: f.targetWeightKg || round(defaultTargetWeight(f), 1) };
@@ -893,7 +932,7 @@ function openProfileSheet() {
           view = 'today';
           document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
           render();
-          toast(`已保存。她每天的目标是 ${t.targetCalories} kcal。`);
+          toast(`已保存。她每天的目标大约是 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
         } catch (err) {
           toast(err.message);
         }

@@ -23,6 +23,12 @@ const MAIN_PROTEIN_MIN_FACTOR = 0.8;
 /** 单条目标克数允许超出多少（份量吸附到整份之后通常会超一点），超了就按比例缩回来 */
 const OVERSHOOT_TOLERANCE = 1.15;
 
+/** 每天烹调油的合理上限（克）。30 克≈两勺半，再多就不像家常做法了 */
+export const MAX_DAILY_OIL_G = 30;
+
+/** 配餐时给烹调油预留的剩余热量比例（早餐鸡蛋、午晚炒菜都要用油） */
+const DAILY_OIL_KCAL_SHARE = 0.18;
+
 import { FOODS } from './foods.js';
 import { round } from './calc.js';
 
@@ -116,6 +122,58 @@ export function snapToServing(food, targetGrams) {
   return { food, grams, desc: `${grams} 克（约 ${desc}）` };
 }
 
+/**
+ * 把「剩下的热量」分成主食预算和烹调油预算。
+ *
+ * 不这么分的话，主食会独吞全部剩余热量，脂肪目标永远差一截
+ * （核验时实测：100 kg 维持期的餐单脂肪只有目标的 52%，油是 0 克）。
+ *
+ * @returns {{carbKcal:number, oilG:number}} 主食可用热量、烹调油克数
+ */
+export function splitRemainingKcal(kcalLeft, fatGapG, oilFood) {
+  if (!(kcalLeft > 0)) return { carbKcal: 0, oilG: 0 };
+  const kcalPerOilG = oilFood.kcal / 100;
+  let oilG = 0;
+  if (fatGapG >= 4 && kcalPerOilG > 0) {
+    // 目标：补掉脂肪缺口，但油不超过合理上限，也不超过剩余热量的 35%
+    oilG = Math.min(MAX_DAILY_OIL_G, fatGapG, (kcalLeft * 0.35) / kcalPerOilG);
+    oilG = Math.max(0, Math.floor(oilG)); // 向下取整，宁可少一点也不要顶超
+  }
+  return { carbKcal: Math.max(0, kcalLeft - oilG * kcalPerOilG), oilG };
+}
+
+/**
+ * 把一天的碳水目标按餐分配。
+ *
+ * 只按「当餐剩余热量」配主食是不够的：午餐预算大就会配出 260 克米饭，
+ * 一天的碳水早就超了，脂肪目标反而永远差一半。
+ * 这里按热量比例把碳水目标分到各餐（加餐减半），再按上限收敛。
+ *
+ * @returns {Record<string, number>} 每餐的碳水克数上限
+ */
+export function allocateCarbByMeal(meals, targets) {
+  const active = (meals || []).filter((m) => m.items.some((it) => it.role === 'carb'));
+  const totalCarbG = targets?.carbG ?? 0;
+  if (!active.length || !(totalCarbG > 0)) return {};
+  const weightOf = (m) => (m.key === 'snack' ? m.tpl.calorieShare * 0.5 : m.tpl.calorieShare);
+  const weightSum = active.reduce((a, m) => a + weightOf(m), 0);
+  const out = {};
+  for (const m of active) out[m.key] = (totalCarbG * weightOf(m)) / weightSum;
+  // 收敛：主食克数吸附到整份之后会超，超了就整体按最大倍数等比缩一次
+  let worst = 1;
+  for (const m of active) {
+    const carbItem = m.items.find((it) => it.role === 'carb');
+    const otherCarb = m.items
+      .filter((it) => it !== carbItem)
+      .reduce((a, it) => a + (it.food.carb * it.grams) / 100, 0);
+    const allowed = Math.max(0, (out[m.key] - otherCarb) * 100);
+    const used = carbItem.grams * (carbItem.food.carb / 100) * 100;
+    if (used > allowed && used > 0) worst = Math.max(worst, allowed / used);
+  }
+  if (worst < 1) for (const k of Object.keys(out)) out[k] *= Math.max(worst, 0.5);
+  return out;
+}
+
 function gramsForProtein(food, proteinGrams) {
   if (food.protein <= 0) throw new Error(`${food.name} 没有蛋白质，不能当蛋白来源`);
   return (proteinGrams * 100) / food.protein;
@@ -203,11 +261,21 @@ export function trimMeal(items, budgetKcal, tolerance = 0.04) {
  * 生成一天的餐单
  * @param {{targetCalories:number, proteinG:number}} targets
  * @param {{seed?:number}} options seed 换一天就换一批菜
- */
-export function buildMealPlan(targets, options = {}) {
+ */export function buildMealPlan(targets, options = {}) {
   const seed = options.seed ?? 0;
-  const meals = [];
 
+  // 分两遍配：第一遍只看热量份额，用它算出「每餐碳水上限」，第二遍套上这个上限重配。
+  // 只配一遍的话，午餐预算大会配出 260 克米饭，一天的碳水早就超了，脂肪目标反而永远差一半。
+  const firstPass = composeMeals(targets, seed, null);
+  const carbBudgets = allocateCarbByMeal(firstPass.parts, targets);
+  const { meals } = composeMeals(targets, seed, carbBudgets);
+  return finishPlan(meals, targets);
+}
+
+/** 按给定的「每餐碳水上限」组一遍餐（carbBudgets 为 null 时只用热量份额） */
+function composeMeals(targets, seed, carbBudgets) {
+  const meals = [];
+  const parts = [];
   for (const tpl of MEAL_TEMPLATES) {
     const dish = tpl.dishes[seed % tpl.dishes.length];
     const items = [];
@@ -218,6 +286,7 @@ export function buildMealPlan(targets, options = {}) {
       throw new Error(`${tpl.name} 的 protein 比例之和不是 1：${JSON.stringify(dish.ratio)}`);
     }
     const mealBudget = Math.round(targets.targetCalories * tpl.calorieShare);
+    const carbBudgetG = carbBudgets ? carbBudgets[tpl.key] : undefined;
     // 给主食预留的最小空间（至少半份），主菜封顶时会扣掉这一块
     const carbFoodTmp = dish.carb ? findById(dish.carb) : null;
     const carbReserve = carbFoodTmp ? (carbFoodTmp.kcal * carbFoodTmp.servings[0][1] * 0.5) / 100 : 0;
@@ -252,15 +321,20 @@ export function buildMealPlan(targets, options = {}) {
       items.push(item);
     }
 
-    // 2) 主食：用掉本餐剩下的热量额度
+    // 2) 主食：受两个上限约束 —— 当餐剩余热量（留给油一部分）和当餐碳水预算
     if (dish.carb) {
       const carbFood = findById(dish.carb);
       const usedKcal = caloriesOf(items);
-      const budget = mealBudget - usedKcal;
+      const left = Math.max(0, mealBudget - usedKcal);
+      const carbKcal = tpl.key === 'snack' ? left : left * (1 - DAILY_OIL_KCAL_SHARE);
       if (carbFood.kcal <= 0) throw new Error(`${carbFood.name} 没有热量，不能当主食`);
-      // 主食最少给 0.4 份，但绝不因此把整餐顶爆（份额不够时按额度给）
-      const floorByServing = carbFood.servings[0][1] * 0.4;
-      const grams = Math.max(Math.min(floorByServing, (budget * 100) / carbFood.kcal), (budget * 100) / carbFood.kcal);
+      let grams = (carbKcal * 100) / carbFood.kcal;
+      const carbItem = { role: 'carb', food: carbFood, grams: 0 };
+      if (carbBudgetG !== undefined && carbFood.carb > 0) {
+        const otherCarb = items.reduce((a, it) => a + (it.food.carb * it.grams) / 100, 0);
+        const carbLimitG = ((carbBudgetG - otherCarb) * 100) / carbFood.carb;
+        if (carbLimitG > 0 && carbLimitG < grams) grams = carbLimitG;
+      }
       items.push({ role: 'carb', ...snapToServing(carbFood, grams) });
     }
 
@@ -305,18 +379,51 @@ export function buildMealPlan(targets, options = {}) {
       trimmed,
       items,
     });
+    parts.push({ key: tpl.key, tpl, items: items.map((it) => ({ ...it })) });
   }
+  return { meals, parts };
+}
 
+/** 汇总整份餐单，并算出烹调油额度 */
+function finishPlan(meals, targets) {
   const sum = (k) => meals.reduce((a, m) => a + m[k], 0);
   const planKcal = Math.round(sum('kcal'));
   const planProteinG = round(sum('proteinG'), 1);
-  const deviation = targets.targetCalories > 0 ? planKcal / targets.targetCalories - 1 : 0;
+  const planFatG = round(sum('fatG'), 1);
+
+  // 脂肪缺口用「烹调油」补：模板主菜都是鸡胸、鱼虾、豆腐这类低脂的，
+  // 光靠它们脂肪只有目标的六七成。这里算出该补多少油，并把额度写进餐单，
+  // 免得「餐单不含油」和「提醒每天 15~28 克油」互相矛盾、实际多吃一截。
+  const oilFood = findById('oil');
+  const fatGap = Math.max(0, (targets.fatG ?? 0) - planFatG);
+  // 油量 = 脂肪缺口与「剩余热量里能放下的量」取小，并封顶；同时不能把当日总热量顶超
+  const kcalLeft = Math.max(0, targets.targetCalories - planKcal);
+  const oilByKcal = oilFood.kcal > 0 ? (kcalLeft * 100) / oilFood.kcal : 0;
+  const plannedOil = splitRemainingKcal(Math.max(0, targets.targetCalories), fatGap, oilFood).oilG;
+  const cookingOilG = fatGap < 4 ? 0
+    : Math.max(0, Math.round(Math.min(plannedOil, MAX_DAILY_OIL_G, fatGap, oilByKcal)));
+  const oilKcal = Math.round((oilFood.kcal * cookingOilG) / 100);
+  if (cookingOilG > 0) {
+    for (const m of meals) {
+      if (m.key === 'snack') continue;
+      const share = targets.targetCalories > 0 ? (m.kcal + m.budgetKcal) / 2 / targets.targetCalories : 0.3;
+      m.oilG = Math.max(0, Math.round(cookingOilG * share));
+    }
+    const allocated = meals.reduce((a, m) => a + (m.oilG || 0), 0);
+    if (allocated !== cookingOilG) meals.find((m) => m.key === 'dinner').oilG += cookingOilG - allocated;
+  }
+
+  const deviation = targets.targetCalories > 0 ? (planKcal + oilKcal) / targets.targetCalories - 1 : 0;
 
   return {
     meals,
     planKcal,
+    planKcalWithOil: planKcal + oilKcal,
+    cookingOilG,
+    cookingOilKcal: oilKcal,
     planProteinG,
-    planFatG: round(sum('fatG'), 1),
+    planFatG,
+    planFatWithOilG: round(planFatG + cookingOilG, 1),
     planCarbG: round(sum('carbG'), 1),
     targetCalories: targets.targetCalories,
     proteinG: targets.proteinG,
@@ -330,11 +437,25 @@ export function buildMealPlan(targets, options = {}) {
   };
 }
 
-/** 一天的通用提醒（油、水、蔬菜、蛋白粉等），按目标热量给量 */
-export function buildDailyTips(targets) {
-  const oilG = targets.targetCalories < 1600 ? 15 : targets.targetCalories < 2000 ? 22 : 28;
+
+/**
+ * 一天的通用提醒（油、水、蔬菜、蛋白粉等）
+ * @param {{targetCalories:number, proteinG:number}} targets
+ * @param {number} [oilFromPlan] 餐单里已经算好的烹调油克数；给了就用它，保证两处数字一致
+ */
+export function buildDailyTips(targets, oilFromPlan = null) {
+  const oilG = oilFromPlan ?? (targets.targetCalories < 1600 ? 15 : targets.targetCalories < 2000 ? 22 : 28);
+  if (oilG <= 0) {
+    return [
+      '今天的餐单本身脂肪就够了，炒菜尽量少放油（水煮、清蒸、少油快炒）。',
+      '每天蔬菜 300~500 克，其中一半是深色叶菜。蔬菜几乎不占热量，但饱腹感靠它。',
+      `蛋白质尽量吃够 ${targets.proteinG} 克，分成 3~4 餐吃比一顿全吃完更好吸收。`,
+      '每天喝水 1500~2000 毫升。渴了经常被当成饿了。',
+      '如果当天蛋白质实在吃不够，可以用一勺乳清蛋白粉（约 25 克蛋白、110 kcal）补，别用含糖饮料补。',
+    ];
+  }
   return [
-    `炒菜用油全天控制在 ${oilG} 克左右（约 ${oilG <= 15 ? '一勺半' : '两勺'}）。外卖和食堂的菜普遍比这个油，吃到油腻的菜就用清水涮一下。`,
+    `炒菜用油全天 ${oilG} 克左右（大约${oilG <= 15 ? '一勺半' : oilG <= 24 ? '两勺' : '两勺半'}），这个量已经算进上面的餐单里了。外卖和食堂的菜普遍比这个油，吃到油腻的菜就用清水涮一下。`,
     '每天蔬菜 300~500 克，其中一半是深色叶菜。蔬菜几乎不占热量，但饱腹感靠它。',
     `蛋白质尽量吃够 ${targets.proteinG} 克，分成 3~4 餐吃比一顿全吃完更好吸收。`,
     '每天喝水 1500~2000 毫升。渴了经常被当成饿了。',

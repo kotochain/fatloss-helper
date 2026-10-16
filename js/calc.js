@@ -63,10 +63,12 @@ export function calcBMR({ sex, weightKg, heightCm, age, bodyFatPct = null }) {
   assertNumber(age, '年龄');
   if (sex !== 'female' && sex !== 'male') throw new Error('性别必须是 female 或 male');
 
-  if (typeof bodyFatPct === 'number' && Number.isFinite(bodyFatPct) && bodyFatPct > 0) {
-    const leanMass = weightKg * (1 - bodyFatPct / 100);
+  const bf = typeof bodyFatPct === 'number' && Number.isFinite(bodyFatPct) ? bodyFatPct : null;
+  if (bf !== null && bf >= 3 && bf <= 60) {
+    const leanMass = weightKg * (1 - bf / 100);
     return { bmr: 370 + 21.6 * leanMass, method: 'katch', leanMass };
   }
+  // 体脂率超出 3%~60% 基本是填错了（例如把 25% 写成 0.25），这时退回身高体重公式更稳
   const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
   const bmr = sex === 'female' ? base - 161 : base + 5;
   return { bmr, method: 'mifflin', leanMass: null };
@@ -138,12 +140,12 @@ export function calcTargets(profile) {
   let deficit = 0;
   if (goalMode === 'lose') {
     const desired = firstWeekDeltaKg(profile, paceInfo.pctPerWeek) * KCAL_PER_KG_FAT / 7;
-    deficit = desired;
-    const maxDeficitByBmi = bmi >= 28 ? 0.30 : bmi >= 24 ? 0.25 : 0.20;
-    const cap = tdee * maxDeficitByBmi;
-    if (deficit > cap) {
-      deficit = cap;
-      warnings.push(`按你选的节奏缺口太大，已自动收窄到每天 ${Math.round(cap)} kcal（约为总消耗的 ${Math.round(maxDeficitByBmi * 100)}%），更安全也更不容易掉肌肉。`);
+    // 上限 75%：既符合「每周减 1% 体重」的经验上限，也保证下面的安全下限
+    //（基础代谢的 1.1 倍）永远不会算到比总消耗还高 —— 否则「减脂」会变成「吃更多」。
+    const deficitCap = tdee * 0.75;
+    deficit = Math.min(desired, deficitCap);
+    if (desired > deficitCap) {
+      warnings.push(`按你选的节奏缺口太大，已收窄到每天 ${Math.round(deficitCap)} kcal（总消耗的 75%），否则就得长期吃不到基础代谢了。`);
     }
   }
 
@@ -154,48 +156,66 @@ export function calcTargets(profile) {
   if (targetCalories < floor) {
     targetCalories = floor;
     deficit = tdee - targetCalories;
-    warnings.push(`目标热量低于安全下限，已锁在每天 ${Math.round(floor)} kcal（不低于基础代谢的 1.1 倍）。想吃更少请先咨询医生或营养师。`);
+    if (deficit < 0) {
+      // 身材很小 + 活动量低时，基础代谢的 1.1 倍会高于总消耗，缺口变成负数。
+      // 这时候要老老实实说是「维持」，不能还按减脂宣传。
+      warnings.push(`你的总消耗（${Math.round(tdee)} kcal）本身就低于安全下限（${Math.round(floor)} kcal），所以这里按「维持」给量，暂时没有减脂空间。这种情况要先找医生或营养师看，不要自己再往下压热量。`);
+    } else {
+      warnings.push(`目标热量低于安全下限，已锁在每天 ${Math.round(floor)} kcal（不低于基础代谢的 1.1 倍），缺口相应收窄到 ${Math.round(deficit)} kcal。想吃更少请先咨询医生或营养师。`);
+    }
   }
   if (goalMode === 'maintain') {
     warnings.push('你选的是「维持体重」，所以没有设热量缺口。');
   }
 
-  // 蛋白质：减脂期给足，保护肌肉；肾病人群需遵医嘱
-  // 1.8 g/kg 在减脂期属于常见推荐区间（1.6~2.2）。
-  // 另外有两条现实约束：
-  //   下限 —— 配餐时米饭、蔬菜、奶蛋本身就会带来 30~50 克蛋白，
-  //           所以目标定得比「结构自带量」还低是没意义的；
-  //   上限 —— 蛋白质最多占总热量 35%，否则脂肪和主食没地方放。
-  const proteinPerKg = goalMode === 'lose' ? 1.8 : 1.4;
+  // ── 三大营养素的分配顺序很重要：蛋白质 → 脂肪 → 碳水 ──
+  // 先定蛋白质，再定脂肪（不低于 0.6 g/kg 的安全下限），剩下的热量才是碳水。
+  // 反过来先定碳水，会让脂肪目标算出一个根本放不下的数
+  //（例如 100 kg 的人按 0.9 g/kg 要 90 克脂肪，剩下的热量根本装不下），
+  // 用户照着吃只会让脂肪永远差一半。
+  const MIN_CARB_G = 80;
+  const PROTEIN_KCAL_SHARE_MAX = 0.35; // 蛋白质最多占总热量 35%，否则脂肪和主食没地方放
+
+  // 1) 蛋白质：减脂期给足（1.8 g/kg，80 kg 以上逐步降到 1.6），并留出「配餐结构自带」的量
+  const proteinPerKg = goalMode === 'lose' ? (weightKg > 80 ? 1.6 : 1.8) : 1.4;
   const structuredProteinFloor = weightKg * 0.9 + 0.12 * targetCalories / KCAL_PER_G.protein;
-  const rawProteinG = Math.max(weightKg * proteinPerKg, structuredProteinFloor);
-  const maxProteinByCalories = (targetCalories * 0.35) / KCAL_PER_G.protein;
-  const proteinG = Math.min(rawProteinG, maxProteinByCalories);
-  if (rawProteinG > maxProteinByCalories) {
-    warnings.push('蛋白质目标受总热量限制做了下调，否则脂肪和主食就没地方放了。');
-  }
+  const proteinWanted = Math.max(weightKg * proteinPerKg, structuredProteinFloor);
+  const proteinCapKcal = targetCalories * PROTEIN_KCAL_SHARE_MAX;
+  const proteinG = Math.min(proteinWanted, proteinCapKcal / KCAL_PER_G.protein);
+  const proteinCapped = proteinWanted > proteinCapKcal / KCAL_PER_G.protein;
 
-  // 脂肪：不低于 0.6 g/kg（激素和脂溶性维生素需要它）
-  const fatPerKg = goalMode === 'lose' ? 0.8 : 0.9;
-  let fatG = weightKg * fatPerKg;
+  // 2) 脂肪：安全下限 0.6 g/kg，理想值 0.8~0.9 g/kg，但不能挤掉碳水的 80 克底线
   const minFatG = weightKg * 0.6;
-  if (fatG < minFatG) fatG = minFatG;
-  const maxFatByCalories = (targetCalories * 0.4) / KCAL_PER_G.fat;
-  if (fatG > maxFatByCalories) {
-    fatG = maxFatByCalories;
-    warnings.push('脂肪目标受总热量限制做了下调，但仍保持在安全下限以上。');
+  const idealFatG = weightKg * (goalMode === 'lose' ? 0.8 : 0.9);
+  const fatCapKcal = targetCalories - proteinG * KCAL_PER_G.protein - MIN_CARB_G * KCAL_PER_G.carb;
+  let fatG = Math.min(idealFatG, Math.max(fatCapKcal / KCAL_PER_G.fat, minFatG));
+  let fatClamped = false;
+  if (fatG < minFatG) {
+    // 只有「矮 + 极重」（BMI 70 上下）才会走到这里，属于该就医的情况
+    fatG = minFatG;
+    warnings.push('按你的身高体重，安全脂肪下限（0.6 g/kg）和热量上限互相冲突了。这已经不是自己能调的范围，请找医生或营养师。');
+  } else if (idealFatG > fatG + 0.5) {
+    fatClamped = true;
   }
 
-  // 剩下的热量给碳水
+  // 3) 碳水：剩下的热量全给它，但不低于 80 克
   let carbG = (targetCalories - proteinG * KCAL_PER_G.protein - fatG * KCAL_PER_G.fat) / KCAL_PER_G.carb;
-  const minCarbG = 80;
-  if (carbG < minCarbG) {
-    // 碳水太少时，优先保证碳水下限，从脂肪里挤（脂肪仍有下限保护）
-    const need = (minCarbG - carbG) * KCAL_PER_G.carb;
-    const fatCut = Math.min(need / KCAL_PER_G.fat, Math.max(0, fatG - minFatG));
-    fatG -= fatCut;
+  if (carbG < MIN_CARB_G) {
+    // 理论上不该发生（第 2 步已经给碳水留了底线），留个兜底并如实提示
+    const need = (MIN_CARB_G - carbG) * KCAL_PER_G.carb;
+    const cut = Math.min(need / KCAL_PER_G.fat, Math.max(0, fatG - minFatG));
+    fatG -= cut;
     carbG = (targetCalories - proteinG * KCAL_PER_G.protein - fatG * KCAL_PER_G.fat) / KCAL_PER_G.carb;
-    warnings.push('按你的热量和蛋白质目标，主食偏少，已把脂肪压到下限来保证碳水不低于 80 g。');
+    warnings.push('蛋白质和脂肪都已压到下限，碳水才凑够 80 克。这个热量水平对当前体重来说偏紧了。');
+  }
+  if (proteinCapped) {
+    warnings.push('蛋白质目标受总热量限制做了下调（最多占总热量 35%），否则脂肪和主食就没地方放了。');
+  }
+  if (fatClamped) {
+    warnings.push(`脂肪目标按热量可达值定为约 ${round(fatG)} 克（理想值 ${round(idealFatG)} 克，安全下限 ${round(minFatG)} 克）。`);
+  }
+  if (method === 'mifflin') {
+    warnings.push('基础代谢用的是身高体重公式（Mifflin-St Jeor），误差一般在 ±10% 左右。有条件测一次体脂率会更准。');
   }
 
   const weeklyLossKg = (deficit * 7) / KCAL_PER_KG_FAT;
@@ -204,10 +224,10 @@ export function calcTargets(profile) {
   if (bmi < 18.5) {
     warnings.push(`你现在 BMI ${round(bmi, 1)}（偏瘦），不建议再减脂。建议改成增肌增重。`);
   }
-  if (method === 'mifflin') {
-    warnings.push('基础代谢用的是身高体重公式（Mifflin-St Jeor），误差一般在 ±10% 左右。有条件测一次体脂率会更准。');
+  const targetBmi = calcBMI({ weightKg: targetWeightKg, heightCm });
+  if (goalMode === 'lose' && targetBmi < 18.5) {
+    warnings.push(`你填的目标体重 ${round(targetWeightKg, 1)} kg 对应 BMI ${round(targetBmi, 1)}，已经属于偏瘦，不建议减到这个数。`);
   }
-
   return {
     bmr: round(bmr),
     bmrMethod: method,

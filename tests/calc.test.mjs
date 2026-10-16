@@ -95,6 +95,50 @@ test('每周减重不超过体重的 1%：选「想快一点」也会被收窄',
   assert.ok(t.warnings.some((w) => w.includes('缺口')), '被收窄时应当给出提示');
 });
 
+// 说明：deficitCap（总消耗的 75%）是理论护栏。按内置的三档节奏（每周 0.25/0.5/0.75% 体重），
+// 即使 250 kg 的人选「想快一点」也到不了这个上限，所以它不会在实际使用中生效
+// —— 真正兜住用户的是下面这条不变量，以及「不低于基础代谢 1.1 倍」的下限。
+// 这里直接断言不变量本身，而不是断言那个护栏被触发过。
+test('任何组合下每周掉秤都不超过体重的 1%，目标热量也不低于总消耗的 25%', () => {
+  let worstRatio = 1; let worstLoss = 0; let n = 0;
+  for (const sex of ['female', 'male']) {
+    for (const weightKg of [40, 45, 55, 70, 90, 120]) {
+      for (const heightCm of [150, 163, 178, 195]) {
+        for (const activity of ['sedentary', 'light', 'moderate', 'active', 'athlete']) {
+          for (const pace of ['gentle', 'standard', 'fast']) {
+            const t = calcTargets({ sex, weightKg, heightCm, age: 30, activity, pace, goal: 'lose' });
+            n += 1;
+            worstRatio = Math.min(worstRatio, t.targetCalories / t.tdee);
+            worstLoss = Math.max(worstLoss, t.weeklyLossKg / weightKg);
+          }
+        }
+      }
+    }
+  }
+  assert.ok(n >= 180, `样本太少：${n}`);
+  // 缺口上限 75% → 目标热量至少是总消耗的 25%
+  assert.ok(worstRatio >= 0.25 - 1e-9, `有组合的目标热量只有总消耗的 ${(worstRatio * 100).toFixed(1)}%`);
+  assert.ok(worstLoss <= 0.01 + 1e-9, `有组合每周掉 ${(worstLoss * 100).toFixed(2)}% 体重`);
+});
+
+// 注意：MIN_CARB_G 这条 80 克底线是「结构性成立」的 —— 脂肪上限已经先给碳水留了位置，
+// 所以这个常量本身不会在实际输入下被触发（250 kg 的极端组合最低也有 87 克）。
+// 测试断言的是「碳水不会低于 80 克」这个对外承诺，而不是断言那个常量被执行过。
+test('碳水永远不低于 80 克（压到极限的输入也一样）', () => {
+  let minCarb = Infinity; let worst = '';
+  for (const weightKg of [40, 55, 75, 100, 150]) {
+    for (const heightCm of [145, 163, 190]) {
+      for (const activity of ['sedentary', 'light', 'athlete']) {
+        for (const goal of ['lose', 'maintain']) {
+          const t = calcTargets({ sex: 'female', weightKg, heightCm, age: 40, activity, pace: 'fast', goal });
+          if (t.carbG < minCarb) { minCarb = t.carbG; worst = `${weightKg}kg/${heightCm}cm/${activity}/${goal}`; }
+        }
+      }
+    }
+  }
+  assert.ok(minCarb >= 80, `最低碳水出现在 ${worst}：${minCarb} 克`);
+});
+
 test('偏瘦的人不给减脂缺口，并且明确劝退', () => {
   const t = calcTargets({
     sex: 'female', weightKg: 45, heightCm: 168, age: 22, activity: 'moderate', pace: 'standard', goal: 'lose',

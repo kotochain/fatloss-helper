@@ -2,7 +2,10 @@
  * 常见食物营养数据（每 100 克可食部）
  *
  * 数据来源与准确度说明（重要，别当成精确值用）：
- *  - 数值主要参考《中国食物成分表（第 6 版）》的常见条目，以及市售包装食品的营养成分表典型值。
+ *  - 大部分条目参考《中国食物成分表（第 6 版）》，少部分按更贴近实际吃到的口径：
+ *    全脂牛奶按中国市售包装标签（65 kcal/100ml，比成分表的 54 更接近日常喝的）；
+ *    鸡胸肉、红薯、西兰花、三文鱼按 USDA FoodData Central（更接近去皮去骨/养殖的实际值）。
+ *    两张表的口径差异可达 ±20%，所以本表只当估算。
  *  - 生熟状态差别很大，本表对主食明确区分「生」和「熟」（米饭、面条按熟重计）。
  *  - 品牌、做法、放油量都会让真实值上下浮动 10%~30%，尤其是炒菜和外卖。
  *  - 包装食品请直接照包装背面的「每 100 克」抄进「自定义食物」，那才是准的。
@@ -52,13 +55,16 @@ export const FOODS = [
   { id: 'beef_fatty', name: '肥牛/雪花牛肉', category: 'protein', kcal: 300, protein: 16.0, fat: 26.0, carb: 0, servings: [['一份', 100]] },
   { id: 'lamb', name: '羊肉（瘦）', category: 'protein', kcal: 118, protein: 20.5, fat: 3.9, carb: 0.2, servings: [['一份', 100]] },
   { id: 'shrimp', name: '虾（鲜）', category: 'protein', kcal: 93, protein: 18.6, fat: 0.8, carb: 2.8, servings: [['一只', 15], ['10 只', 150]] },
-  { id: 'salmon', name: '三文鱼', category: 'protein', kcal: 139, protein: 17.2, fat: 7.8, carb: 0.0, servings: [['一份', 120]] },
+  // 按养殖大西洋鲑（USDA FoodData Central 175167）：208/20.4/13.4。
+  // 之前误用了《中国食物成分表》「鲑鱼（大马哈鱼）」的 139/17.2/7.8（野生太平洋鲑），每 100 克少算约 70 kcal
+  { id: 'salmon', name: '三文鱼（养殖生）', category: 'protein', kcal: 208, protein: 20.4, fat: 13.4, carb: 0.0, servings: [['一份', 120]] },
+  { id: 'salmon_wild', name: '大马哈鱼（野生）', category: 'protein', kcal: 139, protein: 17.2, fat: 7.8, carb: 0.0, servings: [['一份', 120]] },
   { id: 'white_fish', name: '巴沙鱼/龙利鱼', category: 'protein', kcal: 90, protein: 17.0, fat: 2.0, carb: 0, servings: [['一份', 150]] },
   { id: 'tuna_can', name: '水浸金枪鱼罐头', category: 'protein', kcal: 100, protein: 22.0, fat: 1.0, carb: 0, servings: [['一罐', 120]] },
   { id: 'egg', name: '鸡蛋', category: 'protein', kcal: 143, protein: 13.3, fat: 8.8, carb: 2.8, servings: [['一个', 50], ['两个', 100], ['蛋白（一个）', 33], ['蛋黄（一个）', 17]] },
   { id: 'duck_egg', name: '鸭蛋', category: 'protein', kcal: 180, protein: 12.6, fat: 13.0, carb: 3.1, servings: [['一个', 70]] },
-  { id: 'tofu_firm', name: '北豆腐（老豆腐）', category: 'protein', kcal: 116, protein: 12.2, fat: 4.8, carb: 4.2, servings: [['一块', 100]] },
-  { id: 'tofu_silken', name: '南豆腐（嫩豆腐）', category: 'protein', kcal: 87, protein: 6.2, fat: 5.8, carb: 2.4, servings: [['一块', 100]] },
+  { id: 'tofu_firm', name: '北豆腐（老豆腐）', category: 'protein', kcal: 99, protein: 12.2, fat: 4.8, carb: 2.0, servings: [['一块', 100]] },
+  { id: 'tofu_silken', name: '南豆腐（嫩豆腐）', category: 'protein', kcal: 57, protein: 6.2, fat: 2.5, carb: 2.4, servings: [['一块', 100]] },
   { id: 'dried_tofu', name: '豆腐干', category: 'protein', kcal: 140, protein: 16.2, fat: 3.6, carb: 11.5, servings: [['一块', 50]] },
   { id: 'soybean', name: '黄豆（干）', category: 'protein', kcal: 390, protein: 35.0, fat: 16.0, carb: 34.2, servings: [['一小把', 30]] },
   { id: 'edamame', name: '毛豆', category: 'protein', kcal: 131, protein: 13.1, fat: 5.0, carb: 10.5, servings: [['一份', 100]] },
@@ -275,13 +281,17 @@ export function parseAmount(text, food = null) {
   // 按食物的常见份量换算（「一碗」「两个」）
   if (food && Array.isArray(food.servings)) {
     const clean = (x) => String(x).replace(/^一/, '').replace(/[（(].*?[)）]/g, '');
-    for (const [label, grams] of food.servings) {
-      const key = clean(label);
-      if (!key) continue;
-      if (key === unit || unit === key || key.includes(unit) || unit.includes(key)) {
-        return round1(qty * grams);
-      }
-    }
+    const pairs = food.servings
+      .map(([label, grams]) => ({ key: clean(label), grams }))
+      .filter((x) => x.key);
+    // 先精确匹配：否则「一碗」会被表里排在前面的「一小碗」抢走，少算近三成
+    const exact = pairs.find((x) => x.key === unit);
+    if (exact) return round1(qty * exact.grams);
+    // 再退到包含匹配，并且取最长的那个 key（「一大碗」优先于「碗」）
+    const loose = pairs
+      .filter((x) => x.key.includes(unit) || unit.includes(x.key))
+      .sort((a, b) => b.key.length - a.key.length)[0];
+    if (loose) return round1(qty * loose.grams);
   }
   return null;
 }

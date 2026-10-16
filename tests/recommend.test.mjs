@@ -89,8 +89,11 @@ test('384 种资料组合下，餐单都不会离谱（热量偏差 ≤ 12.5%）
           for (const goal of ['lose', 'maintain']) {
             const p = { sex, weightKg: w, heightCm: sex === 'female' ? 163 : 176, age: 30, activity: act, pace, goal };
             const t = calcTargets(p);
+            // 当前已经偏瘦（BMI<18.5）却还要减脂的，工具会明确劝退，不配餐；
+            // 这种资料下餐单偏少是正确行为，不纳入统计（下面单独有测试覆盖）
+            if (t.bmi < 18.5) continue;
             const plan = buildMealPlan(t);
-            const dev = Math.abs(plan.planKcal - t.targetCalories) / t.targetCalories;
+            const dev = Math.abs(plan.planKcalWithOil - t.targetCalories) / t.targetCalories;
             n += 1;
             if (dev > worst) { worst = dev; worstCase = `${sex} ${w}kg ${act} ${pace} ${goal}：目标 ${t.targetCalories}，餐单 ${plan.planKcal}`; }
           }
@@ -98,8 +101,48 @@ test('384 种资料组合下，餐单都不会离谱（热量偏差 ≤ 12.5%）
       }
     }
   }
-  assert.equal(n, 384);
+  assert.ok(n > 240, `有效样本只有 ${n} 个，扫描范围不对`);
   assert.ok(worst <= 0.125, `最大偏差 ${(worst * 100).toFixed(1)}%（${worstCase}）`);
+});
+
+test('餐单把脂肪补到位：餐单脂肪 + 烹调油 ≈ 目标脂肪', () => {
+  for (const p of PROFILES) {
+    const t = calcTargets(p);
+    const plan = buildMealPlan(t);
+    const total = plan.planFatWithOilG;
+    // 下限 0.8：主食在「整份/半份」上取整时会挤掉一点脂肪，允许小幅缺口
+    assert.ok(total >= t.fatG * 0.8, `${p.weightKg}kg：脂肪只有 ${total}g，目标 ${t.fatG}g`);
+    assert.ok(total <= t.fatG * 1.25, `${p.weightKg}kg：脂肪 ${total}g，目标 ${t.fatG}g 超太多`);
+    assert.ok(plan.cookingOilG <= 30, `烹调油 ${plan.cookingOilG} 克太多了`);
+  }
+});
+
+test('烹调油有上限：脂肪缺口再大，油也不超过 30 克、且不把总热量顶超', () => {
+  const cases = [
+    { targetCalories: 2200, proteinG: 110, fatG: 120, carbG: 200 }, // 脂肪目标离谱地高
+    { targetCalories: 1800, proteinG: 90, fatG: 90, carbG: 150 },
+    { targetCalories: 3000, proteinG: 150, fatG: 140, carbG: 300 },
+  ];
+  for (const c of cases) {
+    const plan = buildMealPlan(c);
+    assert.ok(plan.cookingOilG <= 30, `油给了 ${plan.cookingOilG} 克（上限 30）`);
+    assert.ok(plan.cookingOilG >= 0);
+    const dev = plan.planKcalWithOil / c.targetCalories - 1;
+    assert.ok(dev <= 0.16, `${JSON.stringify(c)} 下总热量超了 ${(dev * 100).toFixed(1)}%`);
+  }
+});
+
+test('烹调油额度写进餐单，且提醒里的数字与餐单一致（不再互相矛盾）', () => {
+  const t = calcTargets(PROFILES[0]);
+  const plan = buildMealPlan(t);
+  assert.ok(plan.cookingOilG > 0, '这份餐单的脂肪缺口应该需要补油');
+  assert.ok(plan.planKcalWithOil > plan.planKcal, '含油热量应当大于不含油热量');
+  const tips = buildDailyTips(t, plan.cookingOilG);
+  assert.ok(tips[0].includes(String(plan.cookingOilG)), `提醒里的油量 ${tips[0]} 与餐单的 ${plan.cookingOilG} 克不一致`);
+  assert.ok(tips[0].includes('已经算进'), '必须说明油已经算进餐单，否则用户会重复加');
+  // 餐与餐之间分配的油加起来等于总额度
+  const sum = plan.meals.reduce((a, m) => a + (m.oilG || 0), 0);
+  assert.equal(sum, plan.cookingOilG);
 });
 
 test('不会出现「3 个鸡蛋配 1 勺燕麦」这种极端组合：主菜热量不超过当餐 80%', () => {

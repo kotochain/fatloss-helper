@@ -119,6 +119,17 @@ test('份量解析：「150克」「2个」「一小碗」「半斤」', () => {
   assert.equal(parseAmount('120', rice), 120);
 });
 
+test('份量解析：「一碗」不能被表里排在前面的「一小碗」抢走', () => {
+  const rice = findFood('rice_cooked'); // 表：小碗 130 / 碗 180 / 大碗 250
+  assert.equal(parseAmount('一碗', rice), 180);
+  assert.equal(parseAmount('一碗饭', rice), 180);
+  assert.equal(parseAmount('半碗', rice), 90);
+  assert.equal(parseAmount('一大碗', rice), 250);
+  assert.equal(parseAmount('两碗', rice), 360);
+  // 「小碗」仍然要精确命中
+  assert.equal(parseAmount('一小碗', rice), 130);
+});
+
 test('份量解析：看不懂的输入返回 null，而不是猜一个数', () => {
   assert.equal(parseAmount('随便吃了点', findFood('egg')), null);
   assert.equal(parseAmount('', findFood('egg')), null);
