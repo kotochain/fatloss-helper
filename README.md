@@ -91,6 +91,25 @@ AI 模式是可选的加成（说大白话更自由、教练建议更具体）�
 
 ---
 
+## 待办（GitHub Issues）
+
+**[→ 全部 issue](https://github.com/kotochain/fatloss-helper/issues)**
+
+| # | 事项 | 类型 |
+| --- | --- | --- |
+| [6](https://github.com/kotochain/fatloss-helper/issues/6) | 真机试用：把发现的问题记在这里 | 进行中 |
+| [3](https://github.com/kotochain/fatloss-helper/issues/3) | 「半包薯片」的份量被奶茶抢走（精准度相关，优先级高） | bug |
+| [4](https://github.com/kotochain/fatloss-helper/issues/4) | 器械勾选刷新后不保留 | bug |
+| [2](https://github.com/kotochain/fatloss-helper/issues/2) | 普通模式要做到「不接 API 也很好用」 | 最高优先级 |
+| [5](https://github.com/kotochain/fatloss-helper/issues/5) | AI 教练：基于她自己的记录给具体建议 | 增强 |
+| [1](https://github.com/kotochain/fatloss-helper/issues/1) | 会员制度：不用自己配 API，充值即用 | 日后 |
+
+> **为什么先停在试用**：到现在为止所有验证都是无头浏览器跑出来的，一次真机手点都没有。
+> 引导会不会太长、份量档位准不准、装到主屏幕后什么样 —— 这些在电脑上永远测不出来。
+> 用一周，把卡住的地方记到 #6。
+
+---
+
 ## 一、怎么用起来（安卓手机）
 
 ### 第 1 步：在电脑上启动一次预览服务
