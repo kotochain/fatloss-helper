@@ -98,7 +98,7 @@ export function humanizeNetworkError(err, baseUrl) {
 export async function requestParse({ text, meal, hour, config, fetchImpl = fetch }) {
   const userContent = [
     `用户说：${text}`,
-    meal ? `她指定了这一餐是：${meal}` : '',
+    meal ? `用户指定了这一餐是：${meal}` : '',
     `当前时间：${hour ?? new Date().getHours()} 点`,
   ].filter(Boolean).join('\n');
 

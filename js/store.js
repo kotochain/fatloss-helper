@@ -122,9 +122,21 @@ export function updateFoodEntry(state, dateKey, entryId, patch) {
   return null;
 }
 
+/**
+ * 记一次运动。
+ *
+ * 时长必须校验：0 或负数会被存进去变成「练了 0 分钟」，
+ * 让统计里多出一条假记录（次数对了、时长却没变），比直接拒绝更难查。
+ * 校验放在这里而不是各个界面里 —— 界面有两个入口，漏一个就漏了。
+ *
+ * @returns {object|null} 记上的条目；时长不合法时返回 null（由界面提示）
+ */
 export function addExercise(state, dateKey, exerciseKey, minutes) {
+  const m = Math.round(Number(minutes));
+  if (!Number.isFinite(m) || m <= 0 || m > 1440) return null;
+  if (!exerciseKey) return null;
   const day = getDay(state, dateKey);
-  const item = { id: newId('x'), exerciseKey, minutes: Math.round(minutes) };
+  const item = { id: newId('x'), exerciseKey, minutes: m };
   day.exercises.push(item);
   return item;
 }

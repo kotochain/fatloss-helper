@@ -29,7 +29,7 @@ import {
 import { buildMealPlan, buildDailyTips } from './recommend.js';
 import { insights, insightHint } from './insights.js';
 import {
-  SCHEMA_VERSION, loadState, migrateToCurrent, readBackup, clearBackup, saveBackup, describeMigration,
+  SCHEMA_VERSION, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
 } from './schema.js';
 import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
@@ -45,7 +45,7 @@ let view = 'today';
 let dateKey = todayKey();
 let planSeed = 0;
 let pendingFood = null;
-/** 「说一句」流程的临时状态：解析出来的条目等她确认 */
+/** 「说一句」流程的临时状态：解析出来的条目等用户确认 */
 let draft = null;
 /** AI 是否可用（进界面时问一次服务端） */
 let ai = { configured: false, checked: false, reason: null };
@@ -224,7 +224,7 @@ function handleAction(act, data) {
       document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
       render();
       const ta = $('#quickText');
-      if (ta) { ta.focus(); toast('在这里写一句，会自动记到她那一餐。'); }
+      if (ta) { ta.focus(); toast('在这里写一句，会自动记到你那一餐。'); }
       return;
     }
     case 'del-food': {
@@ -266,7 +266,7 @@ function handleAction(act, data) {
 function renderWelcome() {
   app.innerHTML = `
     <div class="card">
-      <div class="card-title">先填 6 个数字，就能算出她每天该吃多少</div>
+      <div class="card-title">填几个数字，就能算出你每天该吃多少</div>
       <p class="small muted" style="margin:0 0 12px">
         需要：性别、年龄、身高、体重、平时的活动量、想多快瘦下来。<br>
         全部只存在这台设备的浏览器里，不联网、不上传，别人看不到。
@@ -276,7 +276,7 @@ function renderWelcome() {
         <button class="btn ghost grow" data-act="demo">看一个填好的例子</button>
       </div>
       <p class="tiny muted" style="margin:12px 0 0">
-        这个工具只做估算和记录，不是医疗建议。如果她怀孕/哺乳、有甲状腺或肾脏问题、在吃影响体重的药，
+        这个工具只做估算和记录，不是医疗建议。如果你怀孕/哺乳、有甲状腺或肾脏问题、在吃影响体重的药，
         或者年龄未满 18 岁，请先问医生，不要照这里的数字吃。
       </p>
     </div>`;
@@ -564,8 +564,8 @@ function renderLog() {
 }
 
 /* ── 「说一句就记上」流程 ─────────────────────
-   流程：她说一句话 → 解析（AI 优先，失败退回离线）→ 展示条目让她确认/改 → 记进当天
-   关键原则：解析结果永远先给她看，不直接记账；AI 只负责听懂，热量由本地食物库算。
+   流程：用户说一句话 → 解析（AI 优先，失败退回离线）→ 展示条目让用户确认/改 → 记进当天
+   关键原则：解析结果永远先给用户看，不直接记账；AI 只负责听懂，热量由本地食物库算。
    ─────────────────────────────────────────── */
 
 function bindQuickLog() {
@@ -578,7 +578,7 @@ function bindQuickLog() {
   });
   btn.addEventListener('click', async () => {
     const text = input.value.trim();
-    if (!text) return toast('先写一句她吃了什么。');
+    if (!text) return toast('先写一句你吃了什么。');
     btn.disabled = true;
     btn.textContent = ai.configured ? 'AI 正在解析…' : '正在解析…';
     try {
@@ -844,7 +844,7 @@ function renderPlan() {
 
     <div class="card">
       <div class="card-title">一周练什么</div>
-      <label class="field"><span>她每周能练几天？</span>
+      <label class="field"><span>你每周能练几天？</span>
         <div class="chips" id="trainDays">
           ${[2, 3, 4].map((d) => `<button class="chip ${state.settings.trainDays === d ? 'on' : ''}" data-days="${d}">${d} 天</button>`).join('')}
         </div>
@@ -900,7 +900,7 @@ function renderCardioCard() {
   const today = getDay(state, dateKey);
   return `
     <div class="card">
-      <div class="card-title">今天练什么 <span class="tiny muted">按她今天能用的器械排</span></div>
+      <div class="card-title">今天练什么 <span class="tiny muted">按你今天能用的器械排</span></div>
 
       <label class="field"><span>今天有哪些器械？（可多选）</span>
         <div class="chips" id="equipChips">
@@ -1413,7 +1413,7 @@ function checkNewAchievements() {
    收成一处，找起来才不费劲。
    ─────────────────────────────────────────── */
 
-/** 从记录里算出的「她自己的规律」（数据不够时返回空数组） */
+/** 从记录里算出的「用户自己的规律」（数据不够时返回空数组） */
 function myInsights(limit) {
   const t = targets();
   if (!t) return [];
@@ -1456,7 +1456,7 @@ function openSettingsSheet() {
     body: `
       <button class="set-row" data-set="profile">
         <span class="set-ico">👤</span>
-        <span class="set-main"><b>她的资料</b><em>${state.profile ? `${state.profile.heightCm} cm · ${state.profile.weightKg} kg · ${state.profile.age} 岁` : '还没填'}</em></span>
+        <span class="set-main"><b>你的资料</b><em>${state.profile ? `${state.profile.heightCm} cm · ${state.profile.weightKg} kg · ${state.profile.age} 岁` : '还没填'}</em></span>
         <span class="set-go">›</span>
       </button>
 
@@ -1634,7 +1634,7 @@ function openAboutSheet() {
         <b>算得准不准</b><br>
         基础代谢用国际通用的公式，误差一般 ±10%。食物热量里，包装食品最准（照标签填），
         炒菜和外卖误差最大（同一道菜不同人放油差一倍）。<br>
-        所以真正准的是「体重」页的趋势判断 —— 它按她实际掉秤速度来校准，比任何公式都准。
+        所以真正准的是「体重」页的趋势判断 —— 它按你实际的掉秤速度来校准，比任何公式都准。
       </div>
       <div class="set-note">
         <b>数据存在哪</b><br>
@@ -2012,7 +2012,7 @@ function drawAiSettings(cfg, relay) {
     show('已保存，正在测试连通…', 'info');
     const t = await testConnection();
     if (t.ok) {
-      show(`✅ 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>现在她怎么写都能听懂了。`, 'info');
+      show(`✅ 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>现在你怎么写都能听懂了。`, 'info');
       ai = { configured: true, checked: true, mode: currentAiConfig().mode };
     } else {
       show(`设置已保存，但连通测试失败：<b>${esc(t.error)}</b><br>修好之前会用离线识别记录（常见说法也能认）。`, '');
@@ -2083,7 +2083,7 @@ function openProfileSheet() {
   openSheet({
     title: hasProfile ? '我的资料' : '填写资料',
     body: `
-      <label class="field"><span>怎么称呼她</span>
+      <label class="field"><span>怎么称呼你</span>
         <input type="text" id="pNickname" value="${esc(p.nickname || '')}" maxlength="8" placeholder="选填，例如：小繁">
         <span class="tiny muted" style="margin-top:4px;display:block">会用在问候和周报里。留空就不称呼。</span>
       </label>
@@ -2194,7 +2194,7 @@ function openProfileSheet() {
           view = 'today';
           document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
           render();
-          toast(`已保存。她每天的目标大约是 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
+          toast(`已保存。你每天的目标大约是 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
         } catch (err) {
           toast(err.message);
         }

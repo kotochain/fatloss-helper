@@ -135,6 +135,19 @@ test('异常份量会给出提醒（防止把克写成斤）', () => {
   assert.ok(entryWarnings({ food: rice, grams: 1200 }).length > 0);
 });
 
+test('addExercise 的时长校验：0、负数、离谱值都要被拒绝', () => {
+  // 不校验的话会存进「练了 0 分钟」，统计里多一条假记录（次数对了、时长却没变），很难查。
+  const s = emptyState();
+  assert.equal(addExercise(s, '2026-10-16', 'walk', 30)?.minutes, 30);
+  assert.equal(addExercise(s, '2026-10-16', 'walk', 0), null, '0 分钟不是运动');
+  assert.equal(addExercise(s, '2026-10-16', 'walk', -20), null, '负数要被拒');
+  assert.equal(addExercise(s, '2026-10-16', 'walk', NaN), null);
+  assert.equal(addExercise(s, '2026-10-16', 'walk', 2000), null, '一天 2000 分钟不可能');
+  assert.equal(addExercise(s, '2026-10-16', '', 30), null, '没有动作名不算');
+  assert.equal(getDay(s, '2026-10-16').exercises.length, 1, '只有合法的那一条被记上');
+  assert.equal(addExercise(s, '2026-10-16', 'walk', 30.6)?.minutes, 31, '小数要取整');
+});
+
 test('记运动与删除', () => {
   const s = emptyState();
   const x = addExercise(s, '2026-10-16', 'walk', 40);
