@@ -1,0 +1,236 @@
+import { round } from './calc.js';
+import { buildMealPlan, buildDailyTips } from './recommend.js';
+
+export const STATE_VERSION = 2;
+
+/** 空状态：还没填资料 */
+export function emptyState() {
+  return {
+    version: STATE_VERSION,
+    profile: null,
+    settings: { trainDays: 3, stepsKey: 'mid' },
+    days: {},
+    customFoods: [],
+    weights: [],
+  };
+}
+
+/** 补齐旧版本数据缺的字段，避免升级后打不开 */
+export function migrate(raw) {
+  const base = emptyState();
+  if (!raw || typeof raw !== 'object') return base;
+  return {
+    ...base,
+    ...raw,
+    version: STATE_VERSION,
+    settings: { ...base.settings, ...(raw.settings || {}) },
+    days: raw.days && typeof raw.days === 'object' ? raw.days : {},
+    customFoods: Array.isArray(raw.customFoods) ? raw.customFoods : [],
+    weights: Array.isArray(raw.weights) ? raw.weights : [],
+  };
+}
+
+/** 本地日期，格式 2026-10-16。不能用 toISOString，那是 UTC，晚上会串到第二天 */
+export function todayKey(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function shiftDate(key, deltaDays) {
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + deltaDays);
+  return todayKey(dt);
+}
+
+/** 取某天的数据；没有就建一个空的（懒加载，不用预填一堆空日子） */
+export function getDay(state, key) {
+  if (!state.days[key]) {
+    state.days[key] = { meals: { breakfast: [], lunch: [], dinner: [], snack: [] }, exercises: [], note: '' };
+  }
+  const day = state.days[key];
+  day.meals = day.meals || { breakfast: [], lunch: [], dinner: [], snack: [] };
+  for (const k of ['breakfast', 'lunch', 'dinner', 'snack']) day.meals[k] = day.meals[k] || [];
+  day.exercises = day.exercises || [];
+  // 兼容早期存档：记录里没有 meal 字段的，按所在餐位补上
+  for (const [key, list] of Object.entries(day.meals)) {
+    for (const e of list) if (!e.meal) e.meal = key;
+  }
+  return day;
+}
+
+let seq = 0;
+function newId(prefix) {
+  seq += 1;
+  return `${prefix}_${Date.now().toString(36)}_${seq}`;
+}
+
+/**
+ * 把一条食物记录放进某一天某一餐
+ * @returns {object} 新记录（调用方负责存盘）
+ */
+/** 份量必须是真正的数字：字符串 '200' 会悄悄通过 > 0 的判断，必须显式挡住 */
+export function normalizeGrams(grams) {
+  if (typeof grams !== 'number' || !Number.isFinite(grams) || grams <= 0) {
+    throw new Error(`份量必须是大于 0 的数字，收到了 ${JSON.stringify(grams)}`);
+  }
+  if (grams > 5000) throw new Error('单次份量超过 5000 克，请确认单位（斤 / 两 / 克）');
+  return Math.round(grams);
+}
+
+export function addFoodEntry(state, dateKey, mealKey, food, grams) {
+  const g = normalizeGrams(grams);
+  const day = getDay(state, dateKey);
+  const slot = day.meals[mealKey];
+  if (!slot) throw new Error(`没有这一餐：${mealKey}`);
+  // meal 字段必须存进记录里：按餐汇总、界面分组都靠它
+  const entry = { id: newId('e'), meal: mealKey, food: { ...food }, grams: g, createdAt: new Date().toISOString() };
+  slot.push(entry);
+  return entry;
+}
+
+export function removeFoodEntry(state, dateKey, entryId) {
+  const day = getDay(state, dateKey);
+  for (const k of Object.keys(day.meals)) {
+    const i = day.meals[k].findIndex((e) => e.id === entryId);
+    if (i >= 0) {
+      day.meals[k].splice(i, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function updateFoodEntry(state, dateKey, entryId, patch) {
+  const day = getDay(state, dateKey);
+  for (const k of Object.keys(day.meals)) {
+    const e = day.meals[k].find((x) => x.id === entryId);
+    if (e) {
+      Object.assign(e, patch);
+      return e;
+    }
+  }
+  return null;
+}
+
+export function addExercise(state, dateKey, exerciseKey, minutes) {
+  const day = getDay(state, dateKey);
+  const item = { id: newId('x'), exerciseKey, minutes: Math.round(minutes) };
+  day.exercises.push(item);
+  return item;
+}
+
+export function removeExercise(state, dateKey, id) {
+  const day = getDay(state, dateKey);
+  const i = day.exercises.findIndex((x) => x.id === id);
+  if (i >= 0) {
+    day.exercises.splice(i, 1);
+    return true;
+  }
+  return false;
+}
+
+export function addWeight(state, dateKey, kg) {
+  if (!(kg > 0)) throw new Error('体重必须大于 0');
+  const list = state.weights.filter((w) => w.date !== dateKey);
+  list.push({ date: dateKey, kg: Math.round(kg * 10) / 10 });
+  list.sort((a, b) => a.date.localeCompare(b.date));
+  state.weights = list;
+  return list;
+}
+
+export function addCustomFood(state, food) {
+  const id = newId('c');
+  const item = {
+    id,
+    name: food.name,
+    category: 'custom',
+    kcal: food.kcal,
+    protein: food.protein,
+    fat: food.fat,
+    carb: food.carb,
+    servings: food.servings && food.servings.length ? food.servings : [['一份', food.baseGrams || 100]],
+  };
+  state.customFoods.push(item);
+  return item;
+}
+
+/** 体重趋势：取最近 N 条，算出平均每天变化 */
+export function weightTrend(state, limit = 30) {
+  const list = [...state.weights].sort((a, b) => a.date.localeCompare(b.date)).slice(-limit);
+  return list;
+}
+
+/**
+ * 按体重变化推算「实际热量缺口」，用来验证吃得对不对。
+ * 需要至少 2 条记录、间隔至少 7 天，否则不给结论。
+ */
+export function analyzeProgress(state) {
+  const list = weightTrend(state, 60);
+  if (list.length < 2) {
+    return { ok: false, reason: '至少记录两次体重（间隔 7 天以上）才能看出趋势。' };
+  }
+  const first = list[0];
+  const last = list[list.length - 1];
+  const days = Math.round((new Date(last.date) - new Date(first.date)) / 86400000);
+  if (days < 7) {
+    return { ok: false, reason: `两次记录只隔了 ${days} 天，至少要 7 天才看得出趋势（体重每天会上下浮动 1 公斤左右）。` };
+  }
+  const deltaKg = last.kg - first.kg;
+  const perWeek = (deltaKg / days) * 7;
+  let verdict;
+  if (perWeek <= -0.2 && perWeek >= -1.0) verdict = '节奏很好，保持现在的吃法和运动。';
+  else if (perWeek < -1.0) verdict = '掉得偏快，容易掉肌肉和代谢下降，建议每天多吃 150~200 kcal（比如多半碗饭）。';
+  else if (perWeek < -0.05) verdict = '掉得比较慢但方向对。如果连续两周几乎不动，可以每天少吃 100~150 kcal，或把走路加到 8000 步。';
+  else if (perWeek <= 0.05) verdict = '体重基本没动。先确认是不是漏记了零食和饮料，再考虑调整。';
+  else verdict = '体重在涨。如果不是在增肌，检查一下份量记录和外食频率。';
+  return {
+    ok: true,
+    days,
+    fromKg: first.kg,
+    toKg: last.kg,
+    deltaKg: round(deltaKg, 1),
+    perWeek: round(perWeek, 2),
+    verdict,
+  };
+}
+
+/** 一天的完整汇总，界面就靠这个渲染 */
+export function daySummary(state, dateKey, targets) {
+  const day = getDay(state, dateKey);
+  const entries = Object.values(day.meals).flat();
+  return { day, entries, targets, dateKey };
+}
+
+/**
+ * 演示/自检用的完整示例：填资料 → 生成餐单 → 记一天饮食。
+ * 只在本地用，用户点「试用示例」时才会跑。
+ */
+export function demoProfile() {
+  return {
+    sex: 'female',
+    age: 26,
+    heightCm: 163,
+    weightKg: 58,
+    bodyFatPct: null,
+    activity: 'light',
+    pace: 'standard',
+    goal: 'lose',
+    targetWeightKg: 54,
+  };
+}
+
+export function demoEntries(state, dateKey, targets) {
+  const plan = buildMealPlan(targets, { seed: 1 });
+  const added = [];
+  for (const meal of plan.meals) {
+    for (const item of meal.items) {
+      added.push(addFoodEntry(state, dateKey, meal.key, item.food, item.grams));
+    }
+  }
+  addExercise(state, dateKey, 'walk', 30);
+  return added;
+}
+
+export function dailyTips(targets) {
+  return buildDailyTips(targets);
+}

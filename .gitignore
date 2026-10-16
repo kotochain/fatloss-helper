@@ -1,0 +1,5 @@
+# 自检产物（截图、无头浏览器配置、浏览器回传的自检结果）
+.selfcheck/
+node_modules/
+.DS_Store
+*.log
