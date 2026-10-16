@@ -149,6 +149,8 @@ node tools/mutate-check.mjs    # 反向验证：故意改坏 19 处代码，确�
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程
 node tools/offline-check.mjs   # 断网自检：缓存后断网重开，确认还能用
+node tools/ai-e2e-check.mjs    # AI 链路端到端自检（用假上游，不花 API 费用，也验证密钥不外泄）
+node tools/check-secrets.mjs --self-test   # 提交前扫密钥（带自查，确认扫描器本身有效）
 ```
 
 AI 转发的环境变量（想换模型时用）：

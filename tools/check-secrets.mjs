@@ -38,11 +38,28 @@ const walk = (dir) => {
 walk(root);
 // 测试里用的假密钥是允许的
 // 测试里刻意用的假密钥：明确列出来，其余一律当真实风险处理
-const FAKE_KEYS = ['sk-fake-for-test', 'sk-secret-should-not-leak', 'sk-from-file', 'sk-from-env', 'sk-你的密钥', 'sk-xxx'];
+const FAKE_KEYS = [
+  'sk-fake-for-test', 'sk-secret-should-not-leak', 'sk-from-file', 'sk-from-env',
+  'sk-e2e-fake-key-for-testing', 'sk-你的密钥', 'sk-xxx',
+];
 // 注意要按完整字符串比，不能只看前几位 —— 假密钥和真密钥前几位长得一样
 const real = hits.filter((h) => !FAKE_KEYS.some((f) => h.key === f)).map((h) => `${h.file}: ${h.key.slice(0, 8)}…`);
 if (real.length) { bad += 1; console.log('❌ 源码里出现了像真密钥的字符串：\n   ' + real.join('\n   ')); }
 else console.log('✅ 源码里没有真密钥形态的字符串');
 
+// 自查工具本身：确认它真的能抓到密钥，而不是永远说「通过」
+if (process.argv.includes('--self-test')) {
+  const looksReal = 'sk-9f3a7c2e5b1d8046aabbccddeeff0011';
+  const looksFake = 'sk-fake-for-test';
+  const scan = (text) => [...text.matchAll(/sk-[A-Za-z0-9_-]{16,}/g)]
+    .map((m) => m[0])
+    .filter((k) => !FAKE_KEYS.includes(k));
+  const caught = scan(`const key = "${looksReal}";`).length === 1;
+  const ignored = scan(`const key = "${looksFake}";`).length === 0;
+  console.log(caught ? '✅ 自查工具能抓到真密钥形态' : '❌ 自查工具抓不到真密钥，形同摆设');
+  console.log(ignored ? '✅ 自查工具会忽略测试用的假密钥' : '❌ 自查工具把假密钥当成真密钥报警');
+  if (!caught || !ignored) process.exitCode = 1;
+}
+
 console.log(bad ? `\n❌ 有 ${bad} 项需要处理` : '\n✅ 密钥自查通过');
-process.exitCode = bad ? 1 : 0;
+if (bad) process.exitCode = 1;
