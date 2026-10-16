@@ -112,6 +112,29 @@ test('升级会补上成长记录的默认值', () => {
   assert.ok(Array.isArray(r.data.migrations), '应当记录迁移时间，方便排查');
 });
 
+test('升级会清掉历史版本写进去的默认称呼，但保留用户自己改过的', () => {
+  // 早期版本会把默认称呼「小繁」直接写进存档 —— 那是为一个人做的痕迹。
+  // 要给别人用，所以升级时把「从没主动改过」的默认值清掉（改成不称呼）。
+  const legacy = legacyV1();
+  legacy.profile = { ...legacy.profile, nickname: '小繁' };
+  const r = migrateToCurrent(legacy);
+  assert.equal(r.ok, true);
+  assert.equal(r.data.profile.nickname, '', '历史默认称呼应当被清掉');
+
+  const custom = legacyV1();
+  custom.profile = { ...custom.profile, nickname: '阿宝' };
+  const r2 = migrateToCurrent(custom);
+  assert.equal(r2.data.profile.nickname, '阿宝', '用户自己填的称呼必须保留');
+});
+
+test('升级会把旧徽章 id 跟到新 id（已解锁状态不能丢）', () => {
+  const legacy = legacyV1();
+  legacy.achievements = { seen: ['fan_badge', 'days_3', 'fan_week'], lastWeeklyAt: null, milestones: [10] };
+  const r = migrateToCurrent(legacy);
+  assert.deepEqual(r.data.achievements.seen, ['start_badge', 'days_3', 'steady_week']);
+  assert.deepEqual(r.data.achievements.milestones, [10], '里程碑进度也要保留');
+});
+
 test('未来版本的存档会被拒绝读取，而不是「尽力解析」把新字段抹掉', () => {
   const future = { schemaVersion: SCHEMA_VERSION + 5, days: {}, weights: [] };
   const r = migrateToCurrent(future);

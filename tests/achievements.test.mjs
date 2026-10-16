@@ -17,7 +17,7 @@ import { emptyState, addFoodEntry, addExercise, addWeight, demoProfile, todayKey
 import { calcTargets } from '../js/calc.js';
 import { findFood } from '../js/foods.js';
 import {
-  ACHIEVEMENTS, PLANT_STAGES, achievements, plantState, currentStreak, longestStreak,
+  ACHIEVEMENTS, PLANT_STAGES, MILESTONES, achievements, plantState, currentStreak, longestStreak,
   totalLoggedDays, weeklyReview, weeklyHighlight, shouldShowWeekly, afterLogMessage,
   markAchievementsSeen, dayTotals, hasLog, recentDays, nickname, greeting, hitMilestone, badgeLabel,
 } from '../js/achievements.js';
@@ -191,19 +191,24 @@ test('空存档不会崩，也不会凭空解锁', () => {
 
 /* ── 个性化（她的昵称与专属徽章）────────────── */
 
-test('称呼：默认「小繁」，可以在资料里改，空值不会露馅', () => {
+test('称呼：默认不称呼，填了才用（工具要给别人用，不能硬编码某个名字）', () => {
   const s = emptyState();
-  assert.equal(nickname(s), '小繁', '没设昵称时用默认名');
+  assert.equal(nickname(s), '', '没填称呼时应当为空，界面不显示名字');
   s.profile = { nickname: '小繁' };
   assert.equal(nickname(s), '小繁');
   s.profile = { nickname: '  繁繁  ' };
   assert.equal(nickname(s), '繁繁', '应当去掉首尾空格');
   s.profile = { nickname: '' };
-  assert.equal(nickname(s), '小繁', '空字符串回落到默认名');
+  assert.equal(nickname(s), '', '空字符串就是不称呼');
   s.profile = { nickname: '这个名字特别特别长超过八个字了' };
-  assert.ok(nickname(s).length <= 8, '过长的昵称要截断，避免撑坏界面');
+  assert.ok(nickname(s).length <= 8, '过长的称呼要截断，避免撑坏界面');
   s.profile = null;
-  assert.equal(nickname(s), '小繁');
+  assert.equal(nickname(s), '');
+
+  // 代码里不许硬编码某个人的名字（要给别人用）
+  const src = fs.readFileSync(path.join(root, 'js', 'achievements.js'), 'utf8');
+  const bad = src.split('\n').filter((l) => /小繁/.test(l) && !l.trim().startsWith('*') && !l.trim().startsWith('//'));
+  assert.deepEqual(bad, [], `代码里出现了硬编码的名字：\n${bad.join('\n')}`);
 });
 
 test('问候语按时间变化，并且带上她的名字', () => {
@@ -222,43 +227,39 @@ test('问候语按时间变化，并且带上她的名字', () => {
   assert.equal(greeting(s, 12).name, '小繁');
 });
 
-test('小繁专属徽章存在，且别人（改名后）也能正常用', () => {
-  const specials = ACHIEVEMENTS.filter((a) => a.special);
-  assert.ok(specials.length >= 3, '至少要有 3 个专属徽章');
-  assert.ok(specials.every((a) => a.emoji && a.congrats), '专属徽章要有表情和一句专属的话');
+test('没有「专属徽章」这种概念：所有徽章对所有人都成立', () => {
+  // 曾经有 3 个「小繁专属」徽章。要给别人用就去掉了 ——
+  // 别人看到「别人的名字专属徽章」会觉得这不是给自己做的。
+  assert.equal(ACHIEVEMENTS.filter((a) => a.special).length, 0, '不该再有专属徽章');
+  assert.ok(ACHIEVEMENTS.every((a) => a.emoji && a.name && a.congrats), '每个徽章都要有表情、名字和一句祝贺');
+  assert.ok(ACHIEVEMENTS.every((a) => !/专属/.test(a.name)), '徽章名字里不该出现「专属」');
 
-  // 名字没有硬编码在徽章定义里（改名之后照样能用）
-  const src = fs.readFileSync(path.join(root, 'js', 'achievements.js'), 'utf8');
-  const defBlock = src.slice(src.indexOf('export const ACHIEVEMENTS'), src.indexOf('export function proteinDays'));
-  assert.ok(!defBlock.includes('小繁'), '徽章定义里不该硬编码她的名字（否则改昵称就错了）');
-
-  const renamed = emptyState();
-  renamed.profile = { nickname: '别人' };
-  const a = achievements(renamed, 60);
-  assert.ok(a.list.some((x) => x.special), '专属徽章不依赖昵称，改名后仍在');
-  assert.ok(a.list.filter((x) => x.special).every((x) => x.special === true));
+  // 换个名字用，徽章完全一样
+  const a1 = achievements(emptyState(), 60).list.map((x) => x.name).join(',');
+  const s2 = emptyState();
+  s2.profile = { nickname: '别人' };
+  const a2 = achievements(s2, 60).list.map((x) => x.name).join(',');
+  assert.equal(a1, a2, '徽章列表不该随称呼变化');
 });
 
-test('徽章显示名：专属徽章带她的昵称，普通徽章不变；不会有别扭的拼接', () => {
+test('徽章显示名就是定义里的名字，不拼称呼、不会出现别扭的拼接', () => {
   const s = emptyState();
   s.profile = { nickname: '小繁' };
   const a = achievements(s, 60);
-  const special = a.list.find((x) => x.special);
-  const normal = a.list.find((x) => x.id === 'days_7');
-  assert.equal(badgeLabel(s, special), '小繁的小徽章');
-  assert.equal(badgeLabel(s, normal), '一周记录');
-  // 之前踩过的坑：字符串替换拼出「小繁专属：徽章」这种词
-  assert.ok(!badgeLabel(s, special).includes('：'), '不该出现「：」');
-  assert.ok(!badgeLabel(s, special).includes('专属：'), '不该出现「专属：」');
+  for (const x of a.list) {
+    assert.equal(badgeLabel(s, x), x.name, `「${x.name}」的显示名不应当是拼出来的`);
+    assert.ok(!badgeLabel(s, x).includes('：'), '不该出现「：」');
+  }
+  // 换个称呼，显示名完全不变
   s.profile = { nickname: '阿宝' };
-  assert.equal(badgeLabel(s, special), '阿宝的小徽章', '改昵称后应当跟着变');
+  assert.equal(badgeLabel(s, a.list[0]), a.list[0].name);
 });
 
-test('专属里程碑：每满 10 天踩到一次，且不会重复弹', () => {
+test('里程碑：每满 10 天踩到一次，且不会重复弹', () => {
   assert.equal(hitMilestone(loggedState(9)), null, '第 9 天不该触发');
   const m10 = hitMilestone(loggedState(10));
   assert.ok(m10 && m10.days === 10, '第 10 天应当触发');
-  assert.ok(m10.nickname, '里程碑文案里要带她的名字');
+  assert.ok(m10.emoji && m10.text, '里程碑要有表情和一句话');
   const m30 = hitMilestone(loggedState(30));
   assert.equal(m30.days, 30);
   // 第 11 天不该再触发 10 天那个

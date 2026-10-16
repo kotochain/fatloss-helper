@@ -16,24 +16,26 @@ import { todayKey, shiftDate } from './store.js';
 /* ── 称呼 ───────────────────────────────── */
 
 /**
- * 怎么称呼她。默认「小繁」（她的昵称），可以在资料里改。
+ * 怎么称呼使用的人。可以在「她的资料」里填，留空就不显示称呼。
+ *
+ * 注意：默认值不再是某个具体名字 —— 这个工具要给别人用，
+ * 硬编码人名会让其他人觉得「这不是给我做的」。空字符串表示「不称呼」。
  * 所有个性化文案都从这里取，不要在各处硬编码名字。
  */
 export function nickname(state) {
   const n = state?.profile?.nickname;
-  return (typeof n === 'string' && n.trim()) ? n.trim().slice(0, 8) : '小繁';
+  return (typeof n === 'string' && n.trim()) ? n.trim().slice(0, 8) : '';
 }
 
 /**
  * 徽章在界面上显示的名字。
- * 专属徽章会带上她的昵称（例如「小繁的专属一周」），普通徽章用原名。
- * 统一在这里拼，不要在各处写字符串替换 —— 之前那样拼出过「小繁专属：徽章」这种别扭的词。
+ *
+ * 以前这里会给「专属徽章」拼上用户昵称（「小繁的一周」那样）。
+ * 已经去掉：这个工具要给别人用，昵称是私人的东西，不该写进通用功能里。
+ * 现在所有徽章都用定义里的名字。保留这个函数是为了让界面只有一处决定显示名。
  */
 export function badgeLabel(state, badge) {
-  if (!badge?.special) return badge?.name || '';
-  const base = badge.specialTitle || badge.name;
-  const shorter = base.replace(/^专属/, '');
-  return `${nickname(state)}的${shorter || base}`;
+  return badge?.name || '';
 }
 
 /**
@@ -48,7 +50,13 @@ export function greeting(state, hour = new Date().getHours()) {
       : hour >= 14 && hour < 18 ? '下午好'
         : hour >= 18 && hour < 23 ? '晚上好'
           : '这么晚还没睡呀';
-  return { emoji: hour >= 18 || hour < 5 ? '🌙' : '🌤️', word, name, text: `${word}，${name}` };
+  return {
+    emoji: hour >= 18 || hour < 5 ? '🌙' : '🌤️',
+    word,
+    name,
+    // 没填称呼时不要留一个孤零零的逗号
+    text: name ? `${word}，${name}` : word,
+  };
 }
 
 /* ── 小工具 ─────────────────────────────── */
@@ -292,35 +300,29 @@ export const ACHIEVEMENTS = [
     congrats: '会看营养标签、会自己建食物，这就比大多数人专业了。',
   },
   {
-    id: 'fan_badge',
-    name: '专属徽章',
-    specialTitle: '专属小徽章',
+    id: 'start_badge',
+    name: '开始的人',
     emoji: '🌼',
     hint: '记下第一笔就有',
     target: 1,
-    special: true,
     progress: (s) => (totalLoggedDays(s) >= 1 ? 1 : 0),
-    congrats: '这枚是给你留的，别人没有。',
+    congrats: '开始了。最难的就是这一步。',
   },
   {
-    id: 'fan_week',
-    name: '专属一周',
-    specialTitle: '专属一周',
+    id: 'steady_week',
+    name: '稳定的一周',
     emoji: '💮',
     hint: '累计记录 7 天',
     target: 7,
-    special: true,
     progress: (s) => totalLoggedDays(s),
-    congrats: '这个 App 就是为你写的。',
+    congrats: '一周了。记录这件事你已经做顺了。',
   },
   {
-    id: 'fan_month',
-    name: '专属一个月',
-    specialTitle: '专属一个月',
+    id: 'steady_month',
+    name: '一个月',
     emoji: '🌸',
     hint: '累计记录 30 天',
     target: 30,
-    special: true,
     progress: (s) => totalLoggedDays(s),
     congrats: '一个月了。你比自己想的更有耐心。',
   },
@@ -383,8 +385,6 @@ export function achievements(state, proteinTarget) {
       emoji: a.emoji,
       hint: a.hint,
       congrats: a.congrats,
-      special: Boolean(a.special),
-      specialTitle: a.specialTitle || null,
       target: a.target,
       value: Math.min(value, a.target),
       rawValue: value,
@@ -428,9 +428,11 @@ export function afterLogMessage(state, mealKey, proteinTarget, today = todayKey(
   const proteinPct = proteinTarget > 0 ? totals.protein / proteinTarget : 0;
 
   const name = nickname(state);
-  if (streak === 1 && totalLoggedDays(state) === 1) return { text: `${name}的第一笔记录，成了。`, emoji: '🌼' };
+  if (streak === 1 && totalLoggedDays(state) === 1) {
+    return { text: name ? `${name}的第一笔记录，成了。` : '第一笔记录，成了。', emoji: '🌼' };
+  }
   if (streak === 3) return { text: '连着三天了，数据开始有形状。', emoji: '🌿' };
-  if (streak === 7) return { text: `${name}一整周没落下。`, emoji: '💮' };
+  if (streak === 7) return { text: name ? `${name}一整周没落下。` : '一整周没落下。', emoji: '💮' };
   if (proteinPct >= 1) return { text: '今天的蛋白质达标了，这条最值钱。', emoji: '💪' };
   if (meals >= 3) return { text: '三餐都记全了，这种记录最有参考价值。', emoji: '🫶' };
   if (mealKey === 'breakfast') return { text: '早餐记上了 —— 很多人的早餐是最大的盲区。', emoji: '☀️' };
@@ -458,9 +460,11 @@ export function weeklyReview(state, { proteinTarget = 60, calorieTarget = 1500, 
 
   const lines = [];
   if (!logged.length) {
-    lines.push(`${nickname(state)}这周还没记录。没关系，今天记一笔就是新开始 —— 之前的数据都还在。`);
+    const who = nickname(state);
+    lines.push(`${who ? `${who}这` : '这'}周还没记录。没关系，今天记一笔就是新开始 —— 之前的数据都还在。`);
   } else {
-    lines.push(`${nickname(state)}这一周记了 ${logged.length} 天${logged.length >= 5 ? '，很稳' : '，够用了'}。`);
+    const who = nickname(state);
+    lines.push(`${who ? `${who}这` : '这'}一周记了 ${logged.length} 天${logged.length >= 5 ? '，很稳' : '，够用了'}。`);
     if (proteinHit >= 3) lines.push(`有 ${proteinHit} 天蛋白质吃够了 —— 这是保住肌肉的关键，比少吃更有用。`);
     else lines.push(`蛋白质达标 ${proteinHit} 天。不用急，先从"每餐都有一点肉蛋奶"开始。`);
     if (exerciseDays) lines.push(`动了 ${exerciseDays} 天，一共 ${exerciseMin} 分钟。`);
@@ -495,8 +499,8 @@ export function weeklyHighlight(review) {
   return { emoji: '🫶', text: '这周先歇着也行' };
 }
 
-/** 小繁专属的里程碑：每满 10 天给一张不同的花 */
-export const NICKNAME_MILESTONES = [
+/** 里程碑：每满 10 天给一张不同的花（对所有用户一样） */
+export const MILESTONES = [
   { days: 10, emoji: '🌷', text: '十天了' },
   { days: 20, emoji: '🌻', text: '二十天了' },
   { days: 30, emoji: '🌸', text: '一个月了' },
@@ -510,9 +514,9 @@ export const NICKNAME_MILESTONES = [
  */
 export function hitMilestone(state, today = todayKey()) {
   const total = totalLoggedDays(state);
-  const hit = NICKNAME_MILESTONES.find((m) => m.days === total);
+  const hit = MILESTONES.find((m) => m.days === total);
   if (!hit) return null;
-  return { ...hit, nickname: nickname(state) };
+  return { ...hit };
 }
 
 /** 该不该弹周报：每周一弹一次，且这周有记录 */

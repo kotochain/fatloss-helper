@@ -8,8 +8,8 @@ export const STATE_VERSION = SCHEMA_VERSION;
 /** 空状态：还没填资料 */
 export function emptyState() {
   return {
-    version: 3,           // 历史字段（老代码读它）；现在统一用 schemaVersion
-    schemaVersion: 3,
+    version: 4,           // 历史字段（老代码读它）；现在统一用 schemaVersion
+    schemaVersion: 4,
     profile: null,
     settings: { trainDays: 3, stepsKey: 'mid' },
     days: {},

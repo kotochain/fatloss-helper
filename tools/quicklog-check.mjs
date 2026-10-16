@@ -76,8 +76,10 @@ function connect(wsUrl) {
     const ws = new WebSocket(wsUrl);
     let id = 0;
     const pending = new Map();
+    const handlers = new Map();
     ws.addEventListener('open', () => resolve({
       ws,
+      on(method, handler) { handlers.set(method, handler); },
       close() { try { ws.close(); } catch { /* 已经关了 */ } },
       send(method, params = {}) {
         const msgId = ++id;
@@ -94,6 +96,8 @@ function connect(wsUrl) {
         pending.delete(msg.id);
         if (msg.error) rej(new Error(msg.error.message));
         else res(msg.result);
+      } else if (msg.method && handlers.has(msg.method)) {
+        handlers.get(msg.method)(msg.params);
       }
     });
   });
@@ -125,6 +129,12 @@ async function main() {
   const target = await (await fetch(`http://127.0.0.1:${PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const client = await connect(target.webSocketDebuggerUrl);
   await client.send('Runtime.enable');
+  // 收集页面运行时的异常：界面因为某个变量名写错而整块渲染不出来时，
+  // 断言可能"看起来没问题"（元素不存在就跳过），必须靠这里兜住。
+  const pageErrors = [];
+  client.on?.('Runtime.exceptionThrown', (p) => {
+    pageErrors.push((p?.exceptionDetails?.exception?.description || p?.exceptionDetails?.text || '').split('\n')[0].slice(0, 160));
+  });
   await client.send('Page.enable');
   await client.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
 
@@ -249,8 +259,17 @@ async function main() {
   if (!todayInfo.晚餐行 || !todayInfo.晚餐行.includes('牛肉面')) problems.push('「今天」页没有显示刚记的晚餐');
 
   console.log('\n=== 一·五、正反馈：小植物 / 徽章 / 庆祝 ===');
+  // 先看「没填称呼」时的表现：把称呼清掉（这也是新用户的默认状态）
+  await evaluate(`(() => {
+    const s = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    s.profile = { ...s.profile, nickname: '' };
+    localStorage.setItem('fatloss.state.v2', JSON.stringify(s));
+    return true;
+  })()`);
+  await evaluate(`location.reload()`);
+  await sleep(1500);
   // 回今天页，找成长入口
-  await evaluate(`document.querySelector('.tab[data-view="today"]').click()`);
+  await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);
   await sleep(400);
   const plantCard = await evaluate(`(() => {
     const el = document.querySelector('.plant-card');
@@ -258,12 +277,13 @@ async function main() {
   })()`);
   console.log(plantCard ? `✅ 今天页有小植物入口：${plantCard.文案}` : '❌ 没有小植物入口');
   const personal = await evaluate(`(() => ({
-    顶部昵称签: document.querySelector('#nameTag')?.textContent.trim() || null,
+    昵称签隐藏: document.querySelector('#nameTag')?.hidden === true,
     问候语: document.querySelector('.greet')?.textContent.replace(/\\s+/g, ' ').trim() || null,
+    问候有孤逗号: /，\\s*$/.test(document.querySelector('.greet')?.textContent || ''),
   }))()`);
-  console.log(`✅ 个性化：顶部签「${personal.顶部昵称签}」｜问候「${personal.问候语}」`);
-  if (!personal.顶部昵称签) problems.push('顶部没有显示她的昵称');
-  if (!personal.问候语 || !personal.问候语.includes('小繁')) problems.push('问候语里没有她的名字');
+  console.log(`✅ 没填称呼时：昵称签隐藏 ${personal.昵称签隐藏}｜问候「${personal.问候语}」`);
+  if (!personal.昵称签隐藏) problems.push('没填称呼时顶部不该显示名字');
+  if (personal.问候有孤逗号) problems.push('没填称呼时问候语留了一个孤零零的逗号');
   if (!plantCard) problems.push('今天页缺少小植物入口');
 
   await evaluate(`document.querySelector('.plant-card').click()`);
@@ -280,11 +300,13 @@ async function main() {
       return txt.includes('没有') && txt.includes('少吃') ? '已声明不做少吃类徽章' : '缺少这句声明';
     })(),
   }))()`);
-  const specialBadges = await evaluate(`[...document.querySelectorAll('.badge-grid .ach.special .ach-name')].map((e) => e.textContent.trim())`);
+  const anyPersonal = await evaluate(`(() => {
+    const txt = document.querySelector('#sheetBody')?.textContent || '';
+    return { 有小繁: txt.includes('小繁'), 有专属: txt.includes('专属') };
+  })()`);
   console.log(`✅ 成长弹层：「${growth.标题}」徽章 ${growth.徽章数} 个（已解锁 ${growth.已解锁}，未解锁带进度条 ${growth.有进度条} 个）`);
-  console.log(`   专属徽章：${specialBadges.join('、') || '（没找到）'}`);
-  if (!specialBadges.length) problems.push('徽章墙里没有专属徽章');
-  if (specialBadges.some((t) => !t.includes('小繁'))) problems.push(`专属徽章没有带上她的昵称：${specialBadges.join('、')}`);
+  console.log(`   徽章墙里是否还有个人信息：小繁 ${anyPersonal.有小繁}｜专属 ${anyPersonal.有专属}`);
+  if (anyPersonal.有小繁 || anyPersonal.有专属) problems.push('徽章墙里还残留「小繁专属」这类个人信息（要给别人用）');
   console.log(`   徽章页文案：${growth.说明}`);
   if (growth.说明 !== '已声明不做少吃类徽章') problems.push('徽章页缺少「不做少吃类徽章」的说明');
   if (growth.徽章数 < 10) problems.push(`徽章只有 ${growth.徽章数} 个，太少了`);
@@ -346,14 +368,27 @@ async function main() {
   }
 
   console.log('\n=== 一·六、设置页（我的）===');
+  // 先把可能还开着的弹层和庆祝动画关掉 —— 它们会挡住点击（踩过：点设置没反应）
+  await evaluate(`(() => {
+    document.querySelector('#celebrateOk')?.click();
+    document.querySelectorAll('.celebrate').forEach((el) => el.remove());
+    for (let i = 0; i < 5; i++) { const b = document.querySelector('#sheetClose'); if (!b || b.offsetParent === null) break; b.click(); }
+    return true;
+  })()`);
+  await sleep(500);
   await evaluate(`document.querySelector('#profileBtn').click()`);
   await sleep(700);
   const settings = await evaluate(`(() => ({
     标题: document.querySelector('#sheetTitle')?.textContent || '',
     条目: [...document.querySelectorAll('.set-row .set-main b')].map((e) => e.textContent.trim()),
   }))()`);
+  const modes = await evaluate(`[...document.querySelectorAll('.mode-chip')].map((e) => e.querySelector('b').textContent.trim() + (e.classList.contains('on') ? '(当前)' : ''))`);
   console.log(`✅ 设置页：「${settings.标题}」包含 ${settings.条目.join('、')}`);
-  for (const must of ['AI 高级版', '数据与备份', '她的资料', '关于']) {
+  console.log(`   使用模式：${modes.join(' / ')}`);
+  if (!modes.some((m) => m.includes('普通模式'))) problems.push('设置页没有「普通模式」选项');
+  if (!modes.some((m) => m.includes('AI 模式'))) problems.push('设置页没有「AI 模式」选项');
+  if (!modes.some((m) => m.includes('当前') && m.includes('普通'))) problems.push('默认应当是普通模式（大多数人不会配 API）');
+  for (const must of ['AI 设置', '数据与备份', '她的资料', '关于']) {
     if (!settings.条目.includes(must)) problems.push(`设置页缺少「${must}」`);
   }
 
@@ -364,7 +399,7 @@ async function main() {
     有导出: !!document.querySelector('#doExport'),
     有导入: !!document.querySelector('#doImport'),
     有快照按钮: !!document.querySelector('#doSnapshot'),
-    存档版本显示: (document.querySelector('#sheetBody')?.textContent || '').includes('v3'),
+    存档版本显示: /v\\d+/.test(document.querySelector('#sheetBody')?.textContent || ''),
   }))()`);
   console.log(`✅ 备份页：导出 ${backup.有导出}｜导入 ${backup.有导入}｜手动快照 ${backup.有快照按钮}｜显示存档版本 ${backup.存档版本显示}`);
   if (!backup.有导出 || !backup.有导入) problems.push('备份页缺少导出或导入');
@@ -426,6 +461,12 @@ async function main() {
 
   await evaluate(`document.querySelector('#sheetClose').click()`);
   await sleep(200);
+
+  if (pageErrors.length) {
+    console.log('\n=== 页面运行时异常 ===');
+    for (const e of [...new Set(pageErrors)]) console.log('  ❌', e);
+    problems.push(`页面抛了 ${pageErrors.length} 次异常（见上）`);
+  }
 
   console.log('\n=== 结论 ===');
   if (problems.length) {

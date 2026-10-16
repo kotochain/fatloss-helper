@@ -181,7 +181,11 @@ function render() {
   if (dn) dn.textContent = dateLabel();
   else $('#dateLabel').textContent = dateLabel();
   const nameTag = $('#nameTag');
-  if (nameTag) nameTag.textContent = nickname(state);
+  if (nameTag) {
+    const who = nickname(state);
+    nameTag.textContent = who;
+    nameTag.hidden = !who;   // 没填称呼就不显示，不硬塞一个名字
+  }
   if (!state.profile && view !== 'progress') {
     renderWelcome();
     return;
@@ -329,7 +333,7 @@ function renderToday() {
 
   app.innerHTML = `
     <div class="card hero">
-      <div class="greet">${greet.emoji} <span>${esc(greet.word)}，<b>${esc(greet.name)}</b></span></div>
+      <div class="greet">${greet.emoji} <span>${greet.name ? `${esc(greet.word)}，<b>${esc(greet.name)}</b>` : esc(greet.word)}</span></div>
       <div class="ring-wrap">
         <svg class="ring" viewBox="0 0 190 190" aria-hidden="true">
           <defs>
@@ -1326,15 +1330,13 @@ function checkNewAchievements() {
   const t = targets();
   const a = achievements(state, t?.proteinG || 60);
   if (!a.justUnlocked.length) return;
-  // 有专属徽章时优先庆祝专属的（更有惊喜感）
-  const first = a.justUnlocked.find((x) => x.special) || a.justUnlocked[0];
+  const first = a.justUnlocked[0];
   markAchievementsSeen(state, a.justUnlocked.map((x) => x.id));
   save();
   celebrate({
     badge: first.emoji,
     title: badgeLabel(state, first),
     sub: first.congrats,
-    special: first.special,
   });
 
   // 顺带检查有没有踩到「每 10 天」的里程碑
@@ -1344,9 +1346,8 @@ function checkNewAchievements() {
     save();
     setTimeout(() => celebrate({
       badge: mile.emoji,
-      title: `${mile.nickname}，${mile.text}`,
-      sub: '这是给你的。',
-      special: true,
+      title: mile.text,
+      sub: '记录满这个数了，给你一朵。',
     }), 1400);
   }
 }
@@ -1356,9 +1357,27 @@ function checkNewAchievements() {
    收成一处，找起来才不费劲。
    ─────────────────────────────────────────── */
 
+/**
+ * 使用模式：普通 / AI。
+ *
+ * 这是产品层面的划分，不是「功能阉割」：普通模式自己就能算、能记、能配餐、能给运动方案，
+ * 只是说话方式和自由度不如 AI 模式。默认普通模式 —— 大多数人不会去配 API。
+ */
+function useMode() {
+  return state?.settings?.mode === 'ai' ? 'ai' : 'basic';
+}
+
+function setMode(next) {
+  state.settings = { ...(state.settings || {}), mode: next === 'ai' ? 'ai' : 'basic' };
+  if (next !== 'ai') clearDraft();
+  save();
+  render();
+}
+
 function openSettingsSheet() {
   const t = targets();
-  const cfg = currentAiConfig();
+  const current = useMode();
+  const aiCfg = currentAiConfig();
   const plant = plantState(state);
   const a = achievements(state, t?.proteinG || 60);
   const backup = readBackup(localStorage);
@@ -1372,9 +1391,23 @@ function openSettingsSheet() {
         <span class="set-go">›</span>
       </button>
 
+      <div class="mode-switch">
+        <div class="mode-head">使用模式</div>
+        <div class="mode-chips">
+          <button class="mode-chip ${current === 'basic' ? 'on' : ''}" data-mode="basic">
+            <b>普通模式</b>
+            <em>内置规则算，不用配任何东西</em>
+          </button>
+          <button class="mode-chip ${current === 'ai' ? 'on' : ''}" data-mode="ai">
+            <b>AI 模式</b>
+            <em>${aiCfg.configured ? '已开启' : '需要填一次 API 密钥'}</em>
+          </button>
+        </div>
+      </div>
+
       <button class="set-row" data-set="ai">
         <span class="set-ico">✨</span>
-        <span class="set-main"><b>AI 高级版</b><em>${cfg.configured ? `${cfg.presetName || ''} · ${cfg.model || ''}` : '未开启（现在是内置规则）'}</em></span>
+        <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（普通模式不需要）'}</em></span>
         <span class="set-go">›</span>
       </button>
 
@@ -1400,6 +1433,19 @@ function openSettingsSheet() {
         所有记录只存在这台手机上，不上传。<br>换手机或清缓存前，记得导出备份。
       </p>`,
     onMount: (body) => {
+      body.querySelectorAll('[data-mode]').forEach((el) => {
+        el.addEventListener('click', () => {
+          if (el.dataset.mode === 'ai' && !aiCfg.configured) {
+            // 想切到 AI 模式但还没配：直接带她去配，别只弹一句「请先配置」
+            closeSheet();
+            openAiSettingsSheet();
+            return;
+          }
+          setMode(el.dataset.mode);
+          toast(el.dataset.mode === 'ai' ? '已切到 AI 模式。' : '已切到普通模式。');
+          openSettingsSheet();
+        });
+      });
       body.querySelectorAll('[data-set]').forEach((el) => {
         el.addEventListener('click', () => {
           const which = el.dataset.set;
@@ -1554,9 +1600,9 @@ function openGrowthSheet() {
         <div class="card-title">徽章墙 <span class="tiny muted">${a.unlocked.length} / ${a.list.length}</span></div>
         <div class="badge-grid">
           ${a.list.map((x) => `
-            <div class="ach ${x.unlocked ? 'on' : ''} ${x.special ? 'special' : ''}" data-ach="${x.id}">
+            <div class="ach ${x.unlocked ? 'on' : ''}" data-ach="${x.id}">
               <span class="ach-emoji">${x.unlocked ? x.emoji : '🔒'}</span>
-              <span class="ach-name">${esc(badgeLabel(state, x))}</span>
+              <span class="ach-name">${esc(badgeLabel(x))}</span>
               ${x.unlocked ? '' : `<span class="ach-bar"><i style="width:${x.pct}%"></i></span>`}
             </div>`).join('')}
         </div>
@@ -1932,7 +1978,7 @@ export function validateProfile(form) {
 
 function openProfileSheet() {
   const p = state.profile || {
-    nickname: '小繁',
+    nickname: '',
     sex: 'female', age: 25, heightCm: 163, weightKg: 58, bodyFatPct: null,
     activity: 'light', pace: 'standard', goal: 'lose', targetWeightKg: null,
   };
@@ -1941,8 +1987,8 @@ function openProfileSheet() {
     title: hasProfile ? '我的资料' : '填写资料',
     body: `
       <label class="field"><span>怎么称呼她</span>
-        <input type="text" id="pNickname" value="${esc(p.nickname || '小繁')}" maxlength="8" placeholder="例如：小繁">
-        <span class="tiny muted" style="margin-top:4px;display:block">会用在问候、徽章和周报里。留空就用「小繁」。</span>
+        <input type="text" id="pNickname" value="${esc(p.nickname || '')}" maxlength="8" placeholder="选填，例如：小繁">
+        <span class="tiny muted" style="margin-top:4px;display:block">会用在问候和周报里。留空就不称呼。</span>
       </label>
       <label class="field"><span>性别（决定基础代谢公式，必须选）</span>
         <div class="chips" id="sexChips">
@@ -1985,7 +2031,7 @@ function openProfileSheet() {
     onMount: (body, foot) => {
       const num = (id) => Number($(`#${id}`, body).value);
       const form = () => ({
-        nickname: ($('#pNickname', body).value || '').trim().slice(0, 8) || '小繁',
+        nickname: ($('#pNickname', body).value || '').trim().slice(0, 8),
         sex: body.querySelector('#sexChips .chip.on')?.dataset.sex || 'female',
         age: num('pAge'),
         heightCm: num('pHeight'),

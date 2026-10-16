@@ -15,7 +15,7 @@
  */
 
 /** 当前程序能处理的结构版本。改结构时 +1，并补一条迁移。 */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** 历史别名（最早叫 version，现在统一叫 schemaVersion） */
 export const LEGACY_VERSION = SCHEMA_VERSION;
@@ -69,6 +69,25 @@ export const MIGRATIONS = [
         },
         migrations: [...(Array.isArray(data.migrations) ? data.migrations : []), new Date().toISOString()],
       };
+    },
+  },
+  {
+    from: 3,
+    to: 4,
+    description: '「专属徽章」改为所有人都有的成长线；清掉历史版本写进去的默认称呼',
+    migrate(data) {
+      // 早期版本会把默认称呼「小繁」直接写进存档。那是我为一个人做的痕迹，
+      // 现在这个工具要给别人用，所以把「从没主动改过」的默认值清掉（改成不称呼）。
+      // 判断依据：值恰好等于当年的默认名。她自己改过的名字不会被删。
+      const profile = data.profile;
+      const cleaned = profile && profile.nickname === '小繁'
+        ? { ...profile, nickname: '' }
+        : profile;
+      // 徽章 id 改名了：旧的三枚专属徽章换成通用的成长线，已解锁状态要跟过去
+      const ach = data.achievements || {};
+      const renameMap = { fan_badge: 'start_badge', fan_week: 'steady_week', fan_month: 'steady_month' };
+      const seen = (Array.isArray(ach.seen) ? ach.seen : []).map((id) => renameMap[id] || id);
+      return { ...data, profile: cleaned, achievements: { ...ach, seen } };
     },
   },
 ];

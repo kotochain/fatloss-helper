@@ -126,8 +126,10 @@ function connect(wsUrl) {
     const ws = new WebSocket(wsUrl);
     let id = 0;
     const pending = new Map();
+    const handlers = new Map();
     ws.addEventListener('open', () => resolve({
       ws,
+      on(method, handler) { handlers.set(method, handler); },
       close() { try { ws.close(); } catch { /* 已经关了 */ } },
       send(method, params = {}) {
         const msgId = ++id;
@@ -144,6 +146,8 @@ function connect(wsUrl) {
         pending.delete(msg.id);
         if (msg.error) rej(new Error(msg.error.message));
         else res(msg.result);
+      } else if (msg.method && handlers.has(msg.method)) {
+        handlers.get(msg.method)(msg.params);
       }
     });
   });
