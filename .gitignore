@@ -1,3 +1,10 @@
+# 密钥：绝不进版本库（AI 密钥默认放在 ~/.dsh/fatloss-ai-key，
+# 这里再挡一道，防止有人顺手放到项目目录里被提交）
+data/ai-key.txt
+*.key
+.env
+.env.*
+
 # 自检产物（截图、无头浏览器配置、浏览器回传的自检结果）
 .selfcheck/
 node_modules/

@@ -29,7 +29,7 @@ export const FOODS = [
   // ── 主食 ──────────────────────────────────────────────
   { id: 'rice_cooked', name: '米饭（熟）', category: 'staple', kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9, servings: [['一小碗', 130], ['一碗', 180], ['一大碗', 250]] },
   { id: 'rice_raw', name: '大米（生）', category: 'staple', kcal: 346, protein: 7.4, fat: 0.8, carb: 77.9, servings: [['一量杯', 150]] },
-  { id: 'congee', name: '白粥', category: 'staple', kcal: 46, protein: 1.1, fat: 0.3, carb: 9.9, servings: [['一碗', 250]] },
+  { id: 'congee', name: '白粥', category: 'staple', kcal: 46, protein: 1.1, fat: 0.3, carb: 9.9, servings: [['一碗', 250], ['一小碗', 180]] },
   { id: 'bun', name: '馒头', category: 'staple', kcal: 223, protein: 7.0, fat: 1.1, carb: 47.0, servings: [['一个', 100], ['半个', 50]] },
   { id: 'baozi_pork', name: '猪肉包子', category: 'staple', kcal: 227, protein: 8.0, fat: 7.0, carb: 32.0, servings: [['一个', 100]] },
   { id: 'noodle_cooked', name: '面条（煮熟）', category: 'staple', kcal: 110, protein: 3.6, fat: 0.4, carb: 23.0, servings: [['一碗', 250]] },
@@ -163,6 +163,7 @@ export const ALIASES = {
   rice_raw: ['米', '生米'],
   congee: ['稀饭', '粥'],
   bun: ['馍', '花卷'],
+  baozi_pork: ['包子', '肉包', '大包子'],
   noodle_cooked: ['面', '汤面', '捞面'],
   noodle_raw: ['面', '面条'],
   chicken_breast: ['鸡胸', '鸡脯肉', '鸡肉'],

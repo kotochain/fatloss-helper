@@ -240,6 +240,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 /* ── 表单 ───────────────────────────────── */
 label.field { display: block; margin-bottom: 12px; }
 label.field > span { display: block; font-size: 12px; color: var(--ink-2); margin-bottom: 4px; }
+textarea { resize: vertical; min-height: 76px; line-height: 1.6; }
 input[type="text"], input[type="number"], select, textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -331,6 +332,11 @@ input:focus, select:focus { outline: 2px solid var(--green-soft); border-color: 
 .search-hit .nm { flex: 1; font-size: 14px; }
 .search-hit .nm em { font-style: normal; display: block; font-size: 11px; color: var(--ink-3); }
 .search-hit .kk { font-size: 12px; color: var(--ink-2); }
+
+.draft-grams { text-align: center; }
+.entry .name em { font-style: normal; display: block; }
+details summary { outline: none; }
+details[open] summary { margin-bottom: 4px; }
 
 /* 训练计划 */
 .session { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }

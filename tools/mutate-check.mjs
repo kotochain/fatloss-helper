@@ -36,6 +36,13 @@ const MUTATIONS = [
   { file: 'js/recommend.js', from: 'const MAIN_PROTEIN_KCAL_SHARE = 0.7;', to: 'const MAIN_PROTEIN_KCAL_SHARE = 5;', why: '主菜占当餐热量的上限' },
   { file: 'js/recommend.js', from: 'const MAX_DAILY_OIL_G = 30;', to: 'const MAX_DAILY_OIL_G = 300;', why: '每天烹调油上限' },
   { file: 'js/exercise.js', from: "{ key: 'low', label: '目前基本不动', steps: 6000", to: "{ key: 'low', label: '目前基本不动', steps: 20000", why: '走路目标档位' },
+  // ── 第二轮新增：说一句话记录 / 按器械换动作 ──
+  { file: 'js/mealparse.js', from: 'const chosenDish = dishHits.find((h) => !h.ref.generic)?.ref || dishHits[0]?.ref || null;', to: 'const chosenDish = dishHits[0]?.ref || null;', why: '具体菜优先于泛称（否则「食堂吃了碗牛肉面」会被认成「食堂打饭」）' },
+  { file: 'js/mealparse.js', from: "      .sort((a, b) => a.dist - b.dist);", to: '      .sort((a, b) => b.dist - a.dist);', why: '份量按最近距离配对（否则「两个鸡蛋和一个苹果」会串份量）' },
+  { file: 'js/mealparse.js', from: 'const perUnit = food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || portion.perUnit || 100;', to: 'const perUnit = portion.perUnit || 100;', why: '「一个」要按食物自己的份量换算（鸡蛋 50 克 ≠ 通用 100 克）' },
+  { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
+  { file: 'js/cardio.js', from: "    .filter((e) => e.equipment.some((q) => avail.has(q)))\n    .map((e) => {", to: "    .filter(() => true)\n    .map((e) => {", why: '替代动作必须是她今天能用的器械' },
+  { file: 'tools/ai-proxy.mjs', from: "    if (!name) continue;\n    if (!(grams > 0) || grams > 5000) continue;", to: "    if (!name) continue;", why: 'AI 返回的离谱份量要被丢掉' },
 ];
 
 let caught = 0;

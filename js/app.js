@@ -10,6 +10,14 @@ import {
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount } from './foods.js';
 import { searchFoods, MEAL_SLOTS } from './foodlog.js';
 import { listExercises, buildWeekPlan, EXERCISES } from './exercise.js';
+import {
+  parseDescription, normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
+  gramsFromText, portionGrams,
+} from './mealparse.js';
+import { askAi, aiStatus } from './ai.js';
+import {
+  CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment,
+} from './cardio.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
 import {
   emptyState, migrate, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
@@ -25,6 +33,12 @@ let view = 'today';
 let dateKey = todayKey();
 let planSeed = 0;
 let pendingFood = null;
+/** 「说一句」流程的临时状态：解析出来的条目等她确认 */
+let draft = null;
+/** AI 是否可用（进界面时问一次服务端） */
+let ai = { configured: false, checked: false, reason: null };
+/** 有氧推荐的选择 */
+let cardioPick = { equipment: ['treadmill', 'elliptical', 'bike', 'bodyweight'], goal: 'fat_burn', minutes: 30 };
 const app = $('#app');
 
 /* ── 存档 ────────────────────────────────── */
@@ -63,7 +77,10 @@ function esc(s) {
 function toast(msg) {
   const el = document.createElement('div');
   el.className = 'warn info';
-  el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(96px + env(safe-area-inset-bottom));z-index:80;max-width:440px;width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.14)';
+  // 弹层打开时，提示条要挪到弹层上方，否则会盖住弹层里的按钮
+  const sheetOpen = !$('#sheetRoot').classList.contains('hidden');
+  const bottom = sheetOpen ? 'min(78vh, 640px)' : '96px';
+  el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);z-index:80;max-width:440px;width:calc(100% - 32px);box-shadow:0 4px 16px rgba(0,0,0,.14);bottom:calc(' + bottom + ' + env(safe-area-inset-bottom))';
   el.textContent = msg;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3200);
@@ -346,7 +363,23 @@ function renderLog() {
   const recent = frequentFoods(state, 8);
   app.innerHTML = `
     <div class="card">
-      <div class="card-title">记一笔</div>
+      <div class="card-title">说一句就记上
+        <span class="tag ${ai.configured ? 'green' : ''}">${!ai.checked ? '检查中' : ai.configured ? 'AI 已启用' : '离线识别'}</span>
+      </div>
+      <p class="small muted" style="margin:0 0 8px">
+        像跟人说话一样写就行，例如「今天中午在食堂吃了碗牛肉面，加了个蛋」「晚上吃了半份麻辣烫」。
+        ${ai.configured ? '' : '电脑上的解析服务没开或没配 AI 密钥时，用内置的常见说法识别，认不准会反问你。'}
+      </p>
+      <textarea id="quickText" rows="3" placeholder="今天吃了什么？"></textarea>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn grow" id="quickParse">解析这一句</button>
+        <button class="btn ghost" id="quickVoice" title="用手机键盘上的话筒说话">🎤</button>
+      </div>
+      <div id="quickResult"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">手动记一笔</div>
       <p class="small muted" style="margin:0 0 10px">支持输入「150克」「2个」「一小碗」「半斤」这类写法。包装食品照背面标签填最准。</p>
       <div class="btn-row" style="margin-top:0">
         ${MEAL_SLOTS.map((s) => `<button class="btn ghost grow" data-act="add-food" data-meal="${s.key}">${s.label}</button>`).join('')}
@@ -399,11 +432,178 @@ function renderLog() {
     openAmountSheet(food, meal);
   });
   $('#customFoodBtn').addEventListener('click', () => openCustomFoodSheet());
+  bindQuickLog();
   app.querySelectorAll('[data-act="quick-add"]').forEach((el) => {
     el.addEventListener('click', () => {
       const food = [...state.customFoods, ...FOODS].find((f) => f.id === el.dataset.id);
       openAmountSheet(food, guessMeal());
     });
+  });
+}
+
+/* ── 「说一句就记上」流程 ─────────────────────
+   流程：她说一句话 → 解析（AI 优先，失败退回离线）→ 展示条目让她确认/改 → 记进当天
+   关键原则：解析结果永远先给她看，不直接记账；AI 只负责听懂，热量由本地食物库算。
+   ─────────────────────────────────────────── */
+
+function bindQuickLog() {
+  const input = $('#quickText');
+  const btn = $('#quickParse');
+  if (!input || !btn) return;
+  $('#quickVoice')?.addEventListener('click', () => {
+    toast('点输入框，用手机键盘上的话筒图标说话，说完再点「解析这一句」。');
+    input.focus();
+  });
+  btn.addEventListener('click', async () => {
+    const text = input.value.trim();
+    if (!text) return toast('先写一句她吃了什么。');
+    btn.disabled = true;
+    btn.textContent = ai.configured ? 'AI 正在解析…' : '正在解析…';
+    try {
+      await runQuickParse(text);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '解析这一句';
+    }
+  });
+  if (draft) drawDraft();
+}
+
+async function runQuickParse(text) {
+  const meal = guessMeal();
+  let items = [];
+  let questions = [];
+  let source = 'offline';
+  let aiError = null;
+
+  if (ai.configured) {
+    const res = await askAi(text, { meal });
+    if (res.ok && res.items.length) {
+      const norm = normalizeAiItems(
+        { meal: res.meal || meal, items: res.items, questions: res.questions },
+        meal,
+      );
+      items = norm.items;
+      questions = norm.questions;
+      source = 'ai';
+    } else {
+      aiError = res.error || 'AI 没解析出内容';
+    }
+  }
+
+  if (!items.length) {
+    // 离线兜底（AI 没开、或者 AI 没解析出东西时都走这里）
+    const local = parseDescription(text, meal);
+    items = local.items;
+    if (local.unknown.length) {
+      questions = questions.concat(local.unknown.map((u) => `「${u}」我不太确定是什么，能再说具体点吗？（或者用手动记一笔）`));
+    }
+  }
+
+  for (const it of items) {
+    if (it.needsConfirm && it.question) questions.push(it.question);
+  }
+
+  draft = {
+    text,
+    meal,
+    items,
+    questions: [...new Set(questions)].slice(0, 4),
+    source,
+    aiError,
+  };
+  drawDraft();
+}
+
+/** 把解析结果画成「可以改的清单」 */
+function drawDraft() {
+  const box = $('#quickResult');
+  if (!box || !draft) return;
+  if (!draft.items.length && !draft.questions.length) {
+    box.innerHTML = '<div class="warn" style="margin-top:10px">这句我没认出来。可以换种说法（比如「一碗牛肉面」），或者用下面的手动记一笔。</div>';
+    return;
+  }
+  const totals = sumItems(draft.items);
+  const needsCheck = draft.items.some((it) => it.needsConfirm);
+  box.innerHTML = `
+    <div class="warn ${draft.source === 'ai' ? 'info' : ''}" style="margin-top:10px">
+      解析方式：${draft.source === 'ai' ? 'AI 识别' : '离线识别（常见说法）'}
+      ${draft.aiError ? `｜AI 这次没成功：${esc(draft.aiError)}` : ''}
+    </div>
+    ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
+    <div style="margin-top:8px">
+      ${draft.items.map((it, i) => `
+        <div class="entry">
+          <span class="name">${esc(it.name)}
+            ${it.needsConfirm ? '<span class="tag amber">待确认</span>' : ''}
+            ${it.warning ? `<em style="display:block;color:#92400e">${esc(it.warning)}</em>` : ''}
+          </span>
+          <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams" style="width:80px;padding:4px 6px;font-size:14px">
+          <span class="kcal">克</span>
+          <span class="kcal">${Math.round(it.kcal)} kcal</span>
+        </div>`).join('')}
+    </div>
+    <div class="row between small" style="margin-top:8px">
+      <span>这一餐合计约 <b>${Math.round(totals.kcal)}</b> kcal · 蛋白 ${Math.round(totals.protein)} g</span>
+    </div>
+    <label class="field" style="margin-top:10px"><span>记到哪一餐</span>
+      <div class="chips" id="draftMeal">
+        ${MEAL_SLOTS.map((sl) => `<button class="chip ${sl.key === draft.meal ? 'on' : ''}" data-meal="${sl.key}">${sl.label}</button>`).join('')}
+      </div>
+    </label>
+    <div class="btn-row">
+      <button class="btn grow" id="draftSave" ${needsCheck ? '' : ''}>就这样，记上</button>
+      <button class="btn ghost" id="draftCancel">算了</button>
+    </div>
+    ${needsCheck ? '<p class="tiny muted" style="margin:8px 0 0">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
+
+  box.querySelectorAll('.draft-grams').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const idx = Number(inp.dataset.grams);
+      const g = Number(inp.value);
+      if (!(g > 0)) return;
+      const it = draft.items[idx];
+      const ratio = g / it.grams;
+      it.grams = Math.round(g);
+      it.kcal = Math.round(it.kcal * ratio);
+      it.protein = Math.round(it.protein * ratio * 10) / 10;
+      it.fat = Math.round(it.fat * ratio * 10) / 10;
+      it.carb = Math.round(it.carb * ratio * 10) / 10;
+      it.needsConfirm = false;
+      const totals2 = sumItems(draft.items);
+      const summary = box.querySelector('.row.between.small b');
+      if (summary) summary.textContent = Math.round(totals2.kcal);
+    });
+  });
+  $('#draftMeal', box)?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-meal]');
+    if (!b) return;
+    draft.meal = b.dataset.meal;
+    box.querySelectorAll('#draftMeal .chip').forEach((c) => c.classList.toggle('on', c === b));
+  });
+  $('#draftSave', box)?.addEventListener('click', () => {
+    for (const it of draft.items) {
+      addFoodEntry(state, dateKey, draft.meal, {
+        id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: it.name,
+        category: 'custom',
+        kcal: it.grams > 0 ? Math.round((it.kcal / it.grams) * 1000) / 10 : it.kcal,
+        protein: it.grams > 0 ? Math.round((it.protein / it.grams) * 1000) / 10 : it.protein,
+        fat: it.grams > 0 ? Math.round((it.fat / it.grams) * 1000) / 10 : it.fat,
+        carb: it.grams > 0 ? Math.round((it.carb / it.grams) * 1000) / 10 : it.carb,
+        servings: [['一份', it.grams]],
+        fromDescription: true,
+      }, it.grams);
+    }
+    save();
+    const n = draft.items.length;
+    draft = null;
+    render();
+    toast(`记上了 ${n} 条，可以随时改份量或删掉。`);
+  });
+  $('#draftCancel', box)?.addEventListener('click', () => {
+    draft = null;
+    drawDraft();
   });
 }
 
@@ -448,6 +648,8 @@ function renderPlan() {
       </div>
       <p class="tiny muted" style="margin:8px 0 0">「记入今天」只是把食物写进今天的记录里，之后可以按实际吃的改份量或删掉。</p>
     </div>
+
+    ${renderCardioCard()}
 
     <div class="card">
       <div class="card-title">每天的固定提醒</div>
@@ -495,6 +697,182 @@ function renderPlan() {
     state.settings.stepsKey = b.dataset.key;
     save();
     render();
+  });
+  bindCardioCard();
+}
+
+/**
+ * 「今天练什么」：先问她今天有什么器械，再据此推荐；推荐里直接给出「没有 X 就做 Y」。
+ * 这是为了让计划跟着现实走 —— 计划写爬坡走，结果健身房只有椭圆机，计划就废了。
+ */
+function renderCardioCard() {
+  const weightKg = state.profile?.weightKg ?? 60;
+  const rec = recommendCardio({
+    equipment: cardioPick.equipment,
+    goal: cardioPick.goal,
+    minutes: cardioPick.minutes,
+    weightKg,
+  });
+  const today = getDay(state, dateKey);
+  return `
+    <div class="card">
+      <div class="card-title">今天练什么 <span class="tiny muted">按她今天能用的器械排</span></div>
+
+      <label class="field"><span>今天有哪些器械？（可多选）</span>
+        <div class="chips" id="equipChips">
+          ${listEquipment().map((eq) => `
+            <button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-eq="${eq.key}">${eq.icon} ${eq.name}</button>
+          `).join('')}
+        </div>
+      </label>
+
+      <div class="grid2">
+        <label class="field"><span>今天想练什么</span>
+          <div class="chips" id="goalChips">
+            ${Object.entries(GOALS).map(([k, g]) => `<button class="chip ${cardioPick.goal === k ? 'on' : ''}" data-goal="${k}">${g.name}</button>`).join('')}
+          </div>
+        </label>
+        <label class="field"><span>有多少时间</span>
+          <div class="chips" id="minuteChips">
+            ${[20, 30, 45, 60].map((m) => `<button class="chip ${cardioPick.minutes === m ? 'on' : ''}" data-min="${m}">${m} 分钟</button>`).join('')}
+          </div>
+        </label>
+      </div>
+
+      ${rec.picks.length ? `
+        <div class="small muted" style="margin-bottom:8px">${esc(rec.advice)}</div>
+        ${rec.picks.map((p, i) => `
+          <div class="session cardio-session">
+            <h4>${i === 0 ? '首选：' : '也可以：'}${esc(p.name)} <span class="badge cardio">约 ${p.kcal} kcal / ${cardioPick.minutes} 分钟</span></h4>
+            <ul>
+              <li>怎么做：${esc(p.intensity)}</li>
+              <li>要点：${esc(p.cue)}</li>
+              <li>注意：${esc(p.note)}</li>
+            </ul>
+            <button class="add-line" data-log-cardio="${p.id}">今天就做这个（记入记录）</button>
+          </div>`).join('')}
+        <details style="margin-top:6px">
+          <summary class="small" style="cursor:pointer">想做的机器没空？点这里看替代方案</summary>
+          <div style="margin-top:8px">
+            ${CARDIO.filter((e) => e.equipment.some((q) => cardioPick.equipment.includes(q))).slice(0, 8).map((e) => `
+              <div class="search-hit" data-subs="${e.id}">
+                <span class="nm">${esc(e.name)}<em>METs ${e.mets} · ${e.tags?.join('/') || ''}</em></span>
+                <span class="kk">看替代 →</span>
+              </div>`).join('')}
+          </div>
+        </details>
+      ` : `<div class="warn">${esc(rec.advice)}</div>`}
+
+      ${today.exercises.length ? `
+        <hr class="sep">
+        <div class="small muted">今天已经记了：</div>
+        ${today.exercises.map((x) => {
+          const ex = EXERCISES[x.exerciseKey] || { name: x.exerciseKey, mets: 4 };
+          const kcal = calcExerciseKcal({ mets: ex.mets, weightKg, minutes: x.minutes });
+          return `<div class="entry">
+            <span class="name">${esc(ex.name)}<em>${x.minutes} 分钟</em></span>
+            <span class="kcal">约 ${Math.round(kcal)} kcal</span>
+            <button class="del" data-act="del-exercise" data-id="${x.id}">✕</button>
+          </div>`;
+        }).join('')}
+      ` : ''}
+    </div>`;
+}
+
+/** 有氧卡片的交互：选器械/目标/时长，以及「记入记录」和「看替代」 */
+function bindCardioCard() {
+  const eqBox = $('#equipChips');
+  if (eqBox) {
+    eqBox.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-eq]');
+      if (!b) return;
+      const key = b.dataset.eq;
+      cardioPick.equipment = cardioPick.equipment.includes(key)
+        ? cardioPick.equipment.filter((k) => k !== key)
+        : [...cardioPick.equipment, key];
+      if (!cardioPick.equipment.length) cardioPick.equipment = ['bodyweight'];
+      save();
+      render();
+    });
+  }
+  $('#goalChips')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-goal]');
+    if (!b) return;
+    cardioPick.goal = b.dataset.goal;
+    render();
+  });
+  $('#minuteChips')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-min]');
+    if (!b) return;
+    cardioPick.minutes = Number(b.dataset.min);
+    render();
+  });
+  app.querySelectorAll('[data-log-cardio]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const ex = CARDIO.find((c) => c.id === el.dataset.logCardio);
+      if (!ex) return;
+      // 运动记录用 key 存，这里把有氧库的动作映射到运动库（没有对应项就用最接近的）
+      const map = {
+        incline_treadmill: 'walk', treadmill_walk: 'walk', outdoor_walk: 'walk',
+        treadmill_run: 'jog', outdoor_jog: 'jog', treadmill_interval: 'jog',
+        elliptical_steady: 'elliptical', elliptical_interval: 'elliptical',
+        bike_steady: 'cycle', bike_interval: 'cycle', spin_class: 'cycle', outdoor_cycle: 'cycle',
+        rower_steady: 'strength', stair_climber: 'stairs', stepper: 'elliptical',
+        jump_rope: 'jump_rope', jump_rope_low: 'jump_rope', bodyweight_circuit: 'hiit', hiit_video: 'hiit',
+        real_stairs: 'stairs', swim_steady: 'swim', badminton: 'badminton', dance_class: 'dance',
+        yoga_stretch: 'yoga',
+      };
+      addExercise(state, dateKey, map[ex.id] || 'walk', cardioPick.minutes);
+      save();
+      render();
+      toast(`记上了：${ex.name} ${cardioPick.minutes} 分钟。`);
+    });
+  });
+  app.querySelectorAll('[data-subs]').forEach((el) => {
+    el.addEventListener('click', () => {
+      openSubstituteSheet(el.dataset.subs);
+    });
+  });
+}
+
+/** 「想做的机器没空」→ 给可用器械下的同类动作 */
+function openSubstituteSheet(originalId) {
+  const original = CARDIO.find((c) => c.id === originalId);
+  if (!original) return;
+  const subs = substituteExercises(originalId, cardioPick.equipment, 4);
+  const weightKg = state.profile?.weightKg ?? 60;
+  const minutes = cardioPick.minutes;
+  openSheet({
+    title: `${original.name} 做不了？`,
+    body: `
+      <p class="small muted" style="margin:0 0 10px">
+        原动作需要：${original.equipment.map((q) => EQUIPMENT[q]?.name || q).join('、')}。
+        按你勾选的可用器械，下面几个效果最接近：
+      </p>
+      ${subs.length ? subs.map((s) => `
+        <div class="session cardio-session">
+          <h4>${esc(s.exercise.name)} <span class="badge cardio">约 ${Math.round((s.exercise.mets * weightKg * minutes) / 60)} kcal / ${minutes} 分钟</span></h4>
+          <ul>
+            <li>为什么能替代：${esc(s.why)}</li>
+            <li>怎么做：${esc(s.exercise.intensity)}</li>
+            <li>要点：${esc(s.exercise.cue)}</li>
+          </ul>
+          <button class="add-line" data-subs-log="${s.exercise.id}">就做这个</button>
+        </div>`).join('') : '<div class="warn">按现在勾选的器械找不到合适的替代。可以放宽目标（比如改成「不伤膝」），或者把「徒手/地面」勾上 —— 徒手循环不需要任何器械。</div>'}
+      <p class="tiny muted">替代原则：先保证练到同一件事（心肺 or 腿臀），再挑不伤膝、能坚持的那个。时长可以先按原计划，强度以「能说话但唱不了歌」为准。</p>`,
+    onMount: (body) => {
+      body.querySelectorAll('[data-subs-log]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const ex = CARDIO.find((c) => c.id === btn.dataset.subsLog);
+          const map = { elliptical_steady: 'elliptical', bike_steady: 'cycle', rower_steady: 'strength', stair_climber: 'stairs', real_stairs: 'stairs', outdoor_walk: 'walk', jump_rope: 'jump_rope', bodyweight_circuit: 'hiit', hiit_video: 'hiit', swim_steady: 'swim', dance_class: 'dance', badminton: 'badminton', yoga_stretch: 'yoga', treadmill_walk: 'walk', outdoor_jog: 'jog' };
+          addExercise(state, dateKey, map[ex.id] || 'walk', minutes);
+          save();
+          closeSheet();
+          render();
+          toast(`记上了：${ex.name} ${minutes} 分钟。`);
+        });
+      });
+    },
   });
 }
 
@@ -1067,6 +1445,9 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   if (document.readyState === 'complete') register();
   else window.addEventListener('load', register);
 }
+
+// 问一次服务端「AI 配好了没」。没配也不影响使用，只是走离线解析。
+aiStatus().then((st) => { ai = { ...st, checked: true }; if (view === 'log') render(); }).catch(() => {});
 
 if (new URLSearchParams(location.search).has('__selfcheck')) {
   selfCheck();

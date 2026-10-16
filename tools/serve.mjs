@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { aiConfig, callUpstream, readApiKey } from './ai-proxy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.argv[2] || 4173);
@@ -43,6 +44,42 @@ export function createServer() {
   return http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     let pathname = decodeURIComponent(url.pathname);
+
+    // AI 是否已配置（只回状态，绝不回密钥本身）
+    if (pathname === '/api/ai-status') {
+      const cfg = aiConfig(root);
+      const payload = { configured: cfg.configured, model: cfg.model, from: cfg.from };
+      return send(res, 200, JSON.stringify(payload), TYPES['.json']);
+    }
+
+    // 饮食描述解析：密钥留在这台电脑上，手机只知道这个本地地址
+    if (req.method === 'POST' && pathname === '/api/parse-meal') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 20000) req.destroy(); });
+      req.on('end', async () => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 下面统一报错 */ }
+        const text = typeof body.text === 'string' ? body.text.trim().slice(0, 500) : '';
+        if (!text) return send(res, 400, JSON.stringify({ error: '没有收到要解析的内容' }), TYPES['.json']);
+
+        const found = readApiKey(root);
+        if (!found) {
+          return send(res, 503, JSON.stringify({
+            error: '这台电脑上还没配置 AI 密钥。看 README 的「接上 AI」一节，三条命令就能配好。',
+          }), TYPES['.json']);
+        }
+        const cfg = { ...aiConfig(root), key: found.key };
+        try {
+          const result = await callUpstream({ text, meal: body.meal || null, hour: body.hour, config: cfg });
+          console.log(`[AI] 「${text.slice(0, 30)}」→ ${result.items.length} 条${result.questions.length ? `，追问 ${result.questions.length} 个` : ''}`);
+          return send(res, 200, JSON.stringify(result), TYPES['.json']);
+        } catch (err) {
+          console.error('[AI] 解析失败：', err.message);
+          return send(res, 502, JSON.stringify({ error: err.message }), TYPES['.json']);
+        }
+      });
+      return;
+    }
 
     // 浏览器自检脚本把结果 POST 回来，方便在命令行里看（只在本地有效）
     if (req.method === 'POST' && pathname === '/__save') {
@@ -101,6 +138,16 @@ if (isMain) {
       console.log(`  手机打开：  http://${ip}:${port}/   （手机需连同一个 Wi-Fi）`);
     }
     console.log('\n  手机上第一次打开后：浏览器菜单 →「添加到主屏幕」，之后就像 App 一样用。');
-    console.log('  按 Ctrl+C 停止。\n');
+    const cfg = aiConfig(root);
+    if (cfg.configured) {
+      console.log(`\n  AI 解析：已启用（密钥来自 ${cfg.from}，模型 ${cfg.model}）`);
+      console.log('  她说「今天食堂吃了碗面」，由这台电脑代问 AI，密钥不会发到手机上。');
+    } else {
+      console.log('\n  AI 解析：未配置 —— 现在用离线规则解析（常见说法能认）。');
+      console.log('  想启用 AI：在终端里执行下面一行，然后重新启动本服务：');
+      console.log('    echo "你的密钥" > ~/.dsh/fatloss-ai-key && chmod 600 ~/.dsh/fatloss-ai-key');
+      console.log('  密钥文件在你自己电脑的用户目录里，不在项目目录，永远不会被提交到版本库。');
+    }
+    console.log('\n  按 Ctrl+C 停止。\n');
   });
 }
