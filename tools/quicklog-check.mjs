@@ -867,6 +867,52 @@ async function main() {
     : `❌ 重新打开分段变回「${remembered.分段}」`);
   if (!remembered.有运动面板) problems.push('分段没有记住，重新打开又回到「吃的」');
 
+  // 历史列表里删「前几天」的记录：删除按钮必须带上记录自己那一天。
+  // 不带的话会拿当前选中的日期去删，找不到就静默什么都不做 —— 表现是「点了没反应」，最难查。
+  await evaluate(`(async () => {
+    const store = await import('./js/store.js');
+    const ex = await import('./js/exercise.js');
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    ex.logTraining(st, store.shiftDate(store.todayKey(), -4), { exerciseKey: 'strength', minutes: 40 });
+    ex.logTraining(st, store.shiftDate(store.todayKey(), -5), { cardioId: 'swim_steady', minutes: 25 });
+    localStorage.setItem('fatloss.state.v2', JSON.stringify(st));
+    return true;
+  })()`);
+  await client.send('Page.navigate', { url: BASE + '/' });
+  await sleep(1800);
+  await evaluate(`document.querySelector('.tab[data-view="log"]')?.click()`);
+  await sleep(450);
+  const pastBefore = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    const days = Object.entries(st.days).filter(([, d]) => (d.exercises || []).length).map(([k, d]) => k + ':' + d.exercises.length);
+    return { 天数: days.join(','), 行数: document.querySelectorAll('#app .entry').length };
+  })()`);
+  const pastDel = await evaluate(`(async () => {
+    // 必须挑「不是今天」的那一行 —— 今天的记录就算按钮没带日期也能删掉，测不出问题
+    const store = await import('./js/store.js');
+    const today = store.todayKey();
+    const row = [...document.querySelectorAll('#app .entry')].find((r) => {
+      const d = r.querySelector('.del')?.dataset.date;
+      return d && d !== today;
+    });
+    if (!row) return null;
+    const del = row.querySelector('.del');
+    const info = { 日期: del.dataset.date, 文案: row.querySelector('.name').textContent.replace(/\\s+/g, ' ').trim().slice(0, 18) };
+    del.click();
+    return info;
+  })()`);
+  await sleep(600);
+  const pastAfter = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    const days = Object.entries(st.days).filter(([, d]) => (d.exercises || []).length).map(([k, d]) => k + ':' + d.exercises.length);
+    return { 天数: days.join(','), 行数: document.querySelectorAll('#app .entry').length };
+  })()`);
+  console.log(`✅ 历史里删「${pastDel?.日期}」那条（${pastDel?.文案}）：有记录的天 ${pastBefore.天数} → ${pastAfter.天数}`);
+  if (!pastDel) problems.push('历史列表的删除按钮没有带 data-date（删前几天的记录会静默失败）');
+  else if (pastBefore.天数 === pastAfter.天数 && pastBefore.行数 === pastAfter.行数) {
+    problems.push(`删「${pastDel.日期}」那条没有生效（点了没反应）`);
+  }
+
   console.log('\n=== 三·二、计划页的记录入口没被改坏（两处都能记，走同一条路）===');
   const exBefore = await evaluate(`(() => {
     const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));

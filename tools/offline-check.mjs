@@ -128,6 +128,16 @@ async function main() {
   // 先把调试端口清干净：上一次没退干净的 Chrome 会占着端口，
   // 新实例静默失败、等待循环却连上僵尸端口 —— 表现为「只有第一个脚本能过」。
   await freePortAndWait(PORT);
+
+  /**
+   * 每次自检都从干净的 profile 开始。
+   *
+   * 为什么必须这样：这个脚本用固定的 profile 目录，里面会留着上一次注册的 Service Worker。
+   * 而离线缓存是**缓存优先**的 —— 于是一整轮可能都在验旧代码。
+   * 实测踩过：改到 v13 了，自检却报 `fatloss-v11`，看起来"通过"，其实验的是两版之前的代码。
+   * 这种假绿比失败更危险，所以宁可每次多花两秒重建 profile。
+   */
+  try { fs.rmSync(path.join(outDir, 'chrome-offline'), { recursive: true, force: true, maxRetries: 3 }); } catch { /* 清不掉就继续 */ }
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(outDir, 'chrome-offline')}`,
@@ -215,10 +225,20 @@ async function main() {
   const shot = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-offline.png'), Buffer.from(shot.data, 'base64'));
 
-  const ok = swState.registered && swState.state === 'activated' && swState.cachedCount >= 10
+  /**
+   * 断言「验的是当前版本的缓存」，而不是碰巧还在的老缓存。
+   * 只断言「缓存了 10 个以上文件」是不够的：老版本的缓存也满足这个条件。
+   */
+  const expectedCache = (fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8').match(/CACHE = '([^']+)'/) || [])[1];
+  const cacheMatches = (swState.cacheNames || []).includes(expectedCache);
+  if (!cacheMatches) {
+    console.log(`  ⚠️ 缓存名 ${JSON.stringify(swState.cacheNames)} 里没有当前版本 ${expectedCache} —— 可能验的是旧代码`);
+  }
+
+  const ok = cacheMatches && swState.registered && swState.state === 'activated' && swState.cachedCount >= 10
     && offline.appReady && offline.cards > 0 && offline.tabs === 4 && offline.hasData;
   console.log(ok
-    ? `\n✅ 离线可用：缓存了 ${swState.cachedCount} 个文件，断网后仍渲染出 ${offline.cards} 个卡片，本地数据还在`
+    ? `\n✅ 离线可用：缓存 ${expectedCache}（当前版本）· ${swState.cachedCount} 个文件，断网后仍渲染出 ${offline.cards} 个卡片，本地数据还在`
     : '\n❌ 离线不可用，看上面的数据');
   console.log(`截图：${path.join(outDir, 'shot-offline.png')}`);
   finishAndExit(ok ? 0 : 1, [() => client.close(), () => chrome.kill()]);
