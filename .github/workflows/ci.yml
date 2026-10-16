@@ -67,7 +67,9 @@ jobs:
             sleep 1
           done
 
+      # 单步超时 + 脚本自带看门狗：宁可快速失败，也不要挂到 job 超时（那时日志还拿不到）
       - name: 界面与流程自检（Chrome 由 GitHub 的机器自带）
+        timeout-minutes: 6
         env:
           CHROME_PATH: /usr/bin/google-chrome
         run: |

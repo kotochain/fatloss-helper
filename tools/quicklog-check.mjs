@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { armWatchdog } from './watchdog.mjs';
 import { findChrome } from './chrome-path.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -259,5 +260,7 @@ async function main() {
   void errors;
   chrome.kill();
 }
+
+armWatchdog('quicklog-check.mjs', 200);
 
 main().catch((err) => { console.error('自检失败：', err.message); process.exitCode = 1; });

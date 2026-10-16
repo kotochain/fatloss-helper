@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { armWatchdog } from './watchdog.mjs';
 import { findChrome } from './chrome-path.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -272,5 +273,7 @@ async function main() {
   provider.close();
   try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 3 }); } catch { /* 临时目录清不掉不影响结论 */ }
 }
+
+armWatchdog('key-audit.mjs', 200);
 
 main().catch((err) => { console.error('审计失败：', err.message); process.exitCode = 1; });

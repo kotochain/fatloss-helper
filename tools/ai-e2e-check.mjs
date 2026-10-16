@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { armWatchdog } from './watchdog.mjs';
 import { findChrome } from './chrome-path.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -259,5 +260,7 @@ async function main() {
   fakeAi.close();
   try { fs.rmSync(cfgDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
 }
+
+armWatchdog('ai-e2e-check.mjs', 260);
 
 main().catch((err) => { console.error('自检失败：', err.message); process.exitCode = 1; });

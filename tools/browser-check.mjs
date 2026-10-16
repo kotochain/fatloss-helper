@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { armWatchdog } from './watchdog.mjs';
 import { findChrome } from './chrome-path.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -291,6 +292,8 @@ function printReport(report) {
   console.log(`截图与报告在 ${outDir}`);
   if (problems) process.exitCode = 1;
 }
+
+armWatchdog('browser-check.mjs', 240);
 
 main().catch((err) => {
   console.error('自检失败：', err.message);
