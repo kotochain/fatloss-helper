@@ -254,16 +254,44 @@ git push -u origin main
 
 ```bash
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
-npm test                       # 174 个自动化测试
-node tools/mutate-check.mjs    # 反向验证：故意改坏 23 处代码，确认测试符合预期（在临时副本里做）
+npm test                       # 260 个自动化测试
+node tools/mutate-check.mjs    # 反向验证：故意改坏 49 处代码，确认测试符合预期（在临时副本里做）
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程
+
+# 审计工具（都是无头 Chrome，自己起服务、自己清端口/资料夹，可重复跑）
+node tools/live-audit.mjs                 # 打开真实地址走完整流程（默认线上网址；传本地地址可测本机）
+node tools/live-audit.mjs http://127.0.0.1:4173
+node tools/sweep-check.mjs     # 全界面按钮点击清扫：310 次点击，找「点不动 / 点了报错」
+node tools/resilience-check.mjs # AI 各种失败与畸形返回 + 存档损坏/未来版本/存储满
+node tools/layout-check.mjs    # 5 种屏幕尺寸 × 系统大字号：找横向溢出、被裁、点不到
 node tools/offline-check.mjs   # 断网自检：缓存后断网重开，确认还能用
 node tools/direct-check.mjs    # 浏览器直连 AI + 日历的端到端自检（用本地假服务商，零费用）
 node tools/key-audit.mjs       # 密钥安全审计（在真实网址里填假密钥，看它去了哪）
 node tools/ai-e2e-check.mjs    # 「电脑中转」路径的端到端自检（用假上游，零费用）
 node tools/check-secrets.mjs --self-test   # 提交前扫密钥（带自查，确认扫描器本身有效）
+node tools/check-live.mjs      # 上线后：线上文件与本地逐字节比对 + 关键修复是否已部署
 ```
+
+### 上线前必须跑什么（2026-10-20 定，血泪版）
+
+之前的自检是绿的，但用户手机上仍然踩到白屏、按钮点不动、AI 模式从来没工作过。
+复盘下来不是「测得少」，是**测的方向不对**：只测「我做过的功能」，不测「她能点到的东西」；
+只跑本地文件，不跑线上部署；只断言「没报错」，不断言「数字对不对」。现在按下面这条链走：
+
+| 阶段 | 跑什么 | 它到底在守什么 |
+| --- | --- | --- |
+| 改代码时 | `npm test` **连跑 2~3 次** | 逻辑正确；重复跑排除偶发通过 |
+| 改代码时 | `node tools/mutate-check.mjs` | **测试本身有效**：故意改坏代码，测试必须变红 |
+| 提推送前 | `quicklog-check` + `offline-check` + `sweep-check` + `resilience-check` + `layout-check` | 真浏览器里点得动、断了网能用、存档坏了不丢数据、小屏和大字号不烂 |
+| 推送后 | `node tools/check-live.mjs` | 线上文件和本地**逐字节一致**、版本号真的更新了 |
+| 推送后 | `node tools/live-audit.mjs` | **真的打开线上网址**走一遍：引导、记一笔、重开、断网、老存档、导出/导入、图标与主题色、启动失败兜底 |
+
+两条纪律（都是从事故里来的）：
+
+1. **本地文件一致 ≠ 线上能用。** `check-live` 只证明文件传对了；只有 `live-audit` 证明「跑起来是对的」。
+2. **新写的检查必须反向验证。** 故意弄坏一个东西，确认检查会报红；不报红就是摆设。
+   这条抓出过：自检脚本自己写错字段名、监听的下载目录根本没生效、断言只匹配到「前 12 条」。
 
 AI 转发的环境变量（想换模型时用）：
 

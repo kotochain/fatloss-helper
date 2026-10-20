@@ -7,6 +7,8 @@ data/ai-key.txt
 
 # 自检产物（截图、无头浏览器配置、浏览器回传的自检结果）
 .selfcheck/
+# 审计脚本的产物（浏览器资料夹、截图、检查报告），不提交
+.audit/
 node_modules/
 .DS_Store
 *.log

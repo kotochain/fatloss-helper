@@ -76,7 +76,64 @@ jobs:
           node tools/quicklog-check.mjs
           node tools/offline-check.mjs
 
+  # 审计一：完整使用流程 + 韧性（AI 失败路径、存档异常）
+  # 这些脚本自己起服务、自己清端口和浏览器资料夹，可以并行跑。
+  audit-flow:
+    name: 审计·流程与韧性
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: 启动本地服务
+        run: |
+          node tools/serve.mjs 4173 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4173/ > /dev/null && break
+            sleep 1
+          done
+
+      - name: 完整流程（引导 / 记一笔 / 重开 / 断网 / 老存档 / 导出导入 / 图标主题色 / 启动失败兜底）
+        timeout-minutes: 8
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node tools/live-audit.mjs http://127.0.0.1:4173
+
+      - name: AI 失败路径与存档异常
+        timeout-minutes: 8
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node tools/resilience-check.mjs
+
+  # 审计二：全界面按钮清扫 + 小屏/大字号排版
+  audit-ui:
+    name: 审计·界面
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: 全界面按钮点击清扫（找死按钮 / 点了报错）
+        timeout-minutes: 8
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node tools/sweep-check.mjs
+
+      - name: 小屏与系统大字号排版
+        timeout-minutes: 6
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node tools/layout-check.mjs
+
   # 说明：需要访问外部 AI 服务的自检（direct-check / ai-e2e-check）默认不在 CI 跑，
   # 它们用的是本地假服务，理论上也能跑，但会拖长 CI 时间。需要时手动在本地跑：
   #   node tools/direct-check.mjs
   #   node tools/ai-e2e-check.mjs
+  # 线上部署后的检查不在 CI 里（CI 跑的时候 Pages 还没部署完），推送后手动跑：
+  #   node tools/check-live.mjs && node tools/live-audit.mjs

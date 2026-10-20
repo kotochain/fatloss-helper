@@ -25,7 +25,9 @@ else console.log('✅ 暂存区干净');
 const hits = [];
 const walk = (dir) => {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (['.git', '.selfcheck', 'node_modules'].includes(entry.name)) continue;
+    // .audit / .selfcheck 都是自检产物目录：里面有 Chrome 自动生成的语音包等文件，
+    // 会出现 sk- 开头的**语言 id**（例如 sk-sk-x-multi-seanet），不是密钥。
+    if (['.git', '.selfcheck', '.audit', 'node_modules'].includes(entry.name)) continue;
     // 这个自查脚本自己会写出 sk- 开头的示例，跳过它，避免自己报自己
     if (entry.name === 'check-secrets.mjs') continue;
     const full = path.join(dir, entry.name);
