@@ -141,7 +141,15 @@ async function shot(client, name) {
 async function boot(client, { expectReady = true } = {}) {
   await client.send('Page.navigate', { url: BASE + '/' });
   if (!expectReady) { await sleep(2500); return; }
-  await waitFor(() => evaluate(client, `window.__appReady === true || !!document.querySelector('#bootFail:not(.hidden), #crashRoot:not(.hidden)')`), { what: '页面启动' });
+  // 等「真的启动」或「兜底块真的可见」。
+  // 以前写的是 #bootFail:not(.hidden)：但兜底块用的是 hidden **属性**，不是 class，
+  // 选择器会永远命中 —— 线上网络慢时脚本在模块加载完成前就继续，读到空的 #app，
+  // 误判「欢迎页没有入口」。这个假红真踩到过一次。
+  await waitFor(() => evaluate(client, `(() => {
+    if (window.__appReady === true) return true;
+    const box = document.querySelector('#bootFail');
+    return !!box && !box.hidden && box.getBoundingClientRect().height > 0;
+  })()`), { what: '页面启动（或启动失败兜底出现）' });
   await sleep(400);
 }
 
@@ -371,7 +379,8 @@ async function main() {
         const dayKeys = (() => { try { const s = JSON.parse(rawAfter || '{}'); return Object.keys(s.days || {}); } catch { return []; } })();
         const firstDay = (() => { try { const s = JSON.parse(rawAfter || '{}'); const k = Object.keys(s.days || {})[0]; return k ? s.days[k] : null; } catch { return null; } })();
         const 条数 = firstDay ? Object.values(firstDay.meals || firstDay).flat().filter((e) => e && e.food).length : 0;
-        const 崩溃页 = !!document.querySelector('#crashRoot:not(.hidden)');
+        // renderCrash 是写进 #app 的，页面里没有 #crashRoot 这个元素（旧选择器永远为假）
+        const 崩溃页 = /这一页出了点问题/.test(document.querySelector('#app')?.textContent || '');
         return {
           启动: window.__appReady === true,
           崩溃页,

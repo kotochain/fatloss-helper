@@ -84,7 +84,6 @@ for (const f of ['index.html', 'js/app.js', 'sw.js', 'css/style.css', 'js/schema
 const mustHave = [
   ['index.html', 'id="bootFail"', '启动失败的兜底界面（元素本身，不只是引用）'],
   ['js/app.js', 'renderCrash', '渲染错误边界'],
-  ['js/app.js', 'let startupNotice = null;\n\nlet state = load();', 'TDZ 修复（startupNotice 在 load 之前）'],
   ['js/app.js', 'data-act="recover"', '找回记录入口'],
   ['js/app.js', 'openWipeSheet', '从头开始'],
   ['js/app.js', 'exportUnreadable', '读不出来的存档能导出'],
@@ -92,6 +91,16 @@ const mustHave = [
   ['sw.js', 'stale-while-revalidate', '缓存策略（不能退回缓存优先）'],
 ];
 console.log('\n关键改动是否已部署：');
+// TDZ 那个白屏事故：startupNotice 必须在 load() 之前声明。
+// 不能靠整段字符串匹配 —— 中间插一行函数，匹配就失效了（这次就红了一次假失败）。
+{
+  const app = String(need['js/app.js'] || '');
+  const decl = app.indexOf('let startupNotice = null;');
+  const load = app.indexOf('let state = load();');
+  const ok = decl >= 0 && load >= 0 && decl < load;
+  if (!ok) bad += 1;
+  console.log(`${ok ? '✅' : '❌'} 启动顺序（startupNotice 在 load 之前声明）`);
+}
 for (const [file, needle, what] of mustHave) {
   const has = String(need[file] || '').includes(needle);
   if (!has) bad += 1;
