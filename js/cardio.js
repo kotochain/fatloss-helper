@@ -46,6 +46,21 @@ export function normalizeEquipment(list) {
   return valid.length ? valid : [...DEFAULT_EQUIPMENT];
 }
 
+/** 计划页时长选项（跟界面上的按钮保持一致） */
+export const CARDIO_MINUTES = [20, 30, 45, 60];
+
+/** 目标：存档里可能是旧值/脏值，认不出来就回「燃脂」 */
+export function normalizeCardioGoal(key) {
+  return Object.prototype.hasOwnProperty.call(GOALS, key) ? key : 'fat_burn';
+}
+
+/** 时长：只在界面给的几档里取最接近的（存档被改坏时不要出现「0 分钟」或「37 分钟」） */
+export function normalizeCardioMinutes(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return 30;
+  return CARDIO_MINUTES.reduce((best, m) => (Math.abs(m - v) < Math.abs(best - v) ? m : best), CARDIO_MINUTES[0]);
+}
+
 /** 训练目标（想练到什么） */
 export const GOALS = {
   fat_burn: { name: '燃脂（长时间中低强度）', short: '燃脂' },

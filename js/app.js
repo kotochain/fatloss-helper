@@ -32,6 +32,7 @@ import {
 } from './achievements.js';
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment, normalizeEquipment,
+  normalizeCardioGoal, normalizeCardioMinutes,
 } from './cardio.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
 import { insights, insightHint } from './insights.js';
@@ -96,7 +97,12 @@ let quickMealHint = null;
 /** 教练弹层当前展示什么（本地版 / AI 版 / 正在问 / 失败原因） */
 let coachView = null;
 /** 有氧推荐的选择（器械勾过就存在 settings 里，刷新/重开都还在） */
-let cardioPick = { equipment: normalizeEquipment(state?.settings?.equipment), goal: 'fat_burn', minutes: 30 };
+let cardioPick = {
+  equipment: normalizeEquipment(state?.settings?.equipment),
+  // 目标和时长也存过就带回来：她固定练 45 分钟、想练低冲击，不该每次重选
+  goal: normalizeCardioGoal(state?.settings?.cardioGoal),
+  minutes: normalizeCardioMinutes(state?.settings?.cardioMinutes),
+};
 /**
  * 勾/取消一个器械：界面上的两处（计划页、记录→练的）共用这一份，勾完立刻存盘。
  * 全部取消时留「徒手」—— 一个都没有的话推荐不出任何动作（跟以前的行为一致）。
@@ -112,6 +118,28 @@ function toggleEquipment(key) {
   }
   render();
 }
+
+/** 目标/时长的选择也存进 settings（跟器械一样，重开还在） */
+function setCardioGoal(key) {
+  cardioPick.goal = normalizeCardioGoal(key);
+  if (state) {
+    state.settings = state.settings || {};
+    state.settings.cardioGoal = cardioPick.goal;
+    save();
+  }
+  render();
+}
+
+function setCardioMinutes(minutes) {
+  cardioPick.minutes = normalizeCardioMinutes(minutes);
+  if (state) {
+    state.settings = state.settings || {};
+    state.settings.cardioMinutes = cardioPick.minutes;
+    save();
+  }
+  render();
+}
+
 /**
  * 「练的」那一半正在填的东西。
  * 放在模块里而不是当场读输入框：换分段、切换器械重绘之后，已经填好的时长和备注不能丢。
@@ -1645,14 +1673,12 @@ function bindCardioCard() {
   $('#goalChips')?.addEventListener('click', (e) => {
     const b = e.target.closest('[data-goal]');
     if (!b) return;
-    cardioPick.goal = b.dataset.goal;
-    render();
+    setCardioGoal(b.dataset.goal);
   });
   $('#minuteChips')?.addEventListener('click', (e) => {
     const b = e.target.closest('[data-min]');
     if (!b) return;
-    cardioPick.minutes = Number(b.dataset.min);
-    render();
+    setCardioMinutes(b.dataset.min);
   });
   app.querySelectorAll('[data-log-cardio]').forEach((el) => {
     el.addEventListener('click', () => {

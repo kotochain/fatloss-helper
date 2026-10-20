@@ -760,17 +760,32 @@ async function main() {
   console.log(`✅ 只勾「椭圆机」后的推荐：${ellipticalOnly.join(' / ')}`);
   if (!ellipticalOnly.some((t) => t.includes('椭圆机'))) problems.push('只勾椭圆机却没有推荐椭圆机');
 
+  // 目标/时长也要存住：她固定练 45 分钟、想练低冲击，不该每次重选
+  await evaluate(`document.querySelector('#goalChips [data-goal="low_impact"]')?.click()`);
+  await sleep(250);
+  await evaluate(`document.querySelector('#minuteChips [data-min="45"]')?.click()`);
+  await sleep(350);
+
   // issue #4：勾选要存进手机里 —— 重新打开应用不能回到默认四项（她家里有什么器械是稳定的）
   await evaluate(`location.reload()`);
   await sleep(1200);
   await evaluate(`document.querySelector('.tab[data-view="plan"]')?.click()`);
   await sleep(500);
-  const equipAfterReload = await evaluate(`[...document.querySelectorAll('#equipChips .chip.on')].map((c) => c.dataset.eq).sort()`);
-  console.log(`✅ 重新打开应用后的勾选：${equipAfterReload.join('、') || '（一个都没有）'}`);
+  const planAfterReload = await evaluate(`(() => ({
+    器械: [...document.querySelectorAll('#equipChips .chip.on')].map((c) => c.dataset.eq).sort(),
+    目标: document.querySelector('#goalChips .chip.on')?.dataset.goal || null,
+    时长: document.querySelector('#minuteChips .chip.on')?.dataset.min || null,
+    文案: document.querySelector('.cardio-session h4')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+  }))()`);
+  console.log(`✅ 重新打开应用后的勾选：${planAfterReload.器械.join('、') || '（一个都没有）'}｜目标 ${planAfterReload.目标}｜时长 ${planAfterReload.时长}`);
+  console.log(`   推荐文案：${planAfterReload.文案}`);
   // 全部取消时会自动留「徒手」（否则一个动作都推荐不出来），所以这里是这两项
-  if (equipAfterReload.join(',') !== 'bodyweight,elliptical') {
-    problems.push(`器械勾选没存住：重开后是 ${equipAfterReload.join('、') || '空'}（应该是徒手 + 椭圆机，不是默认四项）`);
+  if (planAfterReload.器械.join(',') !== 'bodyweight,elliptical') {
+    problems.push(`器械勾选没存住：重开后是 ${planAfterReload.器械.join('、') || '空'}（应该是徒手 + 椭圆机，不是默认四项）`);
   }
+  if (planAfterReload.目标 !== 'low_impact') problems.push(`训练目标没存住：重开后是 ${planAfterReload.目标}`);
+  if (planAfterReload.时长 !== '45') problems.push(`训练时长没存住：重开后是 ${planAfterReload.时长}`);
+  if (!planAfterReload.文案.includes('45 分钟')) problems.push(`重开后推荐文案没按 45 分钟算：${planAfterReload.文案}`);
 
   // 试着把「爬坡走」换成可用器械的动作
   const subSheet = await evaluate(`(async () => {

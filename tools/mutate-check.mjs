@@ -91,6 +91,8 @@ const MUTATIONS = [
   { file: 'js/coach.js', from: "if (/(运动|锻炼|练了|健身|跑步)", to: "if (/(游泳)", why: '不许暗示「运动了可以多吃」（红线）' },
   { file: 'js/coach.js', from: '    if (totals.kcal < MIN_DAY_KCAL) continue;', to: '    if (false) continue;', why: '只记了一百多卡的那天不算「记了」（否则平均热量被拉低）' },
   { file: 'js/coach.js', from: '  if (remainingKcal <= 0) {', to: '  if (false) {', why: '已经吃超了就不能再给加餐建议' },
+  { file: 'js/cardio.js', from: '  return CARDIO_MINUTES.reduce((best, m) => (Math.abs(m - v) < Math.abs(best - v) ? m : best), CARDIO_MINUTES[0]);', to: '  return v;', why: '训练时长要吸附到界面的档位（存档里 37 分钟会让所有按钮都不选中）' },
+  { file: 'js/cardio.js', from: "  return Object.prototype.hasOwnProperty.call(GOALS, key) ? key : 'fat_burn';", to: '  return key;', why: '训练目标认不出来要回「燃脂」（否则推荐拿不到目标）' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CARDIO, EQUIPMENT, GOALS, substituteExercises, recommendCardio, exercisesByEquipment, listEquipment,
-  normalizeEquipment, DEFAULT_EQUIPMENT,
+  normalizeEquipment, DEFAULT_EQUIPMENT, normalizeCardioGoal, normalizeCardioMinutes, CARDIO_MINUTES,
 } from '../js/cardio.js';
 
 test('每个动作的器械、目标都必须是有定义的，METs 在合理范围', () => {
@@ -140,4 +140,22 @@ test('器械勾选能存能读；老存档没这个字段时回落默认四项�
   // 存的不是数组（被手改坏了）时不能崩
   assert.deepEqual(normalizeEquipment('elliptical'), DEFAULT_EQUIPMENT);
   assert.deepEqual(normalizeEquipment({ 0: 'elliptical' }), DEFAULT_EQUIPMENT);
+});
+
+test('训练目标和时长也要认得出来；存档被改坏时回默认，不出现离谱值', () => {
+  assert.equal(normalizeCardioGoal('low_impact'), 'low_impact');
+  assert.equal(normalizeCardioGoal('nope'), 'fat_burn');
+  assert.equal(normalizeCardioGoal(undefined), 'fat_burn');
+  // 资料页的「减脂/维持体重」是另一套字段，别混进训练目标
+  assert.equal(normalizeCardioGoal('maintain'), 'fat_burn');
+
+  assert.deepEqual(CARDIO_MINUTES, [20, 30, 45, 60], '界面上的时长档位变了要同步改这里');
+  assert.equal(normalizeCardioMinutes(45), 45);
+  assert.equal(normalizeCardioMinutes('30'), 30);
+  assert.equal(normalizeCardioMinutes(37), 30, '不在档位里的值要吸附到最近的一档');
+  assert.equal(normalizeCardioMinutes(999), 60);
+  assert.equal(normalizeCardioMinutes(0), 30);
+  assert.equal(normalizeCardioMinutes(-10), 30);
+  assert.equal(normalizeCardioMinutes('abc'), 30);
+  assert.equal(normalizeCardioMinutes(null), 30);
 });
