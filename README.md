@@ -252,6 +252,9 @@ git push -u origin main
 
 ## 四、给开发者的部分
 
+> 接手/交接先看 [HANDOFF.md](HANDOFF.md)：当前状态、关键决策、验证命令、待办和踩过的坑都在里面。
+
+
 ```bash
 npm run check           # 懒人版：一条命令跑完 7 项本地检查（自动起停服务，约 4 分钟）
 npm run check:full      # 全套 11 项（含全按钮清扫、AI 失败注入、五种屏排版，约 10 分钟）
