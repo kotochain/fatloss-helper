@@ -106,7 +106,10 @@ body {
   margin: 0 auto;
   min-height: 100vh;
   background: var(--bg);
-  padding-bottom: 72px;
+  /* 底栏是 fixed 的，内容要留出它的高度。以前写死 72px：
+     系统字号调到 150% 时底栏会长高，最后一张卡片被挡（排版审计实测只剩 4px 余量）。
+     现在给足 88px，再把全面屏手势区算进去。 */
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
   position: relative;
 }
 
@@ -125,6 +128,7 @@ body {
 }
 .topbar .date-label {
   flex: 1;
+  min-width: 0;   /* 允许收缩，长日期会省略而不是把顶栏挤成两行 */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -139,7 +143,10 @@ body {
   border-radius: var(--radius-sm);
 }
 .topbar .date-label:active { background: var(--rose-soft); }
-.topbar .date-label .ic { width: 17px; height: 17px; color: var(--rose); stroke-width: 2; }
+.topbar .date-label .ic { width: 17px; height: 17px; color: var(--rose); stroke-width: 2; flex: 0 0 auto; }
+.topbar .date-label #dateText, .topbar .date-label #dateLabelText {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .icon-btn {
   border: 0;
   background: transparent;
@@ -149,9 +156,13 @@ body {
   cursor: pointer;
   display: grid;
   place-items: center;
+  /* 触摸目标至少 40×40：手机上「前一天/后一天」原来只有 32px，容易点偏 */
+  min-width: 40px;
+  min-height: 40px;
 }
 .icon-btn:active { background: var(--rose-soft); color: var(--rose-deep); }
 .avatar {
+  position: relative;
   width: 32px; height: 32px;
   border-radius: 50%;
   border: 0;
@@ -163,6 +174,8 @@ body {
   flex: 0 0 auto;
   box-shadow: 0 2px 6px rgba(232, 106, 130, 0.35);
 }
+/* 头像看起来还是 32px，但手指点到周围 4px 也算——手机上实际更好点 */
+.avatar::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
 
 /* 新版本提示条 */
 .update-toast {
@@ -196,6 +209,10 @@ body {
   margin-right: 2px;
   white-space: nowrap;
   letter-spacing: 0.02em;
+  /* 称呼最多 8 个字，但不限制宽度会在大字号 + 小屏上把顶栏撑爆（320 宽实测横向溢出） */
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* hero 里的问候语 */
@@ -453,7 +470,14 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 }
 .entry .del {
   border: 0; background: transparent; color: var(--ink-3);
-  font-size: 16px; padding: 2px 6px; cursor: pointer;
+  font-size: 16px; cursor: pointer;
+  /* 删除按钮视觉上还是小叉，但用「加大内边距 + 负外边距」把点击区域扩到 40px，
+     又不改变行高。不能用伪元素外扩：那会让按钮的 scrollWidth 超出容器，
+     排版自检会把它报成「文字被裁」（真实误报，已踩过）。 */
+  padding: 8px 10px;
+  margin: -6px;
+  min-width: 40px;
+  min-height: 40px;
 }
 .add-line {
   width: 100%;
@@ -524,6 +548,11 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 99px;
+  /* 选项按钮是最常点的东西之一，给到 36px 高（原来是 34px，拇指容易点偏） */
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 7px 13px;
   font-size: 13px;
   color: var(--ink-2);
@@ -607,7 +636,9 @@ input:focus, select:focus, textarea:focus {
   border-bottom: 1px solid var(--line);
 }
 .sheet-title { font-weight: 600; font-size: 15px; }
-.sheet-body { padding: 14px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* 关闭按钮是每个弹层都要点的，至少给到 40×40 的触摸目标（实测原来只有 27px 高） */
+.sheet-head .icon-btn { min-width: 40px; min-height: 40px; }
+.sheet-body { padding: 14px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 .sheet-foot { padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 
 .search-hit {
@@ -919,9 +950,14 @@ details[open] summary { margin-bottom: 4px; }
 }
 
 /* 日历 */
-.cal-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px; }
+/**
+ * 日历 7 列。必须 minmax(0, 1fr)：
+ * 光写 1fr 时，aspect-ratio + 最小内容宽度会把每格撑到 ~58px，
+ * 7 列就比手机屏还宽 —— 真机上日历弹层右侧直接被裁掉（320~412 宽都中招）。
+ */
+.cal-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 4px; }
 .cal-week span { text-align: center; font-size: 11px; color: var(--ink-3); }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .cal-cell {
   position: relative;
   aspect-ratio: 1 / 1;
@@ -934,6 +970,7 @@ details[open] summary { margin-bottom: 4px; }
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
 }
 .cal-cell.empty { background: transparent; cursor: default; }
 .cal-cell.has-data { background: var(--grad-soft); color: var(--rose-deep); font-weight: 680; }
@@ -1047,3 +1084,17 @@ details[open] summary { margin-bottom: 4px; }
 }
 .train-equip[open] > summary::after { content: '收起 ›'; }
 .train-equip[open] > summary { margin-bottom: 8px; }
+
+/* 启动失败兜底：模块没加载起来时唯一能看到的东西。必须显眼、能点、能截图。 */
+.boot-fail {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg, #FFF9F7);
+}
+.boot-fail[hidden] { display: none; }
+.boot-fail .card { width: 100%; max-width: 420px; text-align: center; }

@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#16a34a">
+<!-- 状态栏/浏览器工具栏用界面的奶油底色，跟顶部栏无缝衔接。
+     这里以前是绿色 #16a34a（第一版配色），界面换成温暖米粉后忘了改，
+     手机上就是「绿色状态栏 + 粉色界面」，很割裂。 -->
+<meta name="theme-color" content="#FFF9F7">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -92,6 +95,23 @@
     </div>
     <div id="sheetBody" class="sheet-body"></div>
     <div id="sheetFoot" class="sheet-foot"></div>
+  </div>
+</div>
+
+<!--
+  启动失败兜底：这份 DOM 必须存在。
+  上面那段内联脚本和 app.js 里的 renderBootFailure() 都是往 #bootFail 里写内容的；
+  之前 index.html 里根本没有这个元素，于是「模块没起来」时所有兜底都静默失效 ——
+  页面上什么都不显示，就是用户报过的「白屏」。这个块平时 hidden，脚本判定失败才显示。
+-->
+<div id="bootFail" class="boot-fail" hidden>
+  <div class="card">
+    <div class="card-title">没能打开</div>
+    <p class="small muted" style="margin:0 0 12px">
+      页面没有加载成功。先点下面刷新一次；如果还是这样，把这段小字截图发给我，我能判断是哪一步卡住了。
+    </p>
+    <button class="btn block" onclick="location.reload()">刷新一次</button>
+    <p class="tiny muted" id="bootFailDetail" style="margin:12px 0 0;word-break:break-all"></p>
   </div>
 </div>
 

@@ -1,8 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#16a34a"/>
+  <!--
+    配色必须跟界面一致：#E86A82 就是界面的 --rose（温暖米粉）。这个图标一直是第一版的绿色，
+    界面改成米粉配色之后忘了同步 —— 手机上就成了「绿色图标点开是粉色 app」。
+    改配色时记得连 manifest 的 theme_color / 这里的 PNG 一起改，别只改 CSS。
+  -->
+  <rect width="512" height="512" rx="112" fill="#E86A82"/>
   <circle cx="256" cy="200" r="104" fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round"
           stroke-dasharray="490 163" transform="rotate(-90 256 200)"/>
-  <path d="M256 96 a104 104 0 0 1 92 152" fill="none" stroke="#bbf7d0" stroke-width="26" stroke-linecap="round"/>
+  <path d="M256 96 a104 104 0 0 1 92 152" fill="none" stroke="#FFC978" stroke-width="26" stroke-linecap="round"/>
   <text x="256" y="222" font-family="PingFang SC, Helvetica, Arial, sans-serif" font-size="104"
         font-weight="700" fill="#ffffff" text-anchor="middle">减</text>
   <text x="256" y="392" font-family="PingFang SC, Helvetica, Arial, sans-serif" font-size="76"
