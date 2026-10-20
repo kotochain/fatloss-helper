@@ -779,6 +779,10 @@ async function main() {
   }))()`);
   console.log(`✅ 重新打开应用后的勾选：${planAfterReload.器械.join('、') || '（一个都没有）'}｜目标 ${planAfterReload.目标}｜时长 ${planAfterReload.时长}`);
   console.log(`   推荐文案：${planAfterReload.文案}`);
+  await evaluate(`document.querySelector('#goalChips')?.scrollIntoView({ block: 'center' })`);
+  await sleep(350);
+  const shotPlanPersist = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-plan-persist.png'), Buffer.from(shotPlanPersist.data, 'base64'));
   // 全部取消时会自动留「徒手」（否则一个动作都推荐不出来），所以这里是这两项
   if (planAfterReload.器械.join(',') !== 'bodyweight,elliptical') {
     problems.push(`器械勾选没存住：重开后是 ${planAfterReload.器械.join('、') || '空'}（应该是徒手 + 椭圆机，不是默认四项）`);
