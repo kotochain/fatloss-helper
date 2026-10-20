@@ -16,6 +16,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
@@ -26,7 +27,8 @@ armWatchdog('label-check', 240);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, '.audit', 'label');
-const profileDir = path.join(outDir, 'profile');
+/** 每次都用全新的浏览器资料夹：她的存档/设置会污染「新用户」路径 */
+const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-label-profile-'));
 const CHROME = findChrome();
 const STATIC_PORT = 4199;
 const FAKE_PORT = 18883;
@@ -225,9 +227,6 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   const fixture = path.join(outDir, 'label-fixture.png');
   fs.writeFileSync(fixture, PNG);
-  // 上一次的 profile 清不掉时不能让整条自检崩掉（其他自检脚本也都是这么兜的）；
-  // 清不掉的后果只是 Chrome 复用旧 profile，不影响本次结果。
-  try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch { /* 清不掉就继续 */ }
   await freePortAndWait(CDP_PORT);
 
   const staticServer = spawn(process.execPath, [path.join(root, 'tools/serve.mjs'), String(STATIC_PORT)], { stdio: 'ignore' });

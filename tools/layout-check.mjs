@@ -1630,7 +1630,8 @@ async function startSnapshot() {
 /* ── 主流程 ───────────────────────────────── */
 
 async function main() {
-  fs.rmSync(SHOTS, { recursive: true, force: true }); // 每次重跑先清空，避免旧截图混进来
+  // 每次重跑先清空，避免旧截图混进来；清不掉（权限/沙箱）不能把整条检查带崩
+  try { fs.rmSync(SHOTS, { recursive: true, force: true }); } catch { /* 清不掉就继续 */ }
   fs.mkdirSync(SHOTS, { recursive: true });
   fs.mkdirSync(path.dirname(PROFILE), { recursive: true });
 

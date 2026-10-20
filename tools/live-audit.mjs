@@ -16,6 +16,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
@@ -25,7 +26,8 @@ import { portAlive, freePort } from './chrome-launch.mjs';
 const BASE = (process.argv[2] || 'https://kotochain.github.io/fatloss-helper').replace(/\/$/, '');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, '.audit', 'live');
-const profileDir = path.join(outDir, 'chrome-profile');
+/** 每次都用全新的浏览器资料夹：审计要从「一个干净的新用户」开始，复用旧资料夹会带着她的本地数据（出现过误报） */
+const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-live-profile-'));
 const CDP_PORT = 9420;
 const CHROME = findChrome();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -156,7 +158,6 @@ async function boot(client, { expectReady = true } = {}) {
 async function main() {
   console.log(`线上部署审计：${BASE}\n`);
   await waitForLive();
-  fs.rmSync(profileDir, { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
   await freePortAndWait(CDP_PORT);
 
