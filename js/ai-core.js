@@ -4,6 +4,8 @@
  * 这一层不关心「谁去调用」——浏览器直连和电脑中转都用它，逻辑只有一份，避免两边跑偏。
  */
 
+import { coachSystemPrompt, coachUserMessage } from './coach.js';
+
 export const REQUEST_TIMEOUT_MS = 25000;
 
 /**
@@ -136,9 +138,47 @@ export async function requestParse({ text, meal, hour, config, fetchImpl = fetch
   return normalizeResult(extractJson(content));
 }
 
-/** 发一次最小请求，只为了验证「密钥+地址+模型」能不能用 */
-export async function requestPing({ config, fetchImpl = fetch }) {
+/**
+ * 让 AI 把「本地已经算好的事实」说成一段人话。
+ *
+ * 注意这里**不给它 JSON 格式**：教练要的是自然语言，不是结构化数据。
+ * 数字安全靠 js/coach.js 的 checkCoachText 事后校验 —— 说了清单外的数字就整段退回本地版。
+ */
+export async function requestCoach({ brief, config, fetchImpl = fetch }) {
   let res;
+  try {
+    res = await fetchImpl(`${String(config.baseUrl).replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: 'system', content: coachSystemPrompt() },
+          { role: 'user', content: coachUserMessage(brief) },
+        ],
+        temperature: 0.5,
+        max_tokens: 420,
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new Error(humanizeNetworkError(err, config.baseUrl));
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(humanizeHttpError(res.status, body, { model: config.model }));
+  }
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('服务商没有返回内容');
+  return { text: String(content).trim() };
+}
+
+/** 发一次最小请求，只为了验证「密钥+地址+模型」能不能用 */
+export async function requestPing({ config, fetchImpl = fetch }) {  let res;
   try {
     res = await fetchImpl(`${String(config.baseUrl).replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',

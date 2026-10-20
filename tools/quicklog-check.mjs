@@ -701,6 +701,36 @@ async function main() {
   await evaluate(`document.querySelector('#sheetClose')?.click()`);
   await sleep(300);
 
+  console.log('\n=== 一·八、教练（普通模式，没配 AI） ===');
+  const coachEntry = await evaluate(`(() => {
+    const btn = document.querySelector('[data-act="coach"]');
+    return { 有入口: !!btn, 文案: btn ? btn.textContent.trim() : '' };
+  })()`);
+  console.log(`   入口：${coachEntry.有入口 ? `「${coachEntry.文案}」` : '没有'}`);
+  if (!coachEntry.有入口) problems.push('今天页没有教练入口');
+
+  await evaluate(`document.querySelector('[data-act="coach"]')?.click()`);
+  await sleep(400);
+  const coach = await evaluate(`(() => {
+    const body = document.querySelector('#sheetBody')?.textContent.replace(/\s+/g, ' ').trim() || '';
+    const foot = [...document.querySelectorAll('#sheetFoot [data-coach]')].map((b) => b.textContent.trim());
+    return { 标题: document.querySelector('#sheetTitle')?.textContent || '', body, foot };
+  })()`);
+  console.log(`✅ 教练弹层：「${coach.标题}」`);
+  console.log(`   ${coach.body.slice(0, 110)}…`);
+  console.log(`   底部按钮：${coach.foot.join(' / ')}`);
+  if (!coach.标题.includes('教练')) problems.push('教练弹层没打开');
+  if (!/kcal/.test(coach.body)) problems.push('教练建议里没写还能吃多少 kcal');
+  if (!/蛋白/.test(coach.body)) problems.push('教练建议里没写蛋白还差多少');
+  if (/error|报错|出错了/.test(coach.body)) problems.push('没配 AI 时教练直接报错了（应该给本地建议）');
+  if (!coach.foot.some((t) => t.includes('配'))) problems.push('没配 AI 时没有给出「去配置」的入口');
+
+  const shotCoach = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-coach.png'), Buffer.from(shotCoach.data, 'base64'));
+
+  await evaluate(`document.querySelector('[data-coach="close"]')?.click()`);
+  await sleep(250);
+
   console.log('\n=== 二、按器械换有氧动作 ===');
   await evaluate(`document.querySelector('.tab[data-view="plan"]').click()`);
   await sleep(500);

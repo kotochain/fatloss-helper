@@ -21,8 +21,9 @@ import {
 import {
   askAi, aiStatus, currentAiConfig, saveAiConfigLocal, clearAiConfig,
   testConnection, fetchModels, relayStatus, presetDirectCall,
-  readLabelImage,
+  readLabelImage, askCoach,
 } from './ai.js';
+import { buildCoachBrief, localCoachAdvice, checkCoachText } from './coach.js';
 import { labelToPer100, checkConsistency } from './label.js';
 import { PRESETS, findPreset } from './providers.js';
 import {
@@ -92,6 +93,8 @@ let draft = null;
 let ai = { configured: false, checked: false, reason: null };
 /** 「说一句」是从哪一餐点进来的（界面上的餐次提示，默认按时间猜） */
 let quickMealHint = null;
+/** 教练弹层当前展示什么（本地版 / AI 版 / 正在问 / 失败原因） */
+let coachView = null;
 /** 有氧推荐的选择（器械勾过就存在 settings 里，刷新/重开都还在） */
 let cardioPick = { equipment: normalizeEquipment(state?.settings?.equipment), goal: 'fat_burn', minutes: 30 };
 /**
@@ -355,6 +358,7 @@ function handleAction(act, data) {
     case 'add-food': return openFoodSheet(data.meal);
     case 'growth': return openGrowthSheet();
     case 'insights': return openInsightsSheet();
+    case 'coach': return openCoachSheet();
     case 'crash-retry': view = view || 'today'; return render();
     case 'crash-other': return goView('today');
     case 'crash-export': return exportData();
@@ -630,16 +634,23 @@ function loadDemo() {
 
 /* ── 今天 ────────────────────────────────── */
 
+/** 某天吃进去的合计（只读：绝不因为「看了一眼」就新建空日子） */
+function totalsOfDay(day) {
+  return Object.values(day?.meals || {}).flat().reduce((acc, e) => {
+    const f = calcEntry(e.food, e.grams);
+    acc.kcal += f.kcal;
+    acc.protein += f.protein;
+    acc.fat += f.fat;
+    acc.carb += f.carb;
+    return acc;
+  }, { kcal: 0, protein: 0, fat: 0, carb: 0 });
+}
+
 function renderToday() {
   const t = targets();
   if (!t) return renderWelcome();
   const day = getDay(state, dateKey);
-  const entries = Object.values(day.meals).flat();
-  const totals = entries.reduce((acc, e) => {
-    const f = calcEntry(e.food, e.grams);
-    acc.kcal += f.kcal; acc.protein += f.protein; acc.fat += f.fat; acc.carb += f.carb;
-    return acc;
-  }, { kcal: 0, protein: 0, fat: 0, carb: 0 });
+  const totals = totalsOfDay(day);
 
   // 运动消耗按记录里的 METs 算（老记录没有 mets 时退回旧池），跟记录页/计划页同一套
   const exerciseKcal = day.exercises.reduce((a, x) => a + estimateTrainingKcal(x, state.profile.weightKg), 0);
@@ -733,6 +744,12 @@ function renderToday() {
         ${insightHint(state) ? `<p class="tiny muted" style="margin:8px 0 0">${esc(insightHint(state).text)}</p>` : ''}
         ${myInsights(3).length ? `<button class="btn ghost block" style="margin-top:10px" data-act="insights">看全部规律</button>` : ''}
       </div>` : ''}
+
+    <div class="card coach-card">
+      <div class="card-title">接下来怎么吃</div>
+      <p class="tiny muted" style="margin:0 0 10px">用你今天的记录算的，不猜、不编。</p>
+      <button class="btn ghost block" data-act="coach">问教练</button>
+    </div>
 
     <button class="plant-card" data-act="growth">
       <span class="plant-emoji-sm">${plant.state.stage.emoji}</span>
@@ -2491,6 +2508,109 @@ function openInsightsSheet() {
       </p>
       ${t ? `<p class="tiny muted">目标是每天约 ${t.targetCalories} kcal、蛋白 ${Math.round(t.proteinG)} g。</p>` : ''}`,
   });
+}
+
+
+/* ── 弹层：教练 ──────────────────────────
+   两条路给同一件事：
+     · 本地版：按记录算好「还能吃多少、蛋白差多少、吃哪几样」，不联网、不花钱；
+     · AI 版：把同一份事实交给模型组织语言。她点一下才发请求（不自动消耗额度）。
+   无论哪条路，数字都来自本地；AI 的话要再过一遍 checkCoachText，编数字就退回本地版。
+   ───────────────────────────────────── */
+
+/** 把当前记录整理成教练要的事实清单（只读，不新建空日子） */
+function coachBriefNow() {
+  const t = targets();
+  if (!t) return null;
+  const day = state.days?.[dateKey] || { meals: {} };
+  return buildCoachBrief({
+    state,
+    targets: t,
+    totals: totalsOfDay(day),
+    today: dateKey,
+    patterns: myInsights(3),
+  });
+}
+
+function coachBody() {
+  const v = coachView;
+  const main = v.aiText ? { headline: '教练说的', lines: [v.aiText] } : v.local;
+  return `
+    <div class="coach-main">
+      ${main.headline ? `<p class="coach-headline">${esc(main.headline)}</p>` : ''}
+      ${main.lines.map((line) => `<p>${esc(line)}</p>`).join('')}
+    </div>
+    ${v.loading ? '<p class="tiny muted coach-note">正在问 AI……（会给服务商发一次请求）</p>' : ''}
+    ${v.note ? `<p class="tiny muted coach-note">${esc(v.note)}</p>` : ''}
+    <p class="tiny muted coach-note">${v.aiText
+    ? '这段话是 AI 组织的，数字还是本地算的（发出来之前已核对过）。'
+    : '数字来自你今天的记录，计算在手机本地完成。'}</p>`;
+}
+
+function coachFoot() {
+  const v = coachView;
+  if (v.loading) return '';
+  if (!ai.configured) {
+    return `<button class="btn ghost grow" data-coach="close">知道了</button>
+      <button class="btn grow" data-coach="config">配一下 AI（可选）</button>`;
+  }
+  return `${v.aiText ? '<button class="btn ghost grow" data-coach="local">看本地版</button>' : ''}
+    <button class="btn grow" data-coach="ai">让 AI 说细一点</button>`;
+}
+
+function paintCoach() {
+  if (!coachView) return;
+  openSheet({ title: '教练', body: coachBody(), foot: coachFoot(), onMount: bindCoachActions });
+}
+
+function bindCoachActions() {
+  document.querySelectorAll('[data-coach]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const act = b.dataset.coach;
+      if (act === 'close') { closeSheet(); return; }
+      if (act === 'local') { coachView.aiText = null; coachView.note = null; paintCoach(); return; }
+      if (act === 'config') {
+        closeSheet();
+        openAiSettingsSheet({ then: () => openCoachSheet() });
+        return;
+      }
+      if (act !== 'ai') return;
+      coachView.loading = true;
+      coachView.note = null;
+      paintCoach();
+      const r = await askCoach(coachView.brief);
+      coachView.loading = false;
+      if (!r.ok) {
+        coachView.aiText = null;
+        coachView.note = `AI 这次没接上（${r.error}），先用本地版。`;
+        paintCoach();
+        return;
+      }
+      // 模型只许组织语言：出现清单外的数字、或者暗示「练了可以多吃」，一律退回本地版
+      const checked = checkCoachText(r.text, coachView.brief);
+      if (!checked.ok) {
+        coachView.aiText = null;
+        coachView.note = `AI 说的话里数字对不上（${checked.reason}），已换成本地版。`;
+        paintCoach();
+        return;
+      }
+      coachView.aiText = checked.text;
+      paintCoach();
+    });
+  });
+}
+
+function openCoachSheet() {
+  const brief = coachBriefNow();
+  if (!brief) return;
+  coachView = {
+    brief,
+    local: localCoachAdvice(brief),
+    aiText: null,
+    note: ai.configured ? null : 'AI 版要先在设置里配一个模型；上面这份是本地算的，不配也够用。',
+    loading: false,
+  };
+  paintCoach();
 }
 
 /** 数据与备份 */

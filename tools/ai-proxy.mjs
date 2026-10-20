@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { findPreset, normalizeAiConfigInput, publicAiConfig, maskKey } from '../js/providers.js';
-import { requestParse, requestPing, requestModels } from '../js/ai-core.js';
+import { requestParse, requestPing, requestModels, requestCoach } from '../js/ai-core.js';
 
 export const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 export const DEFAULT_MODEL = 'deepseek-chat';
@@ -147,6 +147,18 @@ export async function callUpstream({ text, meal, hour, config, fetchImpl = fetch
     text,
     meal,
     hour,
+    config: { baseUrl: config.baseUrl, model: config.model, apiKey: config.key },
+    fetchImpl,
+  });
+}
+
+/**
+ * 让电脑代问「教练怎么说」。跟解析那条一样，数字在手机本地算好，
+ * 这里只把事实清单递上去、把一段话递回来。
+ */
+export async function callCoach({ brief, config, fetchImpl = fetch }) {
+  return requestCoach({
+    brief,
     config: { baseUrl: config.baseUrl, model: config.model, apiKey: config.key },
     fetchImpl,
   });

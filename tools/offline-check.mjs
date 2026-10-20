@@ -7,6 +7,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
@@ -137,10 +138,12 @@ async function main() {
    * 实测踩过：改到 v13 了，自检却报 `fatloss-v11`，看起来"通过"，其实验的是两版之前的代码。
    * 这种假绿比失败更危险，所以宁可每次多花两秒重建 profile。
    */
-  try { fs.rmSync(path.join(outDir, 'chrome-offline'), { recursive: true, force: true, maxRetries: 3 }); } catch { /* 清不掉就继续 */ }
+  // 用独立临时资料夹而不是「固定目录 + 先删」：删不掉时（权限/沙箱）会带着旧 Service Worker 跑，
+  // 验的其实是上一版代码 —— 这个假绿/假红都骗过我们，索性每次新建一个。
+  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-offline-profile-'));
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
-    `--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(outDir, 'chrome-offline')}`,
+    `--remote-debugging-port=${PORT}`, `--user-data-dir=${profileDir}`,
     '--window-size=390,844', '--hide-scrollbars', 'about:blank',
   ], { stdio: 'ignore' });
 

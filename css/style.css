@@ -747,6 +747,19 @@ details[open] summary { margin-bottom: 4px; }
 .insight b { font-size: 13.5px; font-weight: 660; display: block; margin-bottom: 3px; }
 .insight p { font-size: 12px; line-height: 1.7; color: var(--ink-2); margin: 0; }
 
+/* 教练：一句话结论 + 几段人话，字号比正文略大一点，弹层里好读 */
+.coach-card { background: linear-gradient(150deg, #FFFCFA, #FFF7F4); }
+.coach-main p { margin: 0 0 9px; font-size: 14px; line-height: 1.75; color: var(--ink); }
+.coach-main p:last-child { margin-bottom: 0; }
+.coach-headline {
+  font-size: 11.5px;
+  color: var(--rose-deep);
+  font-weight: 660;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.coach-note { margin: 10px 0 0; }
+
 /* 模式切换（普通 / AI） */
 .mode-switch { margin-bottom: 14px; }
 .mode-head { font-size: 12.5px; font-weight: 650; color: var(--ink-2); margin-bottom: 8px; }

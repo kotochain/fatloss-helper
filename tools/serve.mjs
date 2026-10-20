@@ -18,7 +18,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
-  aiConfig, callUpstream, readApiKey, aiConfigStatus, saveConfigFromInput,
+  aiConfig, callUpstream, callCoach, readApiKey, aiConfigStatus, saveConfigFromInput,
   clearSavedConfig, testConnection,
 } from './ai-proxy.mjs';
 import { PRESETS } from '../js/providers.js';
@@ -106,6 +106,34 @@ export function createServer() {
         send(res, r.ok ? 200 : 400, JSON.stringify(r), TYPES['.json']);
       }).catch((err) => {
         send(res, 500, JSON.stringify({ ok: false, error: err.message }), TYPES['.json']);
+      });
+      return;
+    }
+
+    // AI 教练：数字在手机本地算好，这里只把事实清单递上去、把一段人话递回来
+    if (req.method === 'POST' && pathname === '/api/coach') {
+      let raw = '';
+      req.on('data', (c) => { raw += c; if (raw.length > 20000) req.destroy(); });
+      req.on('end', async () => {
+        let body = {};
+        try { body = JSON.parse(raw || '{}'); } catch { /* 下面统一报错 */ }
+        const brief = body.brief;
+        if (!brief || typeof brief !== 'object') {
+          return send(res, 400, JSON.stringify({ error: '没有收到教练需要的数据' }), TYPES['.json']);
+        }
+        const cfg = aiConfig(root);
+        if (!cfg.configured || !cfg.key) {
+          return send(res, 503, JSON.stringify({
+            error: '这台电脑上还没配置 AI 密钥。在「我的 → 设置 → AI 设置」填一下就行。',
+          }), TYPES['.json']);
+        }
+        try {
+          const r = await callCoach({ brief, config: cfg });
+          return send(res, 200, JSON.stringify(r), TYPES['.json']);
+        } catch (err) {
+          console.error('[AI] 教练失败：', err.message);
+          return send(res, 502, JSON.stringify({ error: err.message }), TYPES['.json']);
+        }
       });
       return;
     }

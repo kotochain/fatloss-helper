@@ -9,7 +9,7 @@
 
 import { publicAiConfig, normalizeAiConfigInput, findPreset } from './providers.js';
 import { readAiConfig, writeAiConfig, clearAiConfig, defaultStorage } from './ai-config.js';
-import { requestParse, requestPing, requestModels, requestLabelParse } from './ai-core.js';
+import { requestParse, requestPing, requestModels, requestLabelParse, requestCoach } from './ai-core.js';
 
 export { readAiConfig, writeAiConfig, clearAiConfig };
 
@@ -114,6 +114,52 @@ export async function askAi(text, ctx = {}, timeoutMs = 30000) {
   if (mode === 'relay') {
     const viaRelay = await askViaRelay(text, { meal: ctx.meal, hour }, timeoutMs);
     return viaRelay.ok ? viaRelay : { ok: false, error: viaRelay.error };
+  }
+
+  return { ok: false, error: '还没配置 AI' };
+}
+
+/**
+ * 让 AI 把教练建议说得更像人话。
+ *
+ * 输入是 js/coach.js 算好的事实清单（数字都在里面），输出只是一段文字。
+ * **调用方必须再用 checkCoachText 过一遍** —— 模型编数字是这个功能唯一的真风险。
+ * @returns {Promise<{ok:boolean, text?:string, source?:string, error?:string}>}
+ */
+export async function askCoach(brief) {
+  const local = readAiConfig();
+  const mode = local?.mode || 'direct';
+
+  if (mode === 'direct' && local?.baseUrl && local?.model) {
+    try {
+      const r = await requestCoach({
+        brief,
+        config: { baseUrl: local.baseUrl, model: local.model, apiKey: local.apiKey },
+      });
+      return { ok: true, source: 'direct', text: r.text };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+  if (mode === 'relay') {
+    try {
+      const res = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief }),
+        signal: AbortSignal.timeout(30000),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) return { ok: false, error: data?.error || `中转服务返回 ${res.status}` };
+      if (!data?.text) return { ok: false, error: '中转服务返回的格式不对' };
+      return { ok: true, source: 'relay', text: String(data.text) };
+    } catch (err) {
+      const msg = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+        ? 'AI 响应太慢（超过 30 秒）'
+        : '连不上中转服务';
+      return { ok: false, error: msg };
+    }
   }
 
   return { ok: false, error: '还没配置 AI' };

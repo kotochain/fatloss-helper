@@ -1,9 +1,9 @@
 /* 离线缓存：装到手机主屏幕后，没有网络也能打开。
  * 改动文件后把 CACHE 的版本号加一，手机上刷新一次就会拿到新版本。 */
 
-const CACHE = 'fatloss-v20';
+const CACHE = 'fatloss-v21';
 // 版本号同时给页面用（排查「她手机上到底是哪一版」时，一眼就能看到）
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 const ASSETS = [
   './',
   './index.html',
@@ -26,6 +26,7 @@ const ASSETS = [
   './js/store.js',
   './js/schema.js',
   './js/insights.js',
+  './js/coach.js',
   './icons/icon.svg',
   // 桌面图标也进缓存：manifest 在离线时也要能拿到图标，不然装到桌面后图标可能空一块
   './icons/icon-192.png',

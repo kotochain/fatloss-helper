@@ -85,6 +85,12 @@ const MUTATIONS = [
   { file: 'js/exercise.js', from: 'return pool?.mets ?? 4;', to: 'return 4;', why: '老记录没有 METs 时要退回旧 METs 池（跳绳 11 ≠ 快走 4）' },
   { file: 'js/exercise.js', from: 'cardio: CARDIO.filter((e) => e.equipment.some((q) => avail.has(q))),', to: 'cardio: CARDIO.filter(() => true),', why: '只给今天器械做得了的动作（不能推荐跑步机的动作给只有椭圆机的人）' },
   { file: 'js/exercise.js', from: 'const sinceMonday = (dt.getDay() + 6) % 7;', to: 'const sinceMonday = dt.getDay();', why: '一周从周一算起（写成 getDay 就成了周日算起，周日的记录会串到上一周）' },
+  // ── 第九轮：AI 教练（数字本地算，AI 只组织语言）──
+  { file: 'js/coach.js', from: 'const gramsByBudget = Math.floor((budget / f.kcal) * 100 / 10) * 10;', to: 'const gramsByBudget = 300;', why: '教练建议的份量必须受剩余额度限制（不能劝她吃超）' },
+  { file: 'js/coach.js', from: '  if (bad.length) {', to: '  if (false) {', why: 'AI 说了清单外的数字必须退回本地版（模型编数字是这个功能唯一的真风险）' },
+  { file: 'js/coach.js', from: "if (/(运动|锻炼|练了|健身|跑步)", to: "if (/(游泳)", why: '不许暗示「运动了可以多吃」（红线）' },
+  { file: 'js/coach.js', from: '    if (totals.kcal < MIN_DAY_KCAL) continue;', to: '    if (false) continue;', why: '只记了一百多卡的那天不算「记了」（否则平均热量被拉低）' },
+  { file: 'js/coach.js', from: '  if (remainingKcal <= 0) {', to: '  if (false) {', why: '已经吃超了就不能再给加餐建议' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

@@ -49,7 +49,7 @@ const STATIC_PORT = 4198;
 const CDP_PORT = 9339;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const hits = { models: 0, chat: 0, authSeen: [] };
+const hits = { models: 0, chat: 0, coach: 0, authSeen: [] };
 
 /** 假服务商：跨域头齐全，模拟允许浏览器直连的厂商 */
 function startFakeProvider() {
@@ -87,6 +87,19 @@ function startFakeProvider() {
         const body = JSON.parse(raw || '{}');
         const userText = body.messages?.find((m) => m.role === 'user')?.content || '';
         const isPing = userText.includes('回复两个字');
+        const isCoach = userText.includes('请把上面的情况说给她听');
+        // 教练：第一次照清单里的数字说（应当通过校验），第二次故意编一个数字（应当退回本地版）。
+        // 两个数字都从「给 AI 的事实清单」里现取，确保第一次是真的合格，不是碰巧。
+        if (isCoach) {
+          hits.coach += 1;
+          const remain = (userText.match(/还能吃 (-?\d+) kcal/) || [])[1] || '0';
+          const gap = (userText.match(/还差 (\d+) 克/) || [])[1] || '0';
+          const coachText = hits.coach === 1
+            ? `今天还能吃 ${remain} kcal，蛋白质还差 ${gap} 克。先把蛋白补上，主食和蔬菜按剩下的额度配，晚上别空着肚子。`
+            : '今天还能吃 999 kcal，蛋白质还差 12 克，随便吃。';
+          res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ choices: [{ message: { content: coachText } }] }));
+        }
         const content = isPing
           ? '可以'
           : JSON.stringify({
@@ -311,7 +324,57 @@ async function main() {
   const shot = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-direct-ai.png'), Buffer.from(shot.data, 'base64'));
 
-  console.log('\n=== 四、日历与日期选择 ===');
+  console.log('\n=== 四、教练：AI 只组织语言，数字本地算 ===');
+  await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);
+  await sleep(400);
+  await evaluate(`document.querySelector('[data-act="coach"]')?.click()`);
+  await sleep(400);
+  const coachLocal = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    正文: document.querySelector('#sheetBody')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+    有AI按钮: !!document.querySelector('[data-coach="ai"]'),
+  }))()`);
+  console.log(`本地版 → 「${coachLocal.标题}」｜${coachLocal.正文.slice(0, 90)}…`);
+  if (!coachLocal.标题.includes('教练')) problems.push('教练弹层没打开');
+  if (!coachLocal.有AI按钮) problems.push('配了 AI 却没有「让 AI 说细一点」的按钮');
+
+  await evaluate(`document.querySelector('[data-coach="ai"]')?.click()`);
+  await sleep(1500);
+  const coachAi = await evaluate(`(() => {
+    const body = document.querySelector('#sheetBody')?.textContent.replace(/\\s+/g, ' ').trim() || '';
+    return { 正文: body, 用AI版: body.includes('教练说的'), 没接上: body.includes('没接上') };
+  })()`);
+  console.log(`AI 版 → ${coachAi.正文.slice(0, 100)}…`);
+  if (hits.coach < 1) problems.push('点了「让 AI 说细一点」却没有真的发请求');
+  if (coachAi.没接上) problems.push(`AI 教练这条链路没通：${coachAi.正文.slice(0, 80)}`);
+  if (!coachAi.用AI版) problems.push('AI 教练的结果没有显示出来');
+
+  const shotCoachAi = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-coach-ai.png'), Buffer.from(shotCoachAi.data, 'base64'));
+
+  // 第二次：模型编了一个清单外的数字（999），必须整段退回本地版，不能给她看
+  await evaluate(`document.querySelector('[data-coach="ai"]')?.click()`);
+  await sleep(1500);
+  const coachBad = await evaluate(`(() => {
+    const body = document.querySelector('#sheetBody')?.textContent.replace(/\\s+/g, ' ').trim() || '';
+    return {
+      正文: body,
+      有数字校验提示: body.includes('数字对不上'),
+      提示点出999: body.includes('999'),
+      显示本地版: body.includes('按你今天的记录算的'),
+      显示了编的话: body.includes('随便吃'),
+    };
+  })()`);
+  console.log(`编数字那次 → ${coachBad.正文.slice(0, 90)}…`);
+  if (hits.coach < 2) problems.push('第二次「让 AI 说」没有发请求');
+  if (!coachBad.有数字校验提示) problems.push('AI 编了清单外的数字，界面没有提示已换成本地版');
+  if (!coachBad.显示本地版) problems.push('AI 编数字后没有退回本地建议');
+  if (coachBad.显示了编的话) problems.push('AI 编的那段话被显示出来了（数字校验没生效）');
+  if (!coachBad.提示点出999) problems.push('退回本地版时没说清是哪个数字对不上');
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(300);
+
+  console.log('\n=== 五、日历与日期选择 ===');
   await evaluate(`document.querySelector('#dateLabel').click()`);
   await sleep(600);
   const cal = await evaluate(`(() => {
