@@ -6,6 +6,9 @@
   "description": "减脂小助手：记录饮食、算热量与碳蛋脂、给出饮食和运动建议",
   "scripts": {
     "test": "node --test \"tests/*.test.mjs\"",
-    "serve": "node tools/serve.mjs"
+    "serve": "node tools/serve.mjs",
+    "check": "node tools/check-all.mjs fast",
+    "check:full": "node tools/check-all.mjs full",
+    "check:live": "node tools/check-all.mjs live"
   }
 }

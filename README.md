@@ -253,6 +253,10 @@ git push -u origin main
 ## 四、给开发者的部分
 
 ```bash
+npm run check           # 懒人版：一条命令跑完 7 项本地检查（自动起停服务，约 4 分钟）
+npm run check:full      # 全套 11 项（含全按钮清扫、AI 失败注入、五种屏排版，约 10 分钟）
+npm run check:live      # 只测线上：文件逐字节一致 + 真打开线上网址跑一遍（需联网）
+
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
 npm test                       # 260 个自动化测试
 node tools/mutate-check.mjs    # 反向验证：故意改坏 49 处代码，确认测试符合预期（在临时副本里做）
