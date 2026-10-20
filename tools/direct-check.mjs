@@ -327,6 +327,9 @@ async function main() {
   console.log('\n=== 四、教练：AI 只组织语言，数字本地算 ===');
   await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);
   await sleep(400);
+  // 刚才记了一笔会弹「第一次记录」的庆祝层，先关掉，不然截图和点击都被它挡着
+  await evaluate(`document.querySelector('#celebrateOk')?.click()`);
+  await sleep(300);
   await evaluate(`document.querySelector('[data-act="coach"]')?.click()`);
   await sleep(400);
   const coachLocal = await evaluate(`(() => ({
