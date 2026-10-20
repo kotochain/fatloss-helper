@@ -34,6 +34,7 @@ import { buildMealPlan, buildDailyTips } from './recommend.js';
 import { insights, insightHint } from './insights.js';
 import {
   SCHEMA_VERSION, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
+  readUnreadable,
 } from './schema.js';
 import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
@@ -53,7 +54,32 @@ const $ = (sel, root = document) => root.querySelector(sel);
  */
 let startupNotice = null;
 
+/**
+ * 资料够不够用 —— 只有这几项都齐了才算能算目标。
+ *
+ * 为什么要单独判一次：这个应用的目标数字全靠 profile 里的身高/体重/年龄/性别，
+ * 少一项 calcTargets 就会抛错。真出过一次（缺 weightKg 的存档直接崩到今天页），
+ * 而**迁移写错字段名时就是这个症状**。宁可把她当「还没填资料」，也不能让她看到崩溃页。
+ */
+function usableProfile(p) {
+  if (!p || typeof p !== 'object') return false;
+  const inRange = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+  return (p.sex === 'female' || p.sex === 'male')
+    && inRange(p.heightCm, 100, 250)
+    && inRange(p.weightKg, 25, 300)
+    && inRange(p.age, 10, 120);
+}
+
 let state = load();
+// 资料存在但残缺：退回「还没填资料」，但原始资料原样留着，不删她的东西
+if (state && state.profile && !usableProfile(state.profile)) {
+  state.legacyProfile = state.profile;
+  state.profile = null;
+  startupNotice = {
+    kind: 'error',
+    text: '这台手机上的资料读不完整（身高/体重/年龄/性别至少缺一项），没法算目标。以前的记录都还在，重新填一下资料就好。',
+  };
+}
 let view = 'today';
 let dateKey = todayKey();
 let planSeed = 0;
@@ -91,13 +117,21 @@ function load() {
   return res.data;
 }
 
+/** 上一次存盘成功了没有 —— 用来拦住「存不进去」之后又报喜 */
+let lastSaveOk = true;
+
 function save() {
   try {
     state.schemaVersion = SCHEMA_VERSION;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    lastSaveOk = true;
+    return true;
   } catch (err) {
-    toast('存不进去了（浏览器存储可能满了），请到「体重」页导出备份。');
+    // 存不进手机（存储满/隐私模式）时，只报这一句实话；后面不许再弹「记上了」。
+    lastSaveOk = false;
+    toast('存不进去了（浏览器存储可能满了），请到「我的 → 数据与备份」导出，再清理一下空间。');
     console.error(err);
+    return false;
   }
 }
 
@@ -112,7 +146,7 @@ function save() {
  * 餐单给不到目标时，由餐单自己如实说明差多少、怎么补（见 recommend.js 的 deviationNote）。
  */
 function targets() {
-  if (!state.profile) return null;
+  if (!state.profile || !usableProfile(state.profile)) return null;
   return calcTargets(state.profile);
 }
 
@@ -308,6 +342,7 @@ function handleAction(act, data) {
     case 'crash-other': return goView('today');
     case 'crash-export': return exportData();
     case 'recover': return openRecoverSheet();
+    case 'export-unreadable': return exportUnreadable();
     case 'wipe': return openWipeSheet();
     case 'onboard': return onboard({ step: 'intro' });
     case 'go-log':
@@ -517,7 +552,28 @@ function goView(next) {
 }
 
 function renderWelcome() {
+  /*
+   * 存档读不出来（损坏 / 来自更新版本）时，欢迎页必须**一直**说这件事。
+   * 以前只弹一个 6 秒的浮层，关掉之后页面跟全新用户一模一样 ——
+   * 她既不知道记录出了问题，也不知道再去点「看一个填好的例子」会把原来的内容盖掉。
+   * 原始内容已经在 schema.js 里另存了一份（UNREADABLE_KEY），这里负责让她看见、能导出来。
+   */
+  const trouble = startupNotice?.kind === 'error'
+    ? `
+    <div class="card" style="border:1px solid #F3C7CF;background:#FFF6F7">
+      <div class="card-title">⚠️ 有一份记录没读出来</div>
+      <p class="small" style="margin:0 0 8px">${esc(startupNotice.text)}</p>
+      <p class="tiny muted" style="margin:0 0 12px">
+        原始内容我已经原样留在这台手机里了，没有删。你可以先导出一份发我，或者重新开始 —— 原来的记录不会因为重新开始就被抹掉。
+      </p>
+      <div class="btn-row">
+        <button class="btn ghost grow" data-act="export-unreadable">导出一份原始文件</button>
+        <button class="btn ghost grow" data-act="recover">试试恢复</button>
+      </div>
+    </div>`
+    : '';
   app.innerHTML = `
+    ${trouble}
     <div class="card">
       <div class="onboard-hero">🍚</div>
       <div class="card-title">知道自己在吃多少，比少吃更有用</div>
@@ -1090,9 +1146,9 @@ function bindTrainingPane() {
       const saved = describeTraining(item, state.profile?.weightKg ?? 60);
       // 备注写的是「这一次」的情况，记完清掉；动作和时长留着（下次多半差不多，省一步）
       trainingPick.note = '';
-      save();
+      const stored = save();
       // 反馈落在「记了什么 + 大约多少 + 写到哪天」，不说「成功」这种空话
-      toast(`记上了：${saved.name} ${saved.minutes} 分钟，大约 ${saved.kcal} kcal${dateKey === todayKey() ? '' : `（写到${dayLabel(dateKey)}）`}。`);
+      if (stored) toast(`记上了：${saved.name} ${saved.minutes} 分钟，大约 ${saved.kcal} kcal${dateKey === todayKey() ? '' : `（写到${dayLabel(dateKey)}）`}。`);
       render();
     } catch (err) {
       // 时长没填 / 填了 0：store 会拒绝，这里把原因原样说给她听
@@ -1157,12 +1213,17 @@ async function runQuickParse(text) {
         { meal: res.meal || meal, items: res.items, questions: res.questions },
         meal,
       );
-      items = norm.items;
-      questions = norm.questions;
       // AI 认出来了但本地库里没有的，要原样带出去给她看（以前是直接丢掉，她以为记上了）
       unmatchedItems = norm.unmatchedItems || [];
-      source = 'ai';
-      if (res.note) aiNote = res.note;
+      if (norm.items.length) {
+        items = norm.items;
+        questions = norm.questions;
+        // **只有真的有条目落到本地库，才算「AI 识别」。**
+        // 以前这里先写 source='ai' 再判断：AI 返回的名字一个都匹配不上时，
+        // 下面会走离线兜底，于是离线解析出来的条目被标成「AI 识别」—— 来源造假。
+        source = 'ai';
+        if (res.note) aiNote = res.note;
+      }
     } else {
       aiError = res.error || 'AI 没解析出内容';
     }
@@ -1236,6 +1297,10 @@ function drawDraft() {
           ? `认出来了，但这些食物本地库里没有：<b>${missing.map((x) => esc(x.name)).join('、')}</b>。所以一条都没记上。`
           : '这句我没认出来，所以一条都没记上。'}
       </div>
+      ${draft.aiError ? `<div class="warn" style="margin-bottom:8px">
+        AI 这次也没成功：${esc(draft.aiError)}
+        —— 所以不是这句话奇怪，是 AI 那条路没通。可以去「我的 → 设置 → AI 设置」检查一下。
+      </div>` : ''}
       ${missing.length ? `<p class="tiny muted" style="margin:0 0 10px">
         可以直接告诉我更常见的叫法（例如把「小肉丸」说成「猪肉丸」），
         或者用「手动记一笔」自己搜。宁可现在多花十秒，也别记一条 0 kcal 的假数据。
@@ -1338,11 +1403,13 @@ function drawDraft() {
         fromDescription: true,
       }, it.grams);
     }
-    save();
+    const stored = save();
     const n = draft.items.length;
     draft = null;
     closeSheet();
     render();
+    // 存不进去时 save() 已经说了实话，这里不许再报喜（否则「存不进去」和「成了」同时出现）
+    if (!stored) return;
     // 先给一句落在「记录」这件事上的反馈，再检查有没有解锁新徽章
     const t = targets();
     const msg = afterLogMessage(state, savedMeal, t?.proteinG || 60);
@@ -1712,8 +1779,9 @@ function renderProgress() {
     if (!(v > 20 && v < 300)) return toast('体重请填 20~300 之间的数字。');
     addWeight(state, dateKey, v);
     if (state.profile) state.profile.weightKg = v; // 体重变了，目标跟着重算
-    save();
+    const stored = save();
     render();
+    if (!stored) return;   // 存不进去就别报喜
     toast('记上了。目标热量会跟着新体重重算。');
     checkNewAchievements();
   }
@@ -1924,6 +1992,8 @@ function openCustomFoodSheet() {
 function celebrate(opts) {
   const { emoji, title, sub, badge } = opts;
   if (state?.settings?.celebrations === false) return;
+  // 刚刚存盘失败：这时候庆祝「解锁徽章 / 成了」是假的，先不庆祝
+  if (!lastSaveOk) return;
   const el = document.createElement('div');
   el.className = `celebrate${opts.special ? ' special' : ''}`;
   el.innerHTML = `
@@ -2001,7 +2071,10 @@ function useMode() {
 
 function setMode(next) {
   state.settings = { ...(state.settings || {}), mode: next === 'ai' ? 'ai' : 'basic' };
-  if (next !== 'ai') clearDraft();
+  // 切回普通模式时把没确认的 AI 解析草稿丢掉：那份草稿带着 AI 的追问，
+  // 模式都关了还留着它，下次点开会莫名其妙。这里曾经写成调用 clearDraft()，
+  // 而那个函数**根本不存在** —— 点「普通模式」直接抛 ReferenceError，切不回去。
+  if (next !== 'ai') draft = null;
   save();
   render();
 }
@@ -2212,7 +2285,8 @@ function openWipeSheet() {
     title: '从头开始',
     body: `
       <div class="warn">
-        这会删掉这台手机上的<b>全部记录</b>：${totalDays ? `${totalDays} 天的饮食和运动、` : ''}体重、徽章、设置。
+        这会删掉这台手机上的<b>全部记录</b>：${totalDays ? `${totalDays} 天的饮食和运动、` : ''}体重、徽章、设置，
+        还有升级前自动留的那份快照（「找回记录」里会一起没有）。
         <br>删掉之后不能撤销。
       </div>
       <div class="set-note">
@@ -2285,7 +2359,17 @@ function openBackupSheet() {
   const size = (() => {
     try { return Math.round((localStorage.getItem(STORAGE_KEY) || '').length / 1024); } catch { return 0; }
   })();
-  const days = Object.keys(state.days || {}).length;
+  /*
+   * 「X 天的记录」只算**真的有东西**的日子。
+   * 以前直接数 days 的键：今天页一渲染就会顺手建出「今天」这一格，洞察那段更狠，
+   * 会把最近 14 天全建出来 —— 于是她只记了 1 天，这里却写着「14 天的记录」。
+   */
+  const days = Object.keys(state.days || {}).filter((key) => {
+    const d = state.days[key];
+    if (!d) return false;
+    const foods = Object.values(d.meals || {}).flat().filter((e) => e && e.food).length;
+    return foods > 0 || (d.exercises || []).length > 0 || String(d.note || '').trim().length > 0;
+  }).length;
 
   openSheet({
     title: '数据与备份',
@@ -2927,7 +3011,9 @@ function openProfileSheet({ firstTime = false, onSaved = null } = {}) {
       };
       update();
       body.addEventListener('input', update);
-      body.querySelectorAll('.chips').forEach((box) => {
+      // 注意这里是 `.chips, .seg`：「想做什么」那一组用的是 .seg 容器，
+      // 只挑 .chips 会让「减脂 / 维持体重」两个按钮根本绑不上（点了没反应，属于最气人的那种 bug）。
+      body.querySelectorAll('.chips, .seg').forEach((box) => {
         box.addEventListener('click', (e) => {
           const btn = e.target.closest('.chip');
           if (!btn) return;
@@ -2990,15 +3076,31 @@ function openWeightSheet() {
 
 /* ── 导入导出 ────────────────────────────── */
 
-function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+/** 下载一段文本。导出存档、导出「读不出来的原始内容」都走这里，行为保持一致。 */
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `减脂记录-${todayKey()}.json`;
+  a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportData() {
+  downloadText(`减脂记录-${todayKey()}.json`, JSON.stringify(state, null, 2));
   toast('已导出。文件在手机的「下载」里，换设备时用「导入存档」恢复。');
+}
+
+/**
+ * 导出那份「读不出来」的原始内容。
+ * 程序解析不了它，但我可能能救 —— 让她先存下来发我，比让她自己抄现实。
+ */
+function exportUnreadable() {
+  const kept = readUnreadable(localStorage);
+  if (!kept) { toast('没有找到留存的原始内容。'); return; }
+  downloadText(`读不出来的存档-${todayKey()}.json`, kept.raw);
+  toast('已导出原始文件。可以把它发给我看看能不能救回来。');
 }
 
 function importData() {

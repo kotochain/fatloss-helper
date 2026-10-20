@@ -24,6 +24,14 @@ export const LEGACY_VERSION = SCHEMA_VERSION;
 export const STATE_KEY = 'fatloss.state.v2';
 /** 迁移前的自动快照 */
 export const BACKUP_KEY = 'fatloss.backup';
+/**
+ * 「读不出来的存档」原样留一份。
+ *
+ * 为什么要有这个键：主存档损坏、或者来自更新版本时，程序只能当作新用户打开。
+ * 她一旦点了「看一个填好的例子」或者走完引导，主键就被覆盖了 —— 原始内容就真的没了。
+ * 先原样抄一份到旁边，覆盖也不会丢，之后还能导出给我看 / 手工抢救。
+ */
+export const UNREADABLE_KEY = 'fatloss.state.unreadable';
 /** 旧版本（最初几个版本用过这个键名） */
 export const LEGACY_KEYS = ['fatloss.state.v1', 'fatloss_state'];
 
@@ -183,6 +191,32 @@ export function clearBackup(storage) {
 }
 
 /**
+ * 把读不出来的原始文本留一份。存不下也不能因此打不开应用，所以吞掉异常。
+ * @returns {boolean} 是否留成功
+ */
+export function keepUnreadable(storage, raw, reason = '') {
+  if (!raw) return false;
+  try {
+    storage.setItem(UNREADABLE_KEY, JSON.stringify({ savedAt: new Date().toISOString(), reason, raw }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 读回那份原始文本（用于导出给作者排查） */
+export function readUnreadable(storage) {
+  try {
+    const raw = storage.getItem(UNREADABLE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed.raw === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 从存储里读存档并迁移到当前版本。
  * 会顺带处理：老键名、坏 JSON、未来版本、迁移前备份。
  */
@@ -206,12 +240,18 @@ export function loadState(storage, { key = STATE_KEY, legacyKeys = LEGACY_KEYS }
   try {
     parsed = JSON.parse(raw);
   } catch {
+    // 先把原始内容留一份，再报错 —— 界面会退回「新用户」，她一点按钮主键就会被覆盖
+    keepUnreadable(storage, raw, '存档不是合法 JSON（可能是写入时断电/浏览器清理）');
     return { ok: false, error: '存档读不出来（文件损坏）。可以试试「导入备份」恢复，或从自动快照恢复。' };
   }
 
   const from = detectVersion(parsed);
   const result = migrateToCurrent(parsed);
-  if (!result.ok) return { ...result, usedKey };
+  if (!result.ok) {
+    // 未来版本 / 迁移失败：同样先留一份再拒绝读取，绝不覆盖
+    keepUnreadable(storage, raw, result.error);
+    return { ...result, usedKey };
+  }
 
   if (from < SCHEMA_VERSION) {
     // 只有真的要升级时才留快照（避免每次打开都写一遍）

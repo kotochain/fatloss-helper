@@ -58,6 +58,19 @@ test('记录太少时一条洞察都不给 —— 宁可不说，也不要用 1 
   assert.deepEqual(insights(s, { proteinG: target.proteinG }), [], '3 天还不够，不该给结论');
 });
 
+test('算洞察不能往存档里写东西 —— 光打开页面不该把「空日子」记成有记录', () => {
+  // 真出过的错：看数据的函数用了 getDay()（没有就新建），于是打开一次今天页，
+  // 最近 14 天全被写进存档，「数据与备份」显示「14 天的记录」（其实只记了 1 天），
+  // 导出的备份文件里也塞进 13 个空日子。看数据必须是只读的。
+  const s = base();
+  logFullDay(s, todayKey());
+  const before = JSON.stringify(s.days);
+  insights(s, { proteinG: target.proteinG, targetCalories: target.targetCalories, days: 14 });
+  insightHint(s);
+  assert.equal(JSON.stringify(s.days), before, '算洞察前后，days 必须一模一样');
+  assert.deepEqual(Object.keys(s.days), [todayKey()], '不能凭空多出别的日期');
+});
+
 test('数据不够时给的是「再记几天」，不是假结论', () => {
   const s = base();
   const h = insightHint(s);

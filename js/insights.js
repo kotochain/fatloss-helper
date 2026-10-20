@@ -12,7 +12,7 @@
  *  3) **不把估算说成精确值**。所有数字都是「约」，且明确这是她自己的记录算出来的。
  */
 
-import { todayKey, shiftDate, getDay } from './store.js';
+import { todayKey, shiftDate } from './store.js';
 import { findFood } from './foods.js';
 
 /** 一天至少要有这些热量才算「记了正餐」，避免只记一颗鸡蛋就算一天 */
@@ -34,7 +34,10 @@ function dayRows(state, days, today) {
   const rows = [];
   for (let i = 0; i < days; i++) {
     const key = shiftDate(today, -i);
-    const day = getDay(state, key);
+    // 这里**不能**用 getDay()：它会「没有就新建」，于是光打开今天页就把最近 14 天
+    // 全写进了存档，导致「数据与备份」显示「14 天的记录」（其实只记了 1 天），
+    // 导出文件里也塞进 13 个空日子。看数据的地方必须是只读的。
+    const day = state.days?.[key] || { meals: {}, exercises: [] };
     let kcal = 0;
     let protein = 0;
     let fat = 0;

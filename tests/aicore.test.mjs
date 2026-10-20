@@ -14,7 +14,7 @@ import {
   humanizeNetworkError, requestParse, requestPing, requestModels,
 } from '../js/ai-core.js';
 import { readAiConfig, writeAiConfig, clearAiConfig, AI_CONFIG_KEY } from '../js/ai-config.js';
-import { modelsUrl, parseModelsResponse, normalizeAiConfigInput, publicAiConfig } from '../js/providers.js';
+import { modelsUrl, parseModelsResponse, normalizeAiConfigInput, publicAiConfig, PRESETS } from '../js/providers.js';
 
 /** 假的 localStorage，用来隔离测试 */
 function fakeStorage() {
@@ -110,11 +110,27 @@ test('保存时留空密钥表示不改（避免误清）', () => {
   assert.equal(config.model, 'm2');
 });
 
-test('不允许浏览器直连的服务商，默认模式自动落到中转', () => {
-  const { config } = normalizeAiConfigInput({ presetId: 'zhipu', apiKey: 'k' });
-  assert.equal(config.mode, 'relay', '智谱不允许浏览器直连，应当默认走中转');
-  const ds = normalizeAiConfigInput({ presetId: 'deepseek', apiKey: 'k' });
-  assert.equal(ds.config.mode, 'direct', 'DeepSeek 允许直连，应当默认直连');
+test('服务商「不允许浏览器直连」时，默认模式自动落到中转', () => {
+  // 这条测的是「directCall:false → 默认走中转」这个逻辑本身。
+  // 曾经用智谱当例子，但 2026-10-20 实测它其实允许浏览器直连（OPTIONS 和 POST 都回
+  // access-control-allow-origin），所以不能拿真服务商冒充「不允许」——
+  // 那会把一条错的事实写成测试，改了事实测试就红，而不是逻辑坏了才红。
+  const blocked = {
+    id: '__blocked__', name: '假装不让直连', baseUrl: 'https://blocked.example.com/v1',
+    model: 'm', keyUrl: '', note: '', directCall: false,
+  };
+  PRESETS.push(blocked);
+  try {
+    const { config } = normalizeAiConfigInput({ presetId: blocked.id, apiKey: 'k' });
+    assert.equal(config.mode, 'relay', '标记为不能直连的服务商，应当默认走中转');
+  } finally {
+    PRESETS.pop();
+  }
+  // 允许直连的服务商（今天实测过的）默认就该是直连，少一步配置
+  for (const id of ['deepseek', 'zhipu']) {
+    const { config } = normalizeAiConfigInput({ presetId: id, apiKey: 'k' });
+    assert.equal(config.mode, 'direct', `${id} 允许浏览器直连，应当默认直连`);
+  }
 });
 
 test('给界面看的配置不含密钥，只含掩码', () => {

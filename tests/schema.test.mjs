@@ -13,7 +13,7 @@ import path from 'node:path';
 import {
   SCHEMA_VERSION, STATE_KEY, BACKUP_KEY, LEGACY_KEYS, MIGRATIONS,
   migrateToCurrent, detectVersion, looksLikeState, loadState, saveBackup, readBackup,
-  clearBackup, describeMigration,
+  clearBackup, describeMigration, readUnreadable,
 } from '../js/schema.js';
 import { emptyState, addFoodEntry, addWeight, demoProfile, todayKey } from '../js/store.js';
 import { findFood } from '../js/foods.js';
@@ -194,6 +194,43 @@ test('读取存档：文件坏掉时给出可操作的提示，而不是白屏',
   assert.equal(r.ok, false);
   assert.ok(r.error.includes('损坏') || r.error.includes('读不出来'), r.error);
   assert.ok(r.error.includes('备份') || r.error.includes('快照'), '要告诉她怎么恢复');
+});
+
+test('读不出来的存档：原始内容必须原样留一份（否则点一次按钮就没了）', () => {
+  // 真实场景：主存档损坏 / 来自更新版本 → 界面退回「新用户」→
+  // 她点「看一个填好的例子」或走完引导，主键立刻被覆盖。
+  // 如果不在读失败时另存一份，原来那份就永久消失了。
+  const broken = '{这不是 JSON';
+  const st = fakeStorage({ [STATE_KEY]: broken });
+  const r = loadState(st);
+  assert.equal(r.ok, false);
+
+  const kept = readUnreadable(st);
+  assert.ok(kept, '读失败时必须留一份原始内容');
+  assert.equal(kept.raw, broken, '留下的必须是原始文本，不能是转述');
+  assert.ok(kept.savedAt, '要记下什么时候留的');
+
+  // 模拟她自己点了「看一个填好的例子」：主键被覆盖，留存的那份还在
+  st.setItem(STATE_KEY, JSON.stringify({ ...emptyState(), schemaVersion: SCHEMA_VERSION }));
+  assert.equal(readUnreadable(st).raw, broken, '覆盖主存档不能把留存的原始内容也弄丢');
+});
+
+test('未来版本的存档：拒绝读取，但也要留一份（不能因为拒绝就丢）', () => {
+  const future = { schemaVersion: SCHEMA_VERSION + 1, days: { '2026-10-12': { meals: {} } } };
+  const st = fakeStorage({ [STATE_KEY]: JSON.stringify(future) });
+  const r = loadState(st);
+  assert.equal(r.ok, false);
+  assert.equal(r.needsApp, true);
+  assert.equal(st.getItem(STATE_KEY), JSON.stringify(future), '拒绝读取不等于可以覆盖');
+  assert.equal(readUnreadable(st).raw, JSON.stringify(future), '也要留一份原始内容');
+});
+
+test('留不下的情况不能反过来把应用弄崩（存储写满）', () => {
+  const st = fakeStorage({ [STATE_KEY]: '{坏的' });
+  st.setItem = () => { throw new Error('QuotaExceededError'); };
+  const r = loadState(st);
+  assert.equal(r.ok, false, '存不下也要照常返回「读不出来」');
+  assert.equal(readUnreadable(st), null, '没留下就是没有，别假装有');
 });
 
 test('读取存档：没有存档时返回空，而不是报错', () => {

@@ -4,8 +4,10 @@
  * 用户只需要「选一家、贴一个密钥」，其他都由这里带出来。
  * 所有预设都是 OpenAI 兼容接口（/chat/completions + /models），所以只有一套调用代码。
  *
- * directCall 表示「浏览器能不能直接调这家」——我用 OPTIONS 预检实测过（2026-10-16）：
+ * directCall 表示「浏览器能不能直接调这家」——我用 OPTIONS 预检 + 实际 POST 实测过。
  * 允许的话，手机可以完全不依赖电脑上的中转服务；不允许的只能走中转（或本地模型）。
+ * 这一栏会直接决定用户看到的是「填个密钥就能用」还是「还要在电脑上开中转」，
+ * 所以**允许/不允许都必须是实测过的**，不能凭印象。下次复核时间见各条的 verifiedAt。
  */
 
 export const PRESETS = [
@@ -46,9 +48,11 @@ export const PRESETS = [
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     model: 'glm-4-flash',
     keyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
-    note: 'glm-4-flash 有免费额度，适合先试。注意：这家不允许网页直接调用，需要配合中转服务用。',
-    directCall: false,
-    verifiedAt: '2026-10-16',
+    note: 'glm-4-flash 有免费额度，适合先试。',
+    // 2026-10-20 复核：OPTIONS 预检 + 无密钥 POST 都回 access-control-allow-origin，
+    // 也就是浏览器可以直连。之前记成「不允许直连」是错的，会让用户白搭一套中转服务。
+    directCall: true,
+    verifiedAt: '2026-10-20',
   },
   {
     id: 'siliconflow',
