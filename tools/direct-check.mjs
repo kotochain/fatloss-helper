@@ -91,8 +91,10 @@ function startFakeProvider() {
           ? '可以'
           : JSON.stringify({
             meal: 'dinner',
-            items: [{ name: '牛肉面', grams: 550 }, { name: '卤蛋', grams: 50 }],
-            questions: ['面是大碗还是普通碗？'],
+            // 故意用离线解析认不出来的说法：如果 AI 的结果被丢掉、退回离线解析，
+            // 这三条一条都记不上（以前就是这样，界面还显示「AI 识别」，骗过了所有自检）。
+            items: [{ name: '炒河粉', grams: 200 }, { name: '小肉丸', grams: 60 }, { name: '骨肉相连', grams: 80 }],
+            questions: ['炒河粉的碗大概多大？'],
           });
         res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ choices: [{ message: { content } }] }));
@@ -163,7 +165,7 @@ async function main() {
   const BASE = `http://127.0.0.1:${STATIC_PORT}`;
   // 先把调试端口清干净：上一次没退干净的 Chrome 会占着端口，
   // 新实例静默失败、等待循环却连上僵尸端口 —— 表现为「只有第一个脚本能过」。
-  await freePortAndWait(PORT);
+  await freePortAndWait(CDP_PORT);
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
     `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${path.join(outDir, 'chrome-direct')}`,
@@ -175,10 +177,10 @@ async function main() {
     let lastErr = '';
     let ready = false;
     while (Date.now() < deadline) {
-      try { await (await fetch(`http://127.0.0.1:${PORT}/json/version`)).json(); ready = true; break; } catch (err) { lastErr = err.message; }
+      try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json(); ready = true; break; } catch (err) { lastErr = err.message; }
       await sleep(400);
     }
-    if (!ready) throw new Error(`无头 Chrome 在 40 秒内没有起来（端口 ${PORT}）：${lastErr}`);
+    if (!ready) throw new Error(`无头 Chrome 在 40 秒内没有起来（端口 ${CDP_PORT}）：${lastErr}`);
   }
   const target = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const client = await connect(target.webSocketDebuggerUrl);
@@ -271,7 +273,7 @@ async function main() {
   console.log('\n=== 三、直连解析一句话（中转服务不存在，只能靠直连） ===');
   await evaluate(`(() => {
     const ta = document.querySelector('#quickText');
-    ta.value = '晚上吃了碗牛肉面加卤蛋';
+    ta.value = '中午吃了半碗炒河粉加了三个小肉丸两串骨肉相连';
     document.querySelector('#quickParse').click();
   })()`);
   await sleep(3000);
@@ -284,7 +286,17 @@ async function main() {
   const shotDraft = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-draft-sheet.png'), Buffer.from(shotDraft.data, 'base64'));
   if (!parsed.方式.includes('AI 识别')) problems.push(`没有走 AI 直连，实际：${parsed.方式}`);
-  if (parsed.条目.length < 2) problems.push('解析结果不完整');
+  /**
+   * 关键断言：AI 说的三条必须**真的被记上**。
+   *
+   * 这条守的是一个隐藏很久的 bug：AI 只返回 {name, grams}（提示词禁止它给热量），
+   * 而旧代码要求 matchedFoodId 或 kcal 才算数 —— 于是 AI 的结果全被丢掉，
+   * 悄悄退回离线解析。离线解析恰好认得「牛肉面」，所以以前的自检全绿，看不出问题。
+   * 换成离线解析认不出的说法（炒河粉/小肉丸/骨肉相连），才能证明结果真的来自 AI。
+   */
+  if (parsed.条目.length < 3) problems.push(`AI 认出 3 条但只记上 ${parsed.条目.length} 条 —— AI 的结果可能又被丢掉了`);
+  const kcalNum = Number(String(parsed.合计 || '').replace(/[^0-9.]/g, ''));
+  if (!(kcalNum > 500)) problems.push(`这三样算下来应当 600~800 kcal，实际「${parsed.合计}」`);
 
   await evaluate(`document.querySelector('#draftSave').click()`);
   await sleep(500);

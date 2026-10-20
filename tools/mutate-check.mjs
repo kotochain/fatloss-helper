@@ -60,6 +60,11 @@ const MUTATIONS = [
   { file: 'js/recommend.js', from: 'if (proteinRatio < 0.9) {', to: 'if (false) {', why: '蛋白不足时说明里必须点出来' },
   { file: 'js/recommend.js', from: 'if (fatRatio < 0.85) {', to: 'if (false) {', why: '脂肪不足时说明里必须点出来' },
   // ── 第六轮：本地周洞察 ──
+  // ── 第七轮：AI 解析后按名字匹配本地食物（修的是一个「AI 模式从来没工作过」的 bug）──
+  { file: 'js/mealparse.js', from: 'const hit = matchFoodByName(raw.name);', to: 'const hit = null;', why: 'AI 认出的食物必须能在本地库里匹配上（否则一条都记不上）' },
+  { file: 'js/mealparse.js', from: 'if (out.items.length) {', to: 'if (true) {', why: '一条都没记上时不该再追问（答不上来）' },
+  { file: 'js/mealparse.js', from: "out.unmatchedItems.push({ name: String(raw?.name || '?').trim(), grams: Math.round(grams) });", to: "out.unmatchedItems.push({ name: '?', grams: 0 });", why: '没匹配上的食物要原样告诉她（名字和克数）' },
+  { file: 'js/foods.js', from: 'if (!best || best.score < minScore) return null;', to: 'if (!best) return null;', why: '匹配分数太低宁可不算（给错食物的热量比没有更糟）' },
   { file: 'js/insights.js', from: 'if (logged.length < 4) return [];', to: 'if (false) return [];', why: '记录太少时不许给「规律」（数据不够编出来的结论是害人的）' },
   { file: 'js/insights.js', from: 'if (a.length < minPerGroup || b.length < minPerGroup) return null;', to: 'if (false) return null;', why: '两组样本都不够时不许做对比' },
   // ── 第七轮：份量不确定时反问她 ──

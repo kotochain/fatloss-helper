@@ -17,7 +17,7 @@
  * 界面会拿 portionChoices 里的档位反问她一句，而不是默默按默认值记上。
  */
 
-import { FOODS, findFood, parseAmount } from './foods.js';
+import { FOODS, findFood, parseAmount, matchFoodByName } from './foods.js';
 
 /** 单份默认克数：她没说份量时按「正常一份」估，而不是统一 100 克 */
 export const FOOD_DEFAULT_GRAMS = {
@@ -628,53 +628,66 @@ export function parseDescription(raw, defaultMeal = null) {
 
 /**
  * 整理 AI 返回的条目：热量一律用本地数据算，AI 只负责听懂和给份量。
- * AI 返回格式（约定）：
- *   { meal: 'lunch', items: [{ name, grams, matchedFoodId?, note? }], questions: [string] }
- * 对不上的条目会把 AI 给的热量标注出来，但仍以本地估算为准（并标成需要确认）。
+ *
+ * AI 返回格式（约定）：{ meal, items: [{ name, grams, note? }], questions: [string] }
+ *
+ * **重要修正**：这里以前要求 AI 提供 `matchedFoodId`（数据库 id）或 `kcal`，
+ * 但系统提示词明确禁止 AI 输出热量，也从没让它给 id —— 结果**每一条都被丢掉**，
+ * AI 模式实际上从来没工作过（只是白花一次调用，然后悄悄退回离线解析）。
+ * 现在改成：拿到 AI 给的名字，**由本地自己匹配食物**（matchFoodByName）。
+ *
+ * 匹配不上也不静默丢弃：放进 `unmatched` 让界面明确告诉她「认出来了，但库里没有」。
  */
 export function normalizeAiItems(aiResult, defaultMeal = null) {
-  const out = { items: [], meal: aiResult?.meal || defaultMeal, questions: [], unmatched: [] };
+  const out = { items: [], meal: aiResult?.meal || defaultMeal, questions: [], unmatched: [], unmatchedItems: [] };
   const list = Array.isArray(aiResult?.items) ? aiResult.items : [];
   for (const raw of list) {
     const grams = Number(raw?.grams);
     if (!(grams > 0) || grams > 5000) continue;
-    const food = raw?.matchedFoodId ? findFood(raw.matchedFoodId) : null;
+
+    // 先看 AI 有没有直接给 id（一般没有），没有就按名字在本地库里找
+    let food = raw?.matchedFoodId ? findFood(raw.matchedFoodId) : null;
+    let matchedBy = food ? 'AI 给的 id' : null;
+    if (!food && raw?.name) {
+      const hit = matchFoodByName(raw.name);
+      if (hit) { food = hit.food; matchedBy = hit.reason; }
+    }
+
     if (food) {
       const nut = scaleNutrition({ kcal: food.kcal, protein: food.protein, fat: food.fat, carb: food.carb }, grams, 100);
+      const nameDiffers = raw?.name && normLoose(raw.name) !== normLoose(food.name);
       out.items.push({
         name: raw.name || food.name,
         grams: Math.round(grams),
         ...nut,
-        confidence: raw.confidence === 'high' ? 'high' : 'medium',
+        confidence: 'high',
         needsConfirm: false,
         source: 'ai',
         foodId: food.id,
-        note: raw.note || null,
+        foodName: food.name,
+        // AI 说的名字和库里名字不一样时告诉她对应到哪一个，避免她以为记错了
+        note: nameDiffers ? `按「${food.name}」算的（${matchedBy}）` : (raw.note || null),
       });
     } else {
-      // AI 认出了东西但本地库里没有：用 AI 给的热量，但必须让她确认
-      const kcal = Number(raw?.kcal) || 0;
-      if (!(kcal > 0)) { out.unmatched.push(raw?.name || '?'); continue; }
-      out.items.push({
-        name: raw.name || '（AI 估算）',
-        grams: Math.round(grams),
-        kcal: Math.round(kcal),
-        protein: Number(raw.protein) || 0,
-        fat: Number(raw.fat) || 0,
-        carb: Number(raw.carb) || 0,
-        confidence: 'low',
-        needsConfirm: true,
-        question: `「${raw.name}」不在本地食物库里，热量 ${Math.round(kcal)} kcal 是估算的，对吗？`,
-        source: 'ai-estimate',
-        note: raw.note || '这条来自 AI 估算，不是本地数据',
-      });
-      out.unmatched.push(raw.name);
+      // 认出来了但库里没有：**保留在 unmatched 里给用户看**，不要悄悄扔掉
+      out.unmatched.push(String(raw?.name || '?').trim());
+      out.unmatchedItems.push({ name: String(raw?.name || '?').trim(), grams: Math.round(grams) });
     }
   }
-  for (const q of Array.isArray(aiResult?.questions) ? aiResult.questions : []) {
-    if (typeof q === 'string' && q.trim()) out.questions.push(q.trim());
+
+  // 有问题要问，但**只有真有条目时才问** ——
+  // 一条都没记上却问「这碗多大」是答不上来的（用户看到的就是三个粉色气泡 + 0 kcal）
+  if (out.items.length) {
+    for (const q of Array.isArray(aiResult?.questions) ? aiResult.questions : []) {
+      if (typeof q === 'string' && q.trim()) out.questions.push(q.trim());
+    }
   }
   return out;
+}
+
+/** 比较名字用的宽松归一化 */
+function normLoose(text) {
+  return String(text || '').toLowerCase().replace(/[\s·・,，。.、!！?？（）()【】\[\]\/\\-]/g, '');
 }
 
 /** 汇总一组条目 */

@@ -95,32 +95,65 @@ test('收敛上游结果：脏数据被丢掉，形状固定', () => {
   assert.deepEqual(out.questions, ['多大一碗？', 'q2'], '追问最多留 2 个');
 });
 
-test('AI 给的条目：本地库有的用本地热量，本地库没有的标成「需要确认」', () => {
+test('AI 给的条目：按名字在本地库里匹配，热量用本地数据算', () => {
+  // 这是修过一个严重 bug 之后的行为：
+  // 以前要求 AI 提供 matchedFoodId 或 kcal，但提示词禁止 AI 输出热量、也从没让它给 id
+  // —— 结果**每一条都被丢掉**，AI 模式实际上从来没工作过。
+  // 现在：AI 只给名字和克数，本地按名字匹配。
   const out = normalizeAiItems({
     meal: 'lunch',
     items: [
-      { name: '鸡胸肉', grams: 150, matchedFoodId: 'chicken_breast' },
-      { name: '某网红轻食碗', grams: 300, kcal: 420, protein: 25, fat: 12, carb: 50 },
+      { name: '鸡胸肉', grams: 150 },
+      { name: '米饭', grams: 200 },
+      { name: '牛肉面', grams: 600 },
     ],
-    questions: ['轻食碗的酱放了吗？'],
+    questions: ['面多大一碗？'],
   });
-  assert.equal(out.items.length, 2);
-  const chicken = out.items[0];
-  assert.equal(chicken.foodId, 'chicken_breast');
-  assert.equal(chicken.kcal, 177, '本地库有的话，热量要用本地数据算（150 克 × 118/100）');
-  assert.equal(chicken.needsConfirm, false);
-
-  const unknown = out.items[1];
-  assert.equal(unknown.source, 'ai-estimate');
-  assert.equal(unknown.needsConfirm, true, '本地库没有的必须让她确认');
-  assert.ok(unknown.question.includes('估算'));
-  assert.deepEqual(out.unmatched, ['某网红轻食碗']);
+  assert.equal(out.items.length, 3, `三条都该记上，实际只记上 ${out.items.length} 条`);
+  assert.equal(out.items[0].foodId, 'chicken_breast');
+  assert.equal(out.items[0].kcal, 177, '150 克鸡胸 × 118/100');
+  assert.equal(out.items[1].foodId, 'rice_cooked');
+  assert.equal(out.items[2].foodId, 'beef_noodle', '牛肉面要用库里那条组合菜');
+  for (const it of out.items) {
+    assert.equal(it.source, 'ai');
+    assert.equal(it.needsConfirm, false, '匹配上的不需要她再确认');
+  }
 });
 
-test('AI 返回空条目时不会伪造数据', () => {
-  const out = normalizeAiItems({ items: [] });
+test('AI 认出但本地库里没有的：不记录、但要让她看见（不能静默丢弃）', () => {
+  const out = normalizeAiItems({
+    items: [
+      { name: '米饭', grams: 200 },
+      { name: '某网红限定轻食碗', grams: 300 },
+      { name: '另一个没听过的菜', grams: 150 },
+    ],
+    questions: ['酱放了吗？'],
+  });
+  assert.equal(out.items.length, 1, '只有能算的那条被记上');
+  assert.deepEqual(out.unmatched, ['某网红限定轻食碗', '另一个没听过的菜']);
+  assert.equal(out.unmatchedItems.length, 2);
+  assert.deepEqual(out.unmatchedItems[1], { name: '另一个没听过的菜', grams: 150 }, '要带上克数，界面上要告诉她');
+  // 关键：不许用 AI 编的热量
+  assert.equal(out.items.some((i) => i.source === 'ai-estimate'), false, '不许出现「AI 估算热量」的条目');
+});
+
+test('一条都没认出来时不问问题（问了也答不上来）', () => {
+  // 用户实际看到的：三个粉色追问气泡 + 「这一餐合计约 0 kcal」+ 还能点「记上」
+  const out = normalizeAiItems({ items: [], questions: ['碗有多大？', '肉丸多大？'] });
   assert.deepEqual(out.items, []);
-  assert.deepEqual(out.unmatched, []);
+  assert.deepEqual(out.questions, [], '没有条目时追问没有意义');
+});
+
+test('AI 的追问只在有条目时才带出来', () => {
+  const withItems = normalizeAiItems({ items: [{ name: '米饭', grams: 200 }], questions: ['一碗还是一小碗？'] });
+  assert.deepEqual(withItems.questions, ['一碗还是一小碗？']);
+});
+
+test('AI 说的名字和库里名字不同时，要说明按哪个算的', () => {
+  const out = normalizeAiItems({ items: [{ name: '炒河粉', grams: 200 }] });
+  assert.equal(out.items.length, 1);
+  assert.equal(out.items[0].foodId, 'fried_rice_noodle');
+  assert.ok(out.items[0].note.includes('炒河粉（干炒）'), `要告诉她按哪条算：${out.items[0].note}`);
 });
 
 test('密钥读取：环境变量优先，其次是密钥文件；都没有就返回 null', () => {

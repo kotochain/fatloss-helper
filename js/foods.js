@@ -155,7 +155,27 @@ export const FOODS = [
   { id: 'malatang', name: '麻辣烫（不喝汤）', category: 'dish', kcal: 130, protein: 7.0, fat: 8.0, carb: 8.0, servings: [['一份', 500]] },
   { id: 'salad_dressing', name: '沙拉酱（蛋黄酱类）', category: 'dish', kcal: 680, protein: 1.0, fat: 75.0, carb: 2.2, servings: [['一勺', 15]] },
   { id: 'chicken_salad', name: '鸡胸沙拉（少酱）', category: 'dish', kcal: 90, protein: 9.0, fat: 4.0, carb: 5.0, servings: [['一份', 300]] },
+  // ── 常见中式小吃/街边食物（2026-10-20 补）──
+  // 起因：用户说「半碗炒河粉加了三个小肉丸两串骨肉相连」，AI 认出来了但本地库里没有，
+  // 结果一条都记不上。这些都是中国人日常真的会吃的，缺了会直接影响记录准确度。
+  { id: 'fried_rice_noodle', name: '炒河粉（干炒）', category: 'dish', kcal: 190, protein: 6.5, fat: 8.0, carb: 24.0, servings: [['一份', 400], ['半份', 200]] },
+  { id: 'fried_noodle', name: '炒面', category: 'dish', kcal: 175, protein: 6.0, fat: 7.5, carb: 22.0, servings: [['一份', 400], ['半份', 200]] },
+  { id: 'fried_rice_dish', name: '炒饭（外卖）', category: 'dish', kcal: 165, protein: 5.5, fat: 6.5, carb: 22.0, servings: [['一份', 400], ['半份', 200]] },
+  { id: 'meatball_pork', name: '猪肉丸', category: 'protein', kcal: 220, protein: 12.0, fat: 15.0, carb: 8.0, servings: [['一个', 20], ['一串', 100]] },
+  { id: 'meatball_beef', name: '牛肉丸', category: 'protein', kcal: 170, protein: 17.0, fat: 8.0, carb: 6.0, servings: [['一个', 20], ['一串', 100]] },
+  { id: 'grilled_skewer', name: '骨肉相连（烤串）', category: 'dish', kcal: 235, protein: 15.0, fat: 17.0, carb: 5.0, servings: [['一串', 40]] },
+  { id: 'lamb_skewer', name: '羊肉串', category: 'dish', kcal: 250, protein: 18.0, fat: 19.0, carb: 1.0, servings: [['一串', 35]] },
+  { id: 'sausage_grilled', name: '烤肠', category: 'protein', kcal: 290, protein: 12.0, fat: 24.0, carb: 6.0, servings: [['一根', 70]] },
+  { id: 'hamburger', name: '汉堡', category: 'dish', kcal: 250, protein: 12.0, fat: 11.0, carb: 26.0, servings: [['一个', 200]] },
+  { id: 'fried_chicken_leg', name: '炸鸡腿', category: 'dish', kcal: 280, protein: 18.0, fat: 18.0, carb: 11.0, servings: [['一个', 120]] },
+  { id: 'luosifen', name: '螺蛳粉', category: 'dish', kcal: 115, protein: 5.0, fat: 4.5, carb: 14.0, servings: [['一碗', 600]] },
+  { id: 'hot_sour_noodle', name: '酸辣粉', category: 'dish', kcal: 125, protein: 3.5, fat: 5.0, carb: 17.0, servings: [['一碗', 500]] },
+  { id: 'liangpi', name: '凉皮', category: 'dish', kcal: 120, protein: 3.0, fat: 4.0, carb: 18.0, servings: [['一份', 300]] },
+  { id: 'hand_pancake', name: '手抓饼', category: 'dish', kcal: 330, protein: 6.0, fat: 20.0, carb: 31.0, servings: [['一个', 120]] },
+  { id: 'jianbing', name: '煎饼果子', category: 'dish', kcal: 250, protein: 8.5, fat: 12.0, carb: 28.0, servings: [['一个', 250]] },
+  { id: 'oden', name: '关东煮', category: 'dish', kcal: 90, protein: 6.0, fat: 4.0, carb: 7.0, servings: [['一串', 40]] },
 ];
+
 
 /** 除名称外还支持这些俗称搜索 */
 export const ALIASES = {
@@ -179,6 +199,22 @@ export const ALIASES = {
   black_coffee: ['美式', '咖啡'],
   stirfry_greens: ['炒菜', '青菜', '时蔬'],
   chicken_salad: ['沙拉', '轻食'],
+  fried_rice_noodle: ['炒河粉', '河粉', '炒粉', '干炒牛河', '炒米粉', '炒粿条'],
+  fried_noodle: ['炒面', '酱油炒面', '炒面条'],
+  fried_rice_dish: ['炒饭', '扬州炒饭', '外卖炒饭'],
+  meatball_pork: ['肉丸', '肉圆', '小肉丸', '猪肉丸子', '丸子'],
+  meatball_beef: ['牛肉丸', '撒尿牛丸', '牛肉丸子'],
+  grilled_skewer: ['骨肉相连', '烤串', '肉串', '烤骨肉相连'],
+  lamb_skewer: ['羊肉串', '烤羊肉串'],
+  sausage_grilled: ['烤肠', '热狗肠', '台湾烤肠'],
+  hamburger: ['汉堡', '汉堡包', '鸡肉堡', '牛肉堡'],
+  fried_chicken_leg: ['炸鸡腿', '炸鸡'],
+  luosifen: ['螺蛳粉', '螺丝粉'],
+  hot_sour_noodle: ['酸辣粉'],
+  liangpi: ['凉皮', '擀面皮'],
+  hand_pancake: ['手抓饼', '千层饼'],
+  jianbing: ['煎饼果子', '煎饼'],
+  oden: ['关东煮'],
   sweet_potato: ['地瓜', '番薯'],
   potato: ['马铃薯', '土豆'],
   corn: ['苞米', '棒子'],
@@ -240,6 +276,68 @@ function round1(v) {
 
 export function findFood(id) {
   return FOODS.find((f) => f.id === id) || null;
+}
+
+/** 名称归一化：去掉括号补充、空格、标点，方便比较 */
+function normName(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[（(][^）)]*[）)]/g, '')   // 「米饭（熟）」→「米饭」：括号里是生熟说明，不该影响匹配
+    .replace(/[\s·・,，。.、!！?？/\-]/g, '');
+}
+
+/**
+ * 按「名字」找本地食物 —— AI 只给名字和克数，热量必须由本地库算。
+ *
+ * 为什么要单独做这个：AI 返回的是 `{name, grams}`，没有数据库 id。
+ * 以前这里要求 AI 提供 id 或热量（`matchedFoodId` / `kcal`），
+ * 但提示词明确禁止 AI 输出热量 —— 结果**每一条都被丢掉**，AI 模式等于没工作。
+ *
+ * 返回 `{food, score, reason}` 或 null。宁可返回 null，也不要给一个错的食物：
+ * 匹配错了比没匹配上更糟（用户看到"炒河粉 116 kcal"会以为准，其实差了一倍）。
+ *
+ * @param {string} name
+ * @param {{ minScore?: number }} options
+ */
+export function matchFoodByName(name, { minScore = 70 } = {}) {
+  const q = normName(name);
+  if (!q) return null;
+
+  let best = null;
+  const consider = (food, score, reason) => {
+    if (!best || score > best.score) best = { food, score, reason };
+  };
+
+  for (const food of FOODS) {
+    const n = normName(food.name);
+    // 1) 名字完全一致（去掉括号说明后）
+    if (n === q) { consider(food, 100, '名字一致'); continue; }
+    // 2) 别名完全一致
+    const aliases = ALIASES[food.id] || [];
+    let aliasHit = null;
+    for (const a of aliases) {
+      if (normName(a) === q) { aliasHit = a; break; }
+    }
+    if (aliasHit) { consider(food, 95, `别名「${aliasHit}」`); continue; }
+    // 3) 一方包含另一方，且重叠部分够长（避免「河粉」匹配到「粉蒸肉」这种）
+    const short = n.length <= q.length ? n : q;
+    const long = n.length <= q.length ? q : n;
+    if (short.length >= 2 && long.includes(short) && short.length / long.length >= 0.5) {
+      consider(food, 70 + Math.round((short.length / long.length) * 20), '名字包含');
+      continue;
+    }
+    // 4) 别名包含：AI 说「炒河粉」，库里「米粉/河粉（熟）」的别名有「河粉」
+    for (const a of aliases) {
+      const na = normName(a);
+      if (na.length < 2) continue;
+      if (q.includes(na) && na.length / q.length >= 0.5) {
+        consider(food, 65 + Math.round((na.length / q.length) * 15), `别名包含「${a}」`);
+      }
+    }
+  }
+
+  if (!best || best.score < minScore) return null;
+  return best;
 }
 
 /**

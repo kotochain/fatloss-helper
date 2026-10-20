@@ -1148,6 +1148,7 @@ async function runQuickParse(text) {
   let source = 'offline';
   let aiError = null;
   let aiNote = null;
+  let unmatchedItems = [];
 
   if (ai.configured) {
     const res = await askAi(text, { meal });
@@ -1158,6 +1159,8 @@ async function runQuickParse(text) {
       );
       items = norm.items;
       questions = norm.questions;
+      // AI 认出来了但本地库里没有的，要原样带出去给她看（以前是直接丢掉，她以为记上了）
+      unmatchedItems = norm.unmatchedItems || [];
       source = 'ai';
       if (res.note) aiNote = res.note;
     } else {
@@ -1186,6 +1189,7 @@ async function runQuickParse(text) {
     source,
     aiError,
     note: aiNote,
+    unmatchedItems,
   };
   openDraftSheet();
 }
@@ -1222,8 +1226,28 @@ function applyDraftGrams(box, idx, grams) {
 function drawDraft() {
   const box = $('#draftHost') || $('#quickResult');
   if (!box || !draft) return;
-  if (!draft.items.length && !draft.questions.length) {
-    box.innerHTML = '<div class="warn" style="margin-top:10px">这句我没认出来。可以换种说法（比如「一碗牛肉面」），或者用下面的手动记一笔。</div>';
+  // 一条都没认出来：不许显示「记上」（记 0 条 = 留一条空记录，之后更乱）。
+  // 而且要分清两种情况：AI 认出来了但库里没有 vs 完全没听懂 —— 给她的建议完全不同。
+  if (!draft.items.length) {
+    const missing = draft.unmatchedItems || [];
+    box.innerHTML = `
+      <div class="warn" style="margin-top:10px">
+        ${missing.length
+          ? `认出来了，但这些食物本地库里没有：<b>${missing.map((x) => esc(x.name)).join('、')}</b>。所以一条都没记上。`
+          : '这句我没认出来，所以一条都没记上。'}
+      </div>
+      ${missing.length ? `<p class="tiny muted" style="margin:0 0 10px">
+        可以直接告诉我更常见的叫法（例如把「小肉丸」说成「猪肉丸」），
+        或者用「手动记一笔」自己搜。宁可现在多花十秒，也别记一条 0 kcal 的假数据。
+      </p>` : `<p class="tiny muted" style="margin:0 0 10px">换个更常见的说法试试，比如「一碗牛肉面」「两个鸡蛋一碗粥」。</p>`}
+      <button class="btn block" id="draftAgain">重新说一句</button>
+      <button class="btn ghost block" style="margin-top:8px" id="draftManual">手动记一笔</button>`;
+    $('#draftAgain', box)?.addEventListener('click', () => closeSheet());
+    $('#draftManual', box)?.addEventListener('click', () => {
+      closeSheet();
+      setTimeout(() => document.querySelector('#aiSettingsBtn')?.scrollIntoView({ block: 'center' }), 200);
+      toast('点下面的「手动记一笔」自己搜食物就行。');
+    });
     return;
   }
   const totals = sumItems(draft.items);
@@ -1234,6 +1258,10 @@ function drawDraft() {
       ${draft.aiError ? `｜AI 这次没成功：${esc(draft.aiError)}` : ''}
       ${draft.note ? `<br>${esc(draft.note)}` : ''}
     </div>
+    ${(draft.unmatchedItems || []).length ? `<div class="warn" style="margin-bottom:6px">
+      有 ${draft.unmatchedItems.length} 样没记上（本地库里没有）：<b>${draft.unmatchedItems.map((x) => esc(x.name)).join('、')}</b>
+      —— 可以手动补记，或者换成更常见的叫法。
+    </div>` : ''}
     ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
     <div style="margin-top:8px">
       ${draft.items.map((it, i) => `
