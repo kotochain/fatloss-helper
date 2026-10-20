@@ -1,9 +1,9 @@
 /* 离线缓存：装到手机主屏幕后，没有网络也能打开。
  * 改动文件后把 CACHE 的版本号加一，手机上刷新一次就会拿到新版本。 */
 
-const CACHE = 'fatloss-v18';
+const CACHE = 'fatloss-v19';
 // 版本号同时给页面用（排查「她手机上到底是哪一版」时，一眼就能看到）
-const APP_VERSION = 'v18';
+const APP_VERSION = 'v19';
 const ASSETS = [
   './',
   './index.html',
@@ -19,6 +19,7 @@ const ASSETS = [
   './js/ai.js',
   './js/ai-core.js',
   './js/ai-config.js',
+  './js/label.js',
   './js/providers.js',
   './js/achievements.js',
   './js/recommend.js',

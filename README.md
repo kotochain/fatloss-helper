@@ -266,6 +266,7 @@ node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换�
 # 审计工具（都是无头 Chrome，自己起服务、自己清端口/资料夹，可重复跑）
 node tools/live-audit.mjs                 # 打开真实地址走完整流程（默认线上网址；传本地地址可测本机）
 node tools/live-audit.mjs http://127.0.0.1:4173
+node tools/label-check.mjs     # 照包装营养成分表：手动填 + 拍照读表（假服务商，零费用）
 node tools/sweep-check.mjs     # 全界面按钮点击清扫：310 次点击，找「点不动 / 点了报错」
 node tools/resilience-check.mjs # AI 各种失败与畸形返回 + 存档损坏/未来版本/存储满
 node tools/layout-check.mjs    # 5 种屏幕尺寸 × 系统大字号：找横向溢出、被裁、点不到

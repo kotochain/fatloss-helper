@@ -21,7 +21,9 @@ import {
 import {
   askAi, aiStatus, currentAiConfig, saveAiConfigLocal, clearAiConfig,
   testConnection, fetchModels, relayStatus, presetDirectCall,
+  readLabelImage,
 } from './ai.js';
+import { labelToPer100, checkConsistency } from './label.js';
 import { PRESETS, findPreset } from './providers.js';
 import {
   achievements, plantState, weeklyReview, weeklyHighlight, afterLogMessage,
@@ -906,7 +908,7 @@ function bindFoodPane() {
     const meal = guessMeal();
     openAmountSheet(food, meal);
   });
-  $('#customFoodBtn').addEventListener('click', () => openCustomFoodSheet());
+  $('#customFoodBtn').addEventListener('click', () => openLabelSheet());
   bindQuickLog();
   $('#aiSettingsBtn')?.addEventListener('click', openAiSettingsSheet);
   app.querySelectorAll('[data-act="quick-add"]').forEach((el) => {
@@ -1795,7 +1797,8 @@ function openFoodSheet(mealKey) {
     title: `加到${slot.label}`,
     body: `
       <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off">
-      <div id="foodResults" style="margin-top:6px"></div>`,
+      <div id="foodResults" style="margin-top:6px"></div>
+      <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">📋 照包装营养成分表填（更准）</button>`,
     onMount: (body) => {
       const input = $('#foodSearch', body);
       const results = $('#foodResults', body);
@@ -1805,7 +1808,7 @@ function openFoodSheet(mealKey) {
           <div class="search-hit" data-pick="${f.id}">
             <span class="nm">${esc(f.name)}<em>每 100 克</em></span>
             <span class="kk">${f.kcal} kcal</span>
-          </div>`).join('') : '<div class="tiny muted">没搜到。可以用「记录」页里的自定义食物。</div>';
+          </div>`).join('') : '<div class="tiny muted">没搜到。可以用下面的「照包装营养成分表填」，或者回「记录」页手动记一笔。</div>';
       };
       draw();
       input.addEventListener('input', draw);
@@ -1816,6 +1819,10 @@ function openFoodSheet(mealKey) {
         openAmountSheet(food, mealKey);
       });
       setTimeout(() => input.focus(), 60);
+      $('#foodLabelBtn', body).addEventListener('click', () => {
+        closeSheet();
+        openLabelSheet(mealKey);
+      });
     },
   });
 }
@@ -1934,52 +1941,182 @@ function openExerciseSheet() {
 
 /* ── 弹层：自定义食物 ────────────────────── */
 
-function openCustomFoodSheet() {
+/**
+ * 把手机拍的照片压小再发出去。
+ * 原图动辄 3~8 MB，直接编码成 base64 会让请求变得很慢；长边 1400 足够看清营养成分表。
+ */
+function fileToCompressedDataUrl(file, maxEdge = 1400, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch (err) {
+        reject(err);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('这张图片打不开，换一张试试'));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * 照包装背面的「营养成分表」记一笔。
+ *
+ * 为什么值得单独做：预包装食品（调理鸡胸肉、酸奶、面包）和食物库里的「生鸡胸肉」不是一回事，
+ * 蛋白从 24 g 掉到 13.7 g 很常见（注水/淀粉/调味），借用食材条目会差 40%。
+ * 这里让她直接照包装填，记下来的就是包装上的数字。
+ *
+ * 拍照只是「帮她抄」，不是「帮她算」：AI 读出来的数字会填进同一个表单，
+ * 还是由她核对后保存；单位换算和 4/9/4 对账全在本地做（js/label.js）。
+ */
+function openLabelSheet(mealKey = null) {
+  const canPhoto = Boolean(ai.configured) && ai.mode !== 'relay';
+  const slot = MEAL_SLOTS.find((s) => s.key === mealKey) || null;
   openSheet({
-    title: '新增自定义食物',
+    title: slot ? `照包装记 → ${slot.label}` : '照包装营养成分表记',
     body: `
-      <p class="small muted" style="margin:0 0 12px">照包装背面的「营养成分表」抄，通常标的是每 100 克。如果标的是「每份」，就在下面填每份的克数。</p>
-      <label class="field"><span>名称</span><input type="text" id="cfName" placeholder="例如：XX 牌全麦面包"></label>
-      <label class="field"><span>一份是多少克</span><input type="number" id="cfBase" value="100" inputmode="decimal"></label>
+      <p class="small muted" style="margin:0 0 12px">
+        照包装背面的「营养成分表」填，以后按克数记就是准的。
+        <b>国内包装的能量大多写千焦</b>，选「千焦」直接抄数字，我帮你换成 kcal。
+      </p>
+      ${canPhoto ? `
+        <input type="file" id="labelFile" accept="image/*" style="display:none">
+        <button class="btn ghost block" id="labelShot">📷 拍营养成分表，自动读出来</button>
+        <p class="tiny muted" id="labelShotHint" style="margin:8px 0 0">照片只会发给你在设置里配置的 AI 服务商。读出来先核对，再保存。</p>
+      ` : `
+        <p class="tiny" style="margin:0 0 12px;color:var(--ink-3)">
+          拍照自动读需要先在「我的 → 设置 → AI 设置」配一个<b>支持看图的模型</b>（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
+          手动照包装填也一样准。
+        </p>
+      `}
+      <label class="field"><span>名称</span><input type="text" id="labelName" maxlength="30" placeholder="例如：低脂鸡胸肉"></label>
       <div class="grid2">
-        <label class="field"><span>热量 kcal</span><input type="number" id="cfKcal" inputmode="decimal"></label>
-        <label class="field"><span>蛋白质 g</span><input type="number" id="cfProtein" inputmode="decimal"></label>
-        <label class="field"><span>脂肪 g</span><input type="number" id="cfFat" inputmode="decimal"></label>
-        <label class="field"><span>碳水 g</span><input type="number" id="cfCarb" inputmode="decimal"></label>
+        <label class="field"><span>标签是按多少克标的</span><input type="number" id="labelBase" value="100" inputmode="decimal"></label>
+        <label class="field"><span>能量</span><input type="number" id="labelEnergy" inputmode="decimal" placeholder="例如 349"></label>
       </div>
-      <div id="cfPreview" class="warn info">填完后这里会显示每 100 克的数据，方便你核对。</div>`,
-    foot: '<button class="btn block" id="cfSave">保存</button>',
-    onMount: (body) => {
-      const val = (id) => Number($(`#${id}`, body).value);
-      const base = () => val('cfBase') || 100;
-      const preview = $('#cfPreview', body);
+      <div class="chips" id="labelUnit">
+        <button class="chip on" data-unit="kJ">千焦 kJ（国内最常见）</button>
+        <button class="chip" data-unit="kcal">千卡 kcal</button>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        <label class="field"><span>蛋白质 g</span><input type="number" id="labelProtein" inputmode="decimal"></label>
+        <label class="field"><span>脂肪 g</span><input type="number" id="labelFat" inputmode="decimal"></label>
+        <label class="field"><span>碳水 g</span><input type="number" id="labelCarb" inputmode="decimal"></label>
+      </div>
+      <div id="labelPreview" class="warn info" style="margin-top:10px">填完会自动算成每 100 克，并帮你核对一遍。</div>`,
+    foot: '<button class="btn block" id="labelSave">保存并记一笔</button>',
+    onMount: (body, foot) => {
+      const el = (id) => $(id, body);
+      let unit = 'kJ';
+      const preview = el('#labelPreview');
+
+      const readForm = () => ({
+        baseGrams: Number(el('#labelBase').value || 100),
+        energyValue: el('#labelEnergy').value === '' ? null : Number(el('#labelEnergy').value),
+        energyUnit: unit,
+        protein: el('#labelProtein').value === '' ? null : Number(el('#labelProtein').value),
+        fat: el('#labelFat').value === '' ? null : Number(el('#labelFat').value),
+        carb: el('#labelCarb').value === '' ? null : Number(el('#labelCarb').value),
+      });
+
       const update = () => {
-        const k = base();
-        const per100 = (x) => Math.round((val(x) / k) * 100 * 10) / 10;
-        preview.innerHTML = `每 100 克：${per100('cfKcal')} kcal · 蛋白 ${per100('cfProtein')} g · 脂肪 ${per100('cfFat')} g · 碳水 ${per100('cfCarb')} g`;
+        const r = labelToPer100(readForm());
+        if (!r.ok) {
+          preview.className = 'warn';
+          preview.textContent = r.error;
+          return;
+        }
+        const c = checkConsistency(r.per100);
+        preview.className = c.level === 'warn' ? 'warn' : 'warn info';
+        preview.innerHTML = `每 100 克：<b>${r.per100.kcal}</b> kcal · 蛋白 ${r.per100.protein} g · 脂肪 ${r.per100.fat} g · 碳水 ${r.per100.carb} g<br>${esc(c.message)}`;
       };
       body.querySelectorAll('input').forEach((i) => i.addEventListener('input', update));
-      $('#cfSave').addEventListener('click', () => {
-        const name = $('#cfName', body).value.trim();
-        if (!name) return toast('先填个名字。');
-        if (!(val('cfKcal') > 0)) return toast('热量要填大于 0 的数字。');
-        const k = base();
-        addCustomFood(state, {
-          name,
-          kcal: Math.round((val('cfKcal') / k) * 100 * 10) / 10,
-          protein: Math.round((val('cfProtein') / k) * 100 * 10) / 10,
-          fat: Math.round((val('cfFat') / k) * 100 * 10) / 10,
-          carb: Math.round((val('cfCarb') / k) * 100 * 10) / 10,
-          baseGrams: k,
-          servings: [['一份', k]],
+      el('#labelUnit').addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-unit]');
+        if (!btn) return;
+        unit = btn.dataset.unit;
+        el('#labelUnit').querySelectorAll('[data-unit]').forEach((b) => b.classList.toggle('on', b === btn));
+        update();
+      });
+      update();
+
+      // 拍照 -> 读数字 -> 填进表单（还是要她核对一遍）
+      if (canPhoto) {
+        const fileInput = el('#labelFile');
+        const hint = el('#labelShotHint');
+        el('#labelShot').addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async () => {
+          const file = fileInput.files && fileInput.files[0];
+          if (!file) return;
+          hint.textContent = '正在读这张图…（一般 5~15 秒）';
+          try {
+            const dataUrl = await fileToCompressedDataUrl(file);
+            const r = await readLabelImage(dataUrl);
+            if (!r.ok) {
+              hint.textContent = `没读出来：${r.error}`;
+              return;
+            }
+            const fill = (id, v) => { if (v !== null && v !== undefined && v !== '') el(id).value = v; };
+            fill('#labelName', r.name);
+            fill('#labelBase', r.baseGrams || 100);
+            fill('#labelEnergy', r.energy ? r.energy.value : null);
+            if (r.energy && r.energy.unit) {
+              unit = r.energy.unit;
+              el('#labelUnit').querySelectorAll('[data-unit]').forEach((b) => b.classList.toggle('on', b.dataset.unit === unit));
+            }
+            fill('#labelProtein', r.protein);
+            fill('#labelFat', r.fat);
+            fill('#labelCarb', r.carb);
+            update();
+            const empty = !r.energy && r.protein === null && r.fat === null && r.carb === null;
+            hint.textContent = empty
+              ? '这张图里没读出数字，可能是拍糊了或者不是营养成分表。可以重拍，或者手动填。'
+              : '读出来了，核对一下下面的数字再保存。';
+          } catch (err) {
+            hint.textContent = `读书失败：${err.message}`;
+          }
         });
-        save();
+      }
+
+      $('#labelSave', foot).addEventListener('click', () => {
+        const name = el('#labelName').value.trim();
+        if (!name) return toast('先填个名字，方便以后搜。');
+        const r = labelToPer100(readForm());
+        if (!r.ok) return toast(r.error);
+        const base = Number(el('#labelBase').value || 100);
+        const food = addCustomFood(state, {
+          name,
+          kcal: r.per100.kcal,
+          protein: r.per100.protein,
+          fat: r.per100.fat,
+          carb: r.per100.carb,
+          baseGrams: base,
+          servings: [['一份', base]],
+        });
+        const stored = save();
         closeSheet();
         view = 'log';
         document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'log'));
         render();
-        toast('已保存，之后在「记录」和搜索里都能找到。');
+        if (!stored) return;
+        toast(`已存成「${name}」，每 100 克 ${r.per100.kcal} kcal`);
         checkNewAchievements();
+        // 存完顺手记这一笔 —— 她的目的就是现在吃的东西
+        setTimeout(() => openAmountSheet(food, mealKey || quickMealHint || guessMeal()), 250);
       });
     },
   });

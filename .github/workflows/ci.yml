@@ -102,6 +102,12 @@ jobs:
           CHROME_PATH: /usr/bin/google-chrome
         run: node tools/live-audit.mjs http://127.0.0.1:4173
 
+      - name: 照包装营养成分表（手动填 + 拍照读表）
+        timeout-minutes: 5
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node tools/label-check.mjs
+
       - name: AI 失败路径与存档异常
         timeout-minutes: 8
         env:

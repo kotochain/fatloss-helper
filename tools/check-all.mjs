@@ -124,6 +124,7 @@ async function main() {
 
   // 自己起服务的（不需要 4173）
   await run('浏览器直连 AI（本地假服务商，零费用）', 'tools/direct-check.mjs');
+  await run('照包装营养成分表（手动填 + 拍照读表）', 'tools/label-check.mjs');
   if (mode === 'full') {
     await run('AI 失败路径与存档异常', 'tools/resilience-check.mjs');
     await run('全界面按钮清扫（310 次点击）', 'tools/sweep-check.mjs');

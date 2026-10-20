@@ -184,3 +184,115 @@ export async function requestModels({ baseUrl, apiKey, fetchImpl = fetch }) {
   if (!models.length) throw new Error('这家服务没有返回可用的模型列表，可以手动填模型名');
   return models;
 }
+
+/* ── 读营养成分表（拍照） ─────────────────────
+ *
+ * 这一块和「解析一句话」的原则是反过来的，写清楚免得以后有人以为红线破了：
+ *  - 解析一句话：**不许模型输出任何营养数字**，热量由本地食物库算；
+ *  - 读营养成分表：**必须**让模型把包装上印的数字读出来 —— 但只许「读」，不许换算、
+ *    不许估算、看不清就填 null。读回来的数字还要过本地校验（单位、4/9/4 对账）
+ *    并由她确认后才保存。算术仍然在本地，AI 只是 OCR。
+ */
+
+export function buildLabelPrompt() {
+  return [
+    '你是营养成分表读取器。用户会给你一张食品包装背面的「营养成分表」照片。',
+    '你只做一件事：把表里印的数字原样读出来。不要换算、不要估算、不要补充表里没有的数字。',
+    '',
+    '要求：',
+    '1. 默认按「每 100 克」输出；如果标签写的是「每份」，就按每份的数值输出，同时给出 baseGrams（一份多少克）。',
+    '2. 能量按标签上的**原始单位**返回：unit 填 "kJ"（千焦）或 "kcal"（千卡），value 填数字。不要替用户换算。',
+    '3. 蛋白质、脂肪、碳水化合物的单位都是克。',
+    '4. name 用包装上最显眼的品名，尽量短（不超过 20 字）；读不到就留空字符串。',
+    '5. 任何一个数字看不清就填 null，**绝对不要猜**。',
+    '6. 如果图片里没有营养成分表，输出 {"error":"没有找到营养成分表"}。',
+    '7. 只输出 JSON，不要解释文字。',
+    '',
+    '输出格式：',
+    '{"name":"低脂鸡胸肉","baseGrams":100,"energy":{"value":349,"unit":"kJ"},"protein":13.7,"fat":0.7,"carb":5.3}',
+  ].join('\n');
+}
+
+/** 模型返回的 content 可能是字符串，也可能是 [{type:'text',text}] 数组 */
+function contentToText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => (typeof part === 'string' ? part : part?.text || '')).join('');
+  }
+  return '';
+}
+
+/**
+ * 把模型读出来的表收敛成固定形状：只认合理数字，越界一律当作「没读到」。
+ * 不在这里换算单位 —— 单位换算留给本地 label.js，方便单独测试。
+ */
+export function normalizeLabelResult(raw) {
+  const num = (v, max) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= max ? n : null;
+  };
+  const energyRaw = raw && typeof raw.energy === 'object' ? raw.energy : {};
+  const energyValue = num(energyRaw.value, 100000);
+  const unitRaw = String(energyRaw.unit || '').toLowerCase();
+  const unit = unitRaw === 'kj' ? 'kJ' : unitRaw === 'kcal' ? 'kcal' : null;
+  const baseGrams = num(raw?.baseGrams, 5000);
+  return {
+    name: typeof raw?.name === 'string' ? raw.name.trim().slice(0, 20) : '',
+    baseGrams: baseGrams && baseGrams > 0 ? baseGrams : null,
+    energy: energyValue === null ? null : { value: energyValue, unit },
+    protein: num(raw?.protein, 100),
+    fat: num(raw?.fat, 100),
+    carb: num(raw?.carb, 100),
+  };
+}
+
+/**
+ * 请求模型读一张营养成分表照片。
+ * @param {{imageDataUrl:string, config:{baseUrl:string, model:string, apiKey:string}, fetchImpl?:Function}} opts
+ */
+export async function requestLabelParse({ imageDataUrl, config, fetchImpl = fetch }) {
+  if (!/^data:image\//.test(String(imageDataUrl || ''))) throw new Error('图片格式不对（需要 data:image/...）');
+  let res;
+  try {
+    res = await fetchImpl(`${String(config.baseUrl).replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: 'system', content: buildLabelPrompt() },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '这是包装上的营养成分表，把数字读出来。' },
+              { type: 'image_url', image_url: { url: imageDataUrl } },
+            ],
+          },
+        ],
+        temperature: 0,
+        max_tokens: 500,
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS + 15000),
+    });
+  } catch (err) {
+    throw new Error(humanizeNetworkError(err, config.baseUrl));
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    // 大量文字模型会直接拒绝：不支持 image_url / 不是多模态模型
+    if (/image|vision|multimodal|content type|unsupported/i.test(body)) {
+      throw new Error('当前这个模型看不了图片。换一个支持看图的模型（例如 qwen-vl-plus、glm-4v、gpt-4o-mini），或者直接手动填 —— 数字都一样准。');
+    }
+    throw new Error(humanizeHttpError(res.status, body, { model: config.model }));
+  }
+  const data = await res.json();
+  const text = contentToText(data?.choices?.[0]?.message?.content);
+  if (!text) throw new Error('模型没有返回内容');
+  const parsed = extractJson(text);
+  if (parsed?.error) throw new Error(String(parsed.error).slice(0, 80));
+  return normalizeLabelResult(parsed);
+}

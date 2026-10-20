@@ -85,7 +85,7 @@ const INTERFACE_ORDER = [
   ['sheet-weight', '弹层·记体重'],
   ['sheet-growth', '弹层·我的成长'],
   ['sheet-insights', '弹层·你的规律（经验总结）'],
-  ['sheet-custom-food', '弹层·新增自定义食物'],
+  ['sheet-custom-food', '弹层·照包装营养成分表'],
   ['sheet-plan-sub', '弹层·替代动作'],
   ['sheet-calendar', '弹层·日历'],
   ['sheet-settings', '弹层·设置'],
@@ -947,11 +947,11 @@ async function runPass(size, { passId, passLabel, scale, captureAll }) {
   });
   await closeSheetNow();
 
-  // ── 弹层 6：新增自定义食物 ──
-  await runStep('sheet-custom-food', '弹层·新增自定义食物', 'sheet', async () => {
+  // ── 弹层 6：照包装营养成分表（旧版是「新增自定义食物」，元素从 #cfName 换成 #labelName）──
+  await runStep('sheet-custom-food', '弹层·照包装营养成分表', 'sheet', async () => {
     await goLogFood();
     await click('#customFoodBtn');
-    await waitSheetEl('#cfName');
+    await waitSheetEl('#labelName');
   });
   await closeSheetNow();
 

@@ -9,7 +9,7 @@
 
 import { publicAiConfig, normalizeAiConfigInput, findPreset } from './providers.js';
 import { readAiConfig, writeAiConfig, clearAiConfig, defaultStorage } from './ai-config.js';
-import { requestParse, requestPing, requestModels } from './ai-core.js';
+import { requestParse, requestPing, requestModels, requestLabelParse } from './ai-core.js';
 
 export { readAiConfig, writeAiConfig, clearAiConfig };
 
@@ -52,6 +52,32 @@ export async function aiStatus() {
       : { configured: false, mode: 'relay', model: local.model || null, reason: '设置成「走中转服务」，但电脑上的服务没开或没配密钥' };
   }
   return { configured: false, mode: local.mode || null, reason: '还没配置 AI' };
+}
+
+/**
+ * 拍一张营养成分表 -> 把数字读出来（只支持直连）。
+ *
+ * 为什么只支持直连：电脑上的中转服务只转发「文字解析」那一个接口，图片不经过它。
+ * 返回的是**原始读数**（可能带千焦），单位换算、对账、保存都由界面那层做，她确认后才落库。
+ */
+export async function readLabelImage(imageDataUrl) {
+  const local = readAiConfig();
+  const configured = Boolean(local?.baseUrl && local?.model && local?.apiKey);
+  if (!configured) {
+    return { ok: false, error: '还没配置 AI。可以手动照包装填，数字一样准。' };
+  }
+  if (local.mode === 'relay') {
+    return { ok: false, error: '拍照读表需要「手机直连」模式（图片不经过电脑中转）。也可以手动填。' };
+  }
+  try {
+    const r = await requestLabelParse({
+      imageDataUrl,
+      config: { baseUrl: local.baseUrl, model: local.model, apiKey: local.apiKey },
+    });
+    return { ok: true, ...r };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
