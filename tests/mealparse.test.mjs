@@ -186,3 +186,22 @@ test('档位函数的边界：没有食物数据、份量不合理时不能崩',
   const big = buildPortionChoices(findFood('rice_cooked'), 3000);
   assertChoicesSane({ grams: 3000, portionChoices: big }, '3000 克');
 });
+
+test('组合菜不会抢走后面食材的份量（issue #3）', () => {
+  // 「红烧肉配了一碗米饭」：一碗是米饭的，红烧肉按自己的一份算。
+  // 以前红烧肉会把「一碗」抢走（350 克红烧肉 1330 kcal），米饭只剩「小碗 130 克」。
+  const r = parseDescription('晚饭红烧肉配了一碗米饭，还有炒青菜');
+  const rice = r.items.find((i) => i.name.includes('米饭'));
+  const pork = r.items.find((i) => i.name.includes('红烧肉'));
+  assert.ok(rice && pork, '米饭和红烧肉都要在');
+  assert.equal(rice.grams, 180, `一碗米饭应当是 180 克，实际 ${rice.grams}`);
+  assert.equal(pork.grams, 150, `红烧肉该按库里的一份 150 克算，实际 ${pork.grams} 克`);
+});
+
+test('组合菜「一碗」= 一份，不是通用碗重 350 克', () => {
+  // 同一个意思的两种说法不能差出 200 kcal：以前「吃了碗牛肉面」=600 克、「一碗牛肉面」=350 克
+  const a = item('中午吃了一碗牛肉面', '牛肉面');
+  const b = item('中午吃了碗牛肉面', '牛肉面');
+  assert.equal(a.grams, b.grams, `两种说法必须一致：${a.grams} 克 vs ${b.grams} 克`);
+  assert.ok(a.grams >= 500, `一碗牛肉面至少 500 克，实际 ${a.grams}`);
+});

@@ -30,6 +30,22 @@ export const EQUIPMENT = {
   studio: { name: '操房 / 团课', icon: '🎵' },
 };
 
+/** 没勾过器械时默认有的四项（跟她手机上第一版看到的一样，老存档升级后行为不变） */
+export const DEFAULT_EQUIPMENT = ['treadmill', 'elliptical', 'bike', 'bodyweight'];
+
+/**
+ * 把她勾过的器械整理成能用的列表（存在存档 settings.equipment 里）。
+ *
+ * 为什么要过一道：存档可能被手改坏、可能留着已经删掉的器械 id，
+ * 直接拿去筛动作会出现「勾了但界面上没有」或「推荐出根本没有的器械」。
+ * 一个都不剩时回默认四项，而不是空列表（空列表等于什么动作都推荐不出来）。
+ */
+export function normalizeEquipment(list) {
+  if (!Array.isArray(list)) return [...DEFAULT_EQUIPMENT];
+  const valid = [...new Set(list.filter((key) => typeof key === 'string' && EQUIPMENT[key]))];
+  return valid.length ? valid : [...DEFAULT_EQUIPMENT];
+}
+
 /** 训练目标（想练到什么） */
 export const GOALS = {
   fat_burn: { name: '燃脂（长时间中低强度）', short: '燃脂' },

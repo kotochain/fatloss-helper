@@ -389,38 +389,127 @@ export function findAllPortions(text) {
     const one = findPortion(m[0]);
     if (one) out.push({ ...one, index: m.index, end: m.index + m[0].length });
   }
-  return out;
+  // 口语里常常不带「一」：「喝了杯奶茶」「吃了碗面」「来份沙拉」。
+  // 不认这些说法的话，这句话里就只剩「半包」一个份量，会被离得近的奶茶抢走（issue #3）。
+  const bare = /(?:喝|吃|点|来|要|买|加)\s*(?:了|个)?\s*(超大碗|小碗|大碗|碗|份|盘|盒|袋|包|杯|瓶|罐|个|块|串)/g;
+  while ((m = bare.exec(text)) !== null) {
+    const unit = m[1];
+    const index = m.index + m[0].length - unit.length;
+    const end = index + unit.length;
+    // 前面已经带数字的（「一杯」）由上面的规则处理，别重复加
+    if (out.some((p) => index < p.end && end > p.index)) continue;
+    out.push(portionFromBareUnit(unit, index));
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
+/** 「喝了杯奶茶」里的那个「杯」→ 一个标准份量（碗大小有别，交给界面确认） */
+function portionFromBareUnit(unit, index) {
+  const base = { text: unit, index, end: index + unit.length, count: 1 };
+  if (unit === '个' || unit === '块' || unit === '串') {
+    const perUnit = PORTIONS[`一${unit}`] || 100;
+    return { ...base, grams: Math.round(perUnit), portionWord: `一${unit}`, counting: true, perUnit };
+  }
+  if (['碗', '小碗', '大碗', '超大碗'].includes(unit)) {
+    const key = unit === '碗' ? '一碗' : unit === '小碗' ? '一小碗' : unit;
+    return { ...base, grams: PORTIONS[key], portionWord: key, counting: false, unitKey: key };
+  }
+  return { ...base, grams: null, portionWord: `一${unit}`, counting: false, unitKey: `一${unit}` };
 }
 
 /**
- * 把每个食物配上「离它最近的那次份量说法」。
+ * 把每个食物配上「它自己的」份量说法。
  *
- * 两个必须守住的规则（否则份量会离谱）：
+ * 三个必须守住的规则（否则份量会离谱）：
  *  1) 不能拿整句话里唯一的份量去套所有食物
  *     （「一杯奶茶和半包薯片」里 325 克是奶茶的，不能套给薯片）；
  *  2) 匹配要有距离窗口，且「一碗」「一份」里的「一」不算个数
- *     （「一碗白粥和两个鸡蛋」不能变成白粥 1300 克）。
+ *     （「一碗白粥和两个鸡蛋」不能变成白粥 1300 克）；
+ *  3) **单位和食物类型要对得上**：「半包」是包装食品的说法，奶茶按杯算。
+ *     只看距离会让离得近的奶茶把「半包」抢走，薯片就按默认 50 克记了（issue #3）。
  */
 const PAIR_WINDOW = 8;
 
+/**
+ * 这个单位平时装什么（按食物分类）。
+ * 只列「明显该给谁」，没列到的按中立处理 —— 宁可交给距离判断，也不要乱扣分。
+ */
+const UNIT_CATEGORY_FIT = {
+  '杯': ['drink', 'dairy'],
+  '瓶': ['drink'],
+  '罐': ['drink'],
+  '包': ['snack'],
+  '袋': ['snack', 'staple'],
+  '盒': ['dairy', 'snack', 'staple'],
+  '碗': ['staple', 'dish', 'vegetable', 'protein'],
+  '盘': ['dish', 'vegetable', 'protein', 'staple'],
+  '个': ['fruit', 'protein', 'staple', 'dairy', 'snack', 'fat'],
+  '块': ['protein', 'fruit', 'snack', 'dairy', 'staple'],
+  '串': ['protein', 'vegetable'],
+  '勺': ['fat', 'dairy', 'staple'],
+};
+
+/** 明显说不通的组合：「半包奶茶」「一瓶米饭」不是口语里会出现的说法 */
+const UNIT_CATEGORY_CLASH = {
+  '包': ['drink'],
+  '袋': ['drink'],
+  '碗': ['drink'],
+  '盘': ['drink'],
+  '瓶': ['staple', 'vegetable', 'protein', 'fruit', 'dish'],
+  '罐': ['staple', 'vegetable', 'protein', 'fruit', 'dish'],
+  '串': ['drink', 'dairy', 'snack', 'fruit'],
+};
+
+/**
+ * 这个份量说法有多像是给这个食物的：
+ *  3 = 食物自己的份量表里就有这个单位（薯片写了「一小包」）
+ *  1 = 分类上说得通（一杯奶茶）
+ *  0 = 看不出来（「一份」什么都能说）
+ * -2 = 明显对不上（半包奶茶）
+ */
+function unitFitScore(food, portion) {
+  const unitKey = portion?.unitKey || portion?.portionWord;
+  if (!unitKey) return 0;
+  const unit = String(unitKey).replace(/^一/, '');
+  const labels = (food?.servings || []).map(([label]) => String(label));
+  if (labels.some((label) => label.includes(unit))) return 3;
+  if ((UNIT_CATEGORY_CLASH[unit] || []).includes(food?.category)) return -2;
+  const fits = UNIT_CATEGORY_FIT[unit];
+  if (!fits) return 0;
+  return fits.includes(food?.category) ? 1 : 0;
+}
+
 export function pairPortions(text, foodHits) {
   const portions = findAllPortions(text);
-  const used = new Set();
-  const pairs = [];
-  for (const hit of foodHits) {
-    // 在窗口内找最近的份量。必须「按距离取最近」而不是「先看后面再看前面」，
-    // 否则「两个鸡蛋和一个苹果」里鸡蛋会去抢后面那个「一个」（就变成 1 个蛋了）。
-    const cands = portions
-      .filter((p) => !used.has(p.index))
-      .map((p) => ({ p, dist: Math.min(Math.abs(p.index - hit.index), Math.abs(hit.index - p.end)) }))
-      .filter((x) => x.dist <= PAIR_WINDOW)
-      .sort((a, b) => a.dist - b.dist);
-    // 同距离时优先「紧挨着前面」的那个（「两个鸡蛋」而不是后面别的东西的份量）
-    const found = cands[0]?.p || null;
-    if (found) used.add(found.index);
-    pairs.push({ hit, portion: found || null, counting: Boolean(found?.counting) });
+  const cands = [];
+  foodHits.forEach((hit, hi) => {
+    for (const p of portions) {
+      // 距离按「食物开头」和「份量结尾」算，紧挨着的说法距离为 0
+      const dist = Math.min(Math.abs(p.index - hit.index), Math.abs(hit.index - p.end));
+      if (dist > PAIR_WINDOW) continue;
+      const fit = unitFitScore(hit.ref, p);
+      if (fit < 0) continue; // 单位跟食物类型明显对不上，不许抢
+      // 同分时优先「紧挨着前面」的那个（「两个鸡蛋」而不是后面别的东西的份量）
+      const before = p.end <= hit.index ? 1 : 0;
+      cands.push({ hi, p, dist, before, score: fit * 3 - dist });
+    }
+  });
+  // 全局挑「最说得通的组合」：先给匹配度最高的，避免先遍历到的食物把别人更该拿的份量抢走
+  cands.sort((a, b) => b.score - a.score || a.dist - b.dist || b.before - a.before || a.p.index - b.p.index);
+  const usedHit = new Set();
+  const usedPortion = new Set();
+  const chosen = new Map();
+  for (const c of cands) {
+    if (usedHit.has(c.hi) || usedPortion.has(c.p.index)) continue;
+    usedHit.add(c.hi);
+    usedPortion.add(c.p.index);
+    chosen.set(c.hi, c.p);
   }
-  return pairs;
+  return foodHits.map((hit, hi) => ({
+    hit,
+    portion: chosen.get(hi) || null,
+    counting: Boolean(chosen.get(hi)?.counting),
+  }));
 }
 
 /**
@@ -474,6 +563,24 @@ export function gramsForPortion(food, portion) {
   return portion.grams;
 }
 
+/**
+ * 组合菜的一份有多大。
+ *
+ * 「一碗牛肉面」里的「一碗」是**一份**的意思，不是通用碗重 350 克 ——
+ * 以前两种说法（「吃了碗牛肉面」600 克 / 「一碗牛肉面」350 克）能差 260 kcal。
+ * 碗的大小仍然有别，所以按份量表里的比例缩放，不是一律乘 1。
+ */
+const DISH_UNIT_SCALE = { '一小碗': 0.7, '一碗': 1, '大碗': 1.4, '超大碗': 1.6, '一份': 1, '一盘': 1.1, '一盒': 0.9 };
+
+function dishGramsFor(dish, portion, baseGrams) {
+  if (!portion) return baseGrams;
+  const scale = DISH_UNIT_SCALE[portion.portionWord];
+  if (scale) return Math.round(baseGrams * scale);
+  const grams = Number(portion.grams);
+  if (grams > 0) return Math.min(grams, baseGrams * 1.6);
+  return baseGrams;
+}
+
 /** 按克数等比换算营养素 */
 function scaleNutrition(base, grams, baseGrams) {
   const k = grams / baseGrams;
@@ -505,7 +612,11 @@ export function parseDescription(raw, defaultMeal = null) {
   const paired = pairPortions(text, foodHits);
 
   if (chosenDish) {
-    const nearAll = findAllPortions(text).filter((p) => Math.abs(p.index - chosenDishIndex) <= 6);
+    // 已经被食材拿走的份量，组合菜不能再来抢一次：
+    // 「红烧肉配了一碗米饭」里的一碗是米饭的，抢走就变成 350 克红烧肉 + 130 克米饭（issue #3）
+    const takenByFoods = new Set(paired.map((x) => x.portion?.index).filter((i) => Number.isFinite(i)));
+    const nearAll = findAllPortions(text)
+      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6 && !takenByFoods.has(p.index));
     // 「两个包子」里的「两个」是包子的个数，不能拿 200 克当整份的重量
     const near = nearAll.find((p) => !p.counting) || null;
     const dishHit = dishHits.find((h) => h.ref === chosenDish);
@@ -517,7 +628,7 @@ export function parseDescription(raw, defaultMeal = null) {
     void dishHit;
     const grams = near?.counting
       ? Math.round(units * (DISH_PER_UNIT[chosenDish.id] || 100))
-      : Math.min(near?.grams || baseForThis, baseForThis * 1.6);
+      : dishGramsFor(chosenDish, near, baseForThis);
     const nut = scaleNutrition(
       { kcal: chosenDish.kcal, protein: chosenDish.protein, fat: chosenDish.fat, carb: chosenDish.carb },
       grams, chosenDish.baseGrams,
@@ -727,14 +838,15 @@ export function gramsFromText(text) {
 /**
  * 离线解析的基准用例：每句都写了「人肉估算的合理热量」。
  * 用途有二：一是回归测试，二是浏览器里可以直接跑（AI 不通时至少保证兜底不退化）。
- * 允许 ±25% 的偏差 —— 家常菜的份量本身就有这个浮动。
+ * 默认允许 ±25% 的偏差 —— 家常菜的份量本身就有这个浮动。
+ * 但**能算准的句子要单独收紧**：容差太宽会把真 bug 盖住（「半包薯片」那条就是这么被漏掉的，issue #3）。
  */
 export const GOLDEN_CASES = [
   { text: '早上吃了一碗白粥和两个鸡蛋', kcal: 260, note: '粥一碗 250 克（115 kcal）+ 两个蛋 100 克（143 kcal）' },
   { text: '中午吃了两个鸡蛋和一个苹果', kcal: 250, note: '两个蛋 100 克（143 kcal）+ 一个苹果 200 克（106 kcal）' },
   { text: '今天中午在食堂吃了碗牛肉面，加了个蛋', kcal: 680, note: '一碗牛肉面约 600 克 + 一个蛋' },
-  { text: '下午喝了杯奶茶，还有半包薯片', kcal: 690, note: '中杯奶茶 500 克（425 kcal）+ 半包薯片 25 克（134 kcal）' },
-  { text: '晚饭红烧肉配了一碗米饭，还有炒青菜', kcal: 1750, note: '红烧肉一份 + 一碗米饭 + 炒青菜' },
+  { text: '下午喝了杯奶茶，还有半包薯片', kcal: 559, tol: 0.05, note: '中杯奶茶 500 克（425 kcal）+ 半包薯片 25 克（134 kcal）' },
+  { text: '晚饭红烧肉配了一碗米饭，还有炒青菜', kcal: 969, note: '红烧肉一份 150 克（570）+ 一碗米饭 180 克（209）+ 炒青菜 200 克（190）。旧值 1750 是「一碗」被红烧肉抢走算出来的（issue #3）' },
   { text: '中午吃了一份黄焖鸡米饭', kcal: 780, note: '一份黄焖鸡米饭' },
   { text: '晚上吃了碗馄饨', kcal: 330, note: '一碗馄饨 300 克' },
 ];
@@ -746,8 +858,9 @@ export function selfTestParser() {
     const r = parseDescription(c.text);
     const got = sumItems(r.items).kcal;
     if (!r.items.length) { failed.push(`${c.text}：一条都没解析出来`); continue; }
+    const tol = c.tol ?? 0.25;
     const diff = Math.abs(got - c.kcal) / c.kcal;
-    if (diff > 0.25) failed.push(`${c.text}：解析出 ${Math.round(got)} kcal，应在 ${Math.round(c.kcal * 0.75)}~${Math.round(c.kcal * 1.25)} 之间`);
+    if (diff > tol) failed.push(`${c.text}：解析出 ${Math.round(got)} kcal，应在 ${Math.round(c.kcal * (1 - tol))}~${Math.round(c.kcal * (1 + tol))} 之间`);
   }
   return failed;
 }

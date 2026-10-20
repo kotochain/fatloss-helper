@@ -11,6 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CARDIO, EQUIPMENT, GOALS, substituteExercises, recommendCardio, exercisesByEquipment, listEquipment,
+  normalizeEquipment, DEFAULT_EQUIPMENT,
 } from '../js/cardio.js';
 
 test('每个动作的器械、目标都必须是有定义的，METs 在合理范围', () => {
@@ -125,4 +126,18 @@ test('反向验证：如果允许推荐未勾选的器械，上面的测试会�
   for (const p of rec.picks) {
     assert.ok(p.equipment.includes('pool'), `推荐了 ${p.name}，但她只有泳池`);
   }
+});
+
+test('器械勾选能存能读；老存档没这个字段时回落默认四项（issue #4）', () => {
+  // 默认就是她没勾过的时候看到的那四项
+  assert.deepEqual(normalizeEquipment(undefined), DEFAULT_EQUIPMENT);
+  assert.deepEqual(normalizeEquipment(null), DEFAULT_EQUIPMENT);
+  assert.deepEqual(normalizeEquipment([]), DEFAULT_EQUIPMENT, '一个都没勾等于没配过，要回默认而不是空');
+  // 正常保存的勾选原样读回来
+  assert.deepEqual(normalizeEquipment(['elliptical', 'dumbbell']), ['elliptical', 'dumbbell']);
+  // 脏数据：不认识的器械 id 要剔掉，重复的要去重（否则界面上会出现不存在的按钮）
+  assert.deepEqual(normalizeEquipment(['elliptical', 'nope', 'elliptical']), ['elliptical']);
+  // 存的不是数组（被手改坏了）时不能崩
+  assert.deepEqual(normalizeEquipment('elliptical'), DEFAULT_EQUIPMENT);
+  assert.deepEqual(normalizeEquipment({ 0: 'elliptical' }), DEFAULT_EQUIPMENT);
 });

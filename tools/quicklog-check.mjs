@@ -730,6 +730,18 @@ async function main() {
   console.log(`✅ 只勾「椭圆机」后的推荐：${ellipticalOnly.join(' / ')}`);
   if (!ellipticalOnly.some((t) => t.includes('椭圆机'))) problems.push('只勾椭圆机却没有推荐椭圆机');
 
+  // issue #4：勾选要存进手机里 —— 重新打开应用不能回到默认四项（她家里有什么器械是稳定的）
+  await evaluate(`location.reload()`);
+  await sleep(1200);
+  await evaluate(`document.querySelector('.tab[data-view="plan"]')?.click()`);
+  await sleep(500);
+  const equipAfterReload = await evaluate(`[...document.querySelectorAll('#equipChips .chip.on')].map((c) => c.dataset.eq).sort()`);
+  console.log(`✅ 重新打开应用后的勾选：${equipAfterReload.join('、') || '（一个都没有）'}`);
+  // 全部取消时会自动留「徒手」（否则一个动作都推荐不出来），所以这里是这两项
+  if (equipAfterReload.join(',') !== 'bodyweight,elliptical') {
+    problems.push(`器械勾选没存住：重开后是 ${equipAfterReload.join('、') || '空'}（应该是徒手 + 椭圆机，不是默认四项）`);
+  }
+
   // 试着把「爬坡走」换成可用器械的动作
   const subSheet = await evaluate(`(async () => {
     // 直接调用界面上的替代入口：先找到「爬坡走」那一行

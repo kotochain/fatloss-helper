@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readApiKey, aiConfig, aiConfigStatus, buildSystemPrompt, callUpstream, normalizeResult } from '../tools/ai-proxy.mjs';
-import { parseDescription, normalizeAiItems, selfTestParser, GOLDEN_CASES } from '../js/mealparse.js';
+import { parseDescription, normalizeAiItems, selfTestParser, GOLDEN_CASES, sumItems } from '../js/mealparse.js';
 
 const CONFIG = { baseUrl: 'https://example.invalid', model: 'test-model', key: 'sk-fake-for-test' /* secret-scan:allow 假密钥 */ };
 
@@ -207,14 +207,35 @@ test('离线解析的基准用例全部合格（AI 不通时的兜底不能退�
   assert.ok(GOLDEN_CASES.length >= 6, '基准用例太少，覆盖不住常见说法');
 });
 
-test('离线解析：一句话里的多个份量不会被串到一起', () => {
-  // 这是之前真出过的 bug：一杯奶茶的 325 克被套到了半包薯片上
-  const r = parseDescription('下午喝了杯奶茶，还有半包薯片');
-  const milkTea = r.items.find((i) => i.name.includes('奶茶'));
-  const chips = r.items.find((i) => i.name.includes('薯片'));
-  assert.ok(milkTea && chips, '两样都要解析出来');
-  assert.ok(chips.grams <= 60, `薯片被算成 ${chips.grams} 克，明显是套了奶茶的份量`);
-  assert.ok(milkTea.grams <= 500, `奶茶 ${milkTea.grams} 克偏多`);
+test('离线解析：一句话里的多个份量不会被串到一起（issue #3）', () => {
+  // 真出过的 bug：「半包」被奶茶抢走，薯片按默认 50 克记（误差 100%）。
+  // 以前的断言写成「薯片 <= 60 克」——默认值刚好 50，于是这条测试一直在假绿。
+  // 现在钉死克数，并且正反两种语序都要对。
+  const cases = [
+    '下午喝了杯奶茶，还有半包薯片',
+    '半包薯片和一杯奶茶',
+    '一杯奶茶和半包薯片',
+    '喝了奶茶，还有半包薯片',        // 口语里常常不说「一杯」
+    '奶茶和半包薯片',
+  ];
+  for (const text of cases) {
+    const r = parseDescription(text);
+    const milkTea = r.items.find((i) => i.name.includes('奶茶'));
+    const chips = r.items.find((i) => i.name.includes('薯片'));
+    assert.ok(milkTea && chips, `${text}：两样都要解析出来`);
+    assert.equal(chips.grams, 25, `${text}：「半包」应当归薯片（25 克），实际 ${chips.grams} 克`);
+    assert.ok(milkTea.grams >= 400 && milkTea.grams <= 500,
+      `${text}：奶茶该按中杯 500 克算，实际 ${milkTea.grams} 克`);
+  }
+});
+
+test('基准用例「半包薯片」这条必须收紧容差（±25% 会把真 bug 盖住）', () => {
+  const c = GOLDEN_CASES.find((x) => x.text.includes('半包薯片'));
+  assert.ok(c, '基准用例里必须有这条：她日常真会这么说');
+  assert.ok((c.tol ?? 0.25) <= 0.1, `这条的容差要收紧到 10% 以内，现在 ${c.tol}`);
+  const got = sumItems(parseDescription(c.text).items).kcal;
+  const diff = Math.abs(got - c.kcal) / c.kcal;
+  assert.ok(diff <= c.tol, `解析出 ${got} kcal，应在 ${c.kcal} ±${Math.round(c.tol * 100)}% 之内`);
 });
 
 test('离线解析：「两个鸡蛋」不能被后面的「一个苹果」抢走份量', () => {

@@ -38,7 +38,12 @@ const MUTATIONS = [
   { file: 'js/exercise.js', from: "{ key: 'low', label: '目前基本不动', steps: 6000", to: "{ key: 'low', label: '目前基本不动', steps: 20000", why: '走路目标档位' },
   // ── 第二轮新增：说一句话记录 / 按器械换动作 ──
   { file: 'js/mealparse.js', from: 'const chosenDish = dishHits.find((h) => !h.ref.generic)?.ref || dishHits[0]?.ref || null;', to: 'const chosenDish = dishHits[0]?.ref || null;', why: '具体菜优先于泛称（否则「食堂吃了碗牛肉面」会被认成「食堂打饭」）' },
-  { file: 'js/mealparse.js', from: "      .sort((a, b) => a.dist - b.dist);", to: '      .sort((a, b) => b.dist - a.dist);', why: '份量按最近距离配对（否则「两个鸡蛋和一个苹果」会串份量）' },
+  { file: 'js/mealparse.js', from: 'cands.push({ hi, p, dist, before, score: fit * 3 - dist });', to: 'cands.push({ hi, p, dist, before, score: -dist });', why: '份量归属要看「单位配不配这个食物」，不能只看距离（issue #3）' },
+  { file: 'js/mealparse.js', from: '      if (fit < 0) continue; // 单位跟食物类型明显对不上，不许抢', to: '      if (false) continue;', why: '「半包」这种包装说法不能配给奶茶（单位对不上就不许抢）' },
+  { file: 'js/mealparse.js', from: '      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6 && !takenByFoods.has(p.index));', to: '      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6);', why: '组合菜不能抢走已经被食材认领的份量（红烧肉抢米饭的「一碗」）' },
+  { file: 'js/mealparse.js', from: '  const scale = DISH_UNIT_SCALE[portion.portionWord];', to: '  const scale = null;', why: '组合菜的「一碗」是一份，不是通用碗重 350 克（一碗牛肉面 600 克）' },
+  { file: 'js/mealparse.js', from: '    out.push(portionFromBareUnit(unit, index));', to: '    void unit;', why: '口语「喝了杯奶茶」里的「杯」也要算份量（否则「半包」会被奶茶抢走）' },
+  { file: 'js/cardio.js', from: '  return valid.length ? valid : [...DEFAULT_EQUIPMENT];', to: '  return valid;', why: '器械一个都不剩时要回默认四项（空列表会让推荐全空）' },
   { file: 'js/mealparse.js', from: 'const perUnit = food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || portion.perUnit || 100;', to: 'const perUnit = portion.perUnit || 100;', why: '「一个」要按食物自己的份量换算（鸡蛋 50 克 ≠ 通用 100 克）' },
   { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
   { file: 'js/cardio.js', from: 'const avail = new Set(availableEquipment || []);', to: 'const avail = new Set(Object.keys(EQUIPMENT));', why: '替代动作必须是她今天能用的器械' },
