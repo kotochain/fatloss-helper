@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  KJ_PER_KCAL, normalizeUnit, energyToKcal, macroKcal, labelToPer100, checkConsistency,
+  KJ_PER_KCAL, normalizeUnit, energyToKcal, macroKcal, labelToPer100, checkConsistency, photoRetakeHint,
 } from '../js/label.js';
 import { buildLabelPrompt, normalizeLabelResult, requestLabelParse } from '../js/ai-core.js';
 
@@ -92,12 +92,15 @@ test('对账：正常、小偏差、明显对不上三种情况', () => {
   assert.equal(info.computed, 165, '10×4 + 5×9 + 20×4 = 165');
 });
 
-test('AI 读表提示词：只许读、不许算、看不清留空', () => {
+test('AI 读表提示词：只许读、不许换算、看不清留空、不许读串行', () => {
   const p = buildLabelPrompt();
   assert.ok(p.includes('不要换算'), '必须明确禁止换算');
   assert.ok(p.includes('不要猜'), '看不清时不许猜');
   assert.ok(p.includes('kJ'), '要让模型按原始单位返回千焦');
-  assert.ok(!p.includes('蛋白×4'), '读表的提示词不该出现算热量的规则');
+  // 这两条是拿真模型跑糊照片跑出来的：整行错位（蛋白质读到能量那行的 NRV%）是最危险的错，
+  // 它不会留空、会自信地填错数字。措辞被删掉就等于把这个坑埋回去。
+  assert.ok(p.includes('同一行'), '必须要求数字和项目名在同一行');
+  assert.ok(p.includes('4/9/4'), '必须让它输出前自查一遍（读串行时热量对不上）');
 });
 
 test('AI 读表结果收敛：字符串数字要转成数字，越界当没读到', () => {
@@ -167,4 +170,49 @@ test('模型返回「没有找到营养成分表」时，报错要清楚', async
     () => requestLabelParse({ imageDataUrl: 'data:image/png;base64,AAAA', config: { baseUrl: 'https://x', model: 'm', apiKey: 'k' }, fetchImpl }),
     /没有找到营养成分表/,
   );
+});
+
+test('正文是空的、但模型写了「思考过程」：要说清是模型在做深度思考，别说成断网', async () => {
+  // 真事（2026-10-21 用真密钥测）：显式指定 deepseek-flash，它先把答案写进 reasoning_content，
+  // max_tokens 不够时 content 是空串 —— 界面上原本显示「没读出来：服务商没有返回内容」，像网断了。
+  const truncated = async () => ({
+    ok: true, status: 200,
+    json: async () => ({ choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: '让我先看看这张图……' } }] }),
+  });
+  await assert.rejects(
+    () => requestLabelParse({ imageDataUrl: 'data:image/jpeg;base64,AAAA', config: { baseUrl: 'https://x', model: 'deepseek-flash', apiKey: 'k' }, fetchImpl: truncated }),
+    (err) => {
+      assert.ok(/思考/.test(err.message), err.message);
+      assert.ok(/deepseek-chat/.test(err.message), '要说出换哪个模型才不会踩同一个坑');
+      assert.ok(!/没有返回内容/.test(err.message), '不能让人以为是断网');
+      return true;
+    },
+  );
+
+  // 完全空（既没正文也没思考）才是真的「没返回内容」，别把这句话弄丢了
+  const silent = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '' } }] }) });
+  await assert.rejects(
+    () => requestLabelParse({ imageDataUrl: 'data:image/jpeg;base64,AAAA', config: { baseUrl: 'https://x', model: 'm', apiKey: 'k' }, fetchImpl: silent }),
+    /没有返回内容/,
+  );
+});
+
+test('照片读出来对不上时，劝她重拍；手动填的、或只差一点点，不多嘴', () => {
+  // 真事：糊照片里模型把「蛋白质」读成能量那行的 NRV%（13），把脂肪读成 9.2 ——
+  // 标称 1078 kJ = 258 kcal，按读到的算却是 323 kcal，差 25%。这种就该让她重拍。
+  const shifted = checkConsistency(labelToPer100({ baseGrams: 100, energyValue: 1078, energyUnit: 'kJ', protein: 13, fat: 9.2, carb: 46.5 }).per100);
+  assert.ok(shifted.diffPct > 20, `这条用例要求真的对不上，实际差 ${shifted.diffPct}%`);
+  const hint = photoRetakeHint(shifted);
+  assert.ok(hint.includes('重拍'), '要明说重拍');
+  assert.ok(hint.includes('拍满'), '要告诉她怎么拍（拍满画面）');
+  assert.ok(hint.includes('别直接保存'), '要拦住她直接保存');
+
+  // 读对了的那张不该出现这句话（否则每次拍照都吓她一下）
+  const right = checkConsistency(labelToPer100(HER_LABEL).per100);
+  assert.equal(photoRetakeHint(right), '', '对得上时不要多嘴');
+  // 差 20% 以内是包装自己的问题（糖醇/膳食纤维），也不劝重拍
+  assert.equal(photoRetakeHint({ stated: 300, diffPct: 18 }), '');
+  // 没填热量时没法对账，更不该说话
+  assert.equal(photoRetakeHint(checkConsistency({ kcal: null, protein: 10, fat: 5, carb: 20 })), '');
+  assert.equal(photoRetakeHint(null), '');
 });

@@ -17,7 +17,9 @@ export const PRESETS = [
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-chat',
     keyUrl: 'https://platform.deepseek.com/api_keys',
-    note: '国内直连、便宜、中文理解好。一次解析大约几厘钱，充 10 块能用很久。',
+    // 2026-10-21 实测：这个模型名（现在指向 deepseek-flash）能看图，拍照读表可用。
+    // 别改成 deepseek-flash —— 那个会先吐一大段 reasoning_content，额度不够时正文是空的。
+    note: '国内直连、便宜、中文理解好，也能看照片（拍照读营养成分表可用）。一次解析大约几厘钱，充 10 块能用很久。',
     recommended: true,
     directCall: true,
     verifiedAt: '2026-10-16',

@@ -76,6 +76,13 @@ function startFakeProvider() {
         res.end(JSON.stringify({ error: { message: 'This model does not support image input' } }));
         return;
       }
+      if (scenario === 'shifted') {
+        // 真模型在糊照片上真这么错过：蛋白质读成能量那行的 NRV%（13）、脂肪读成蛋白质那行的 9.2。
+        // 数字全非空、看着挺像，只有按 4/9/4 折一遍才发现对不上（323 vs 258 kcal）。
+        res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ name: '全麦吐司面包', baseGrams: 100, energy: { value: 1078, unit: 'kJ' }, protein: 13, fat: 9.2, carb: 46.5 }) } }] }));
+        return;
+      }
       if (scenario === 'absurd') {
         res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ name: '离谱食物', baseGrams: 100, energy: { value: 5000, unit: 'kcal' }, protein: 10, fat: 10, carb: 10 }) } }] }));
@@ -186,6 +193,28 @@ async function openLabelSheet(client) {
   await ev(client, `document.querySelector('#customFoodBtn')?.click()`);
   await waitFor(() => ev(client, `!!document.querySelector('#labelName')`), '照包装弹层出现');
   await sleep(300);
+}
+
+/** 拦掉文件选择框，再用 CDP 把测试图片塞进 input（她真点「拍照」时走的是同一条路） */
+async function injectPhoto(client, fixture) {
+  await ev(client, `(() => {
+    const orig = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function (...a) {
+      if (this.type === 'file') return;
+      return orig.apply(this, a);
+    };
+    document.querySelector('#labelShot')?.click();
+    return true;
+  })()`);
+  await sleep(200);
+  const doc = await client.send('DOM.getDocument', { depth: -1 });
+  const inputs = [];
+  const walk = (n) => { if (n.nodeName === 'INPUT') inputs.push(n.nodeId); for (const c of n.children || []) walk(c); };
+  walk(doc.root);
+  for (const nodeId of inputs) {
+    try { await client.send('DOM.setFileInputFiles', { nodeId, files: [fixture] }); } catch { /* 不是文件输入 */ }
+  }
+  await ev(client, `document.getElementById('labelFile').dispatchEvent(new Event('change'))`);
 }
 
 async function fillManual(client, { energy, unit, protein, fat, carb, name = '手填测试食物' }) {
@@ -350,6 +379,34 @@ async function main() {
       await ev(client, `document.querySelector('#sheetClose')?.click()`);
       await sleep(300);
     }
+
+    /* ── 二·二、读串了行：数字全填上了，但自己对不上 ── */
+    console.log('\n=== 二·二、照片读出来的数字自己对不上（真模型在糊照片上真这么错过）===');
+    scenario = 'shifted';
+    await openLabelSheet(client);
+    await injectPhoto(client, fixture);
+    await waitFor(() => ev(client, `document.getElementById('labelProtein').value === '13'
+      && /读出来了/.test(document.getElementById('labelShotHint')?.textContent || '')`), '错位的数字填进表单');
+    const shifted = await ev(client, `(document.querySelector('#labelPreview')?.textContent || '').replace(/\s+/g, ' ').trim()`);
+    console.log(`   预览：${shifted}`);
+    if (!/重拍/.test(shifted)) fail('数字自己都对不上了，却没劝她重拍');
+    else if (!/别直接保存/.test(shifted)) fail('劝重拍时没拦住「直接保存」');
+    else pass('对不上时直接说「重拍一张」，不让她自己找哪个数错了');
+
+    // 她动手改过一个数，就别再念重拍（改完还挂着警告，像在怪她）
+    await ev(client, `(() => {
+      const el = document.getElementById('labelProtein');
+      el.value = '9.2';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    await sleep(300);
+    const afterEdit = await ev(client, `(document.querySelector('#labelPreview')?.textContent || '').replace(/\s+/g, ' ').trim()`);
+    if (/重拍/.test(afterEdit)) fail('她自己改完数字了，界面还挂着「重拍」');
+    else pass('手动改过之后不再劝重拍');
+    await ev(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+    scenario = 'ok';
 
     /* ── 三、模型看不了图：说人话，手动填照样能用 ── */
     console.log('\n=== 三、模型不支持看图 ===');

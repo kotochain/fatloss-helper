@@ -92,6 +92,10 @@ const MUTATIONS = [
   { file: 'js/coach.js', from: '    if (totals.kcal < MIN_DAY_KCAL) continue;', to: '    if (false) continue;', why: '只记了一百多卡的那天不算「记了」（否则平均热量被拉低）' },
   { file: 'js/coach.js', from: '  if (remainingKcal <= 0) {', to: '  if (false) {', why: '已经吃超了就不能再给加餐建议' },
   { file: 'js/cardio.js', from: '  return CARDIO_MINUTES.reduce((best, m) => (Math.abs(m - v) < Math.abs(best - v) ? m : best), CARDIO_MINUTES[0]);', to: '  return v;', why: '训练时长要吸附到界面的档位（存档里 37 分钟会让所有按钮都不选中）' },
+  // ── 第十轮：拍照读表用真模型跑出来的问题 ──
+  { file: 'js/label.js', from: "if (!(consistency.diffPct > 20)) return '';", to: "if (false) return '';", why: '只有真对不上（>20%）才劝重拍，否则每次拍照都吓她一次' },
+  { file: 'js/ai-core.js', from: '数字必须和它左边的项目名在**同一行**', to: '数字必须和它左边的项目名在**附近**', why: '读表提示词必须要求「数字和项目名同一行」（糊照片上最容易整行错位）' },
+  { file: 'js/ai-core.js', from: "const thinking = String(choice?.message?.reasoning_content || '').trim();", to: "const thinking = '';", why: '正文空但只有思考时，要说是模型在深度思考，不能说成断网' },
   { file: 'js/cardio.js', from: "  return Object.prototype.hasOwnProperty.call(GOALS, key) ? key : 'fat_burn';", to: '  return key;', why: '训练目标认不出来要回「燃脂」（否则推荐拿不到目标）' },
 ];
 

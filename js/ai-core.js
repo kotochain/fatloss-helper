@@ -134,7 +134,7 @@ export async function requestParse({ text, meal, hour, config, fetchImpl = fetch
   }
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('服务商没有返回内容');
+  if (!content) throw emptyContentError(data) || new Error('服务商没有返回内容');
   return normalizeResult(extractJson(content));
 }
 
@@ -173,12 +173,13 @@ export async function requestCoach({ brief, config, fetchImpl = fetch }) {
   }
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('服务商没有返回内容');
+  if (!content) throw emptyContentError(data) || new Error('服务商没有返回内容');
   return { text: String(content).trim() };
 }
 
 /** 发一次最小请求，只为了验证「密钥+地址+模型」能不能用 */
-export async function requestPing({ config, fetchImpl = fetch }) {  let res;
+export async function requestPing({ config, fetchImpl = fetch }) {
+  let res;
   try {
     res = await fetchImpl(`${String(config.baseUrl).replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
@@ -245,12 +246,33 @@ export function buildLabelPrompt() {
     '3. 蛋白质、脂肪、碳水化合物的单位都是克。',
     '4. name 用包装上最显眼的品名，尽量短（不超过 20 字）；读不到就留空字符串。',
     '5. 任何一个数字看不清就填 null，**绝对不要猜**。',
-    '6. 如果图片里没有营养成分表，输出 {"error":"没有找到营养成分表"}。',
-    '7. 只输出 JSON，不要解释文字。',
+    '6. 数字必须和它左边的项目名在**同一行**。照片糊的时候最容易整行错位（把「蛋白质」读成能量那行的 NRV%、',
+    '   或者把下一行的数字安到这一行）—— 只要你不确定这个数字属于哪一行，就填 null。NRV% 那一列不需要，别混进来。',
+    '7. 输出前自己核一遍：三个营养素按 4/9/4 折成热量（蛋白和碳水每克 4 千卡、脂肪每克 9 千卡），',
+    '   应当接近标签上的能量（标签写千焦就先除以 4.184）。差得远说明很可能读错了行或单位，',
+    '   请重新看一遍图片再输出；实在看不清就把可疑的那几个填 null。',
+    '8. 如果图片里没有营养成分表，输出 {"error":"没有找到营养成分表"}。',
+    '9. 只输出 JSON，不要解释文字。',
     '',
     '输出格式：',
     '{"name":"低脂鸡胸肉","baseGrams":100,"energy":{"value":349,"unit":"kJ"},"protein":13.7,"fat":0.7,"carb":5.3}',
   ].join('\n');
+}
+
+/**
+ * 正文是空的，但模型写了「思考过程」—— 这不是网络问题，是模型把额度花在思考上了。
+ * 真事：显式指定 deepseek-flash 时，它会先吐一大段 reasoning_content，
+ * max_tokens 不够时 content 直接是空串，界面上就变成「没读出来：服务商没有返回内容」，看着像断网。
+ * 回到 deepseek-chat（同一个模型的别名，不做深度思考）就正常。
+ */
+function emptyContentError(data) {
+  const choice = data?.choices?.[0] || {};
+  const thinking = String(choice?.message?.reasoning_content || '').trim();
+  if (!thinking) return null;
+  if (choice.finish_reason === 'length') {
+    return new Error('模型把额度都花在「思考」上了，正文被截断。换一个不做深度思考的模型再试（DeepSeek 用 deepseek-chat，别加 -flash）。');
+  }
+  return new Error('模型只回了「思考过程」，正文是空的。换一个不做深度思考的模型再试（DeepSeek 用 deepseek-chat，别加 -flash）。');
 }
 
 /** 模型返回的 content 可能是字符串，也可能是 [{type:'text',text}] 数组 */
@@ -325,13 +347,13 @@ export async function requestLabelParse({ imageDataUrl, config, fetchImpl = fetc
     const body = await res.text().catch(() => '');
     // 大量文字模型会直接拒绝：不支持 image_url / 不是多模态模型
     if (/image|vision|multimodal|content type|unsupported/i.test(body)) {
-      throw new Error('当前这个模型看不了图片。换一个支持看图的模型（例如 qwen-vl-plus、glm-4v、gpt-4o-mini），或者直接手动填 —— 数字都一样准。');
+      throw new Error('当前这个模型看不了图片。换一个支持看图的模型（例如 deepseek-chat、qwen-vl-plus、glm-4v、gpt-4o-mini），或者直接手动填 —— 数字都一样准。');
     }
     throw new Error(humanizeHttpError(res.status, body, { model: config.model }));
   }
   const data = await res.json();
   const text = contentToText(data?.choices?.[0]?.message?.content);
-  if (!text) throw new Error('模型没有返回内容');
+  if (!text) throw emptyContentError(data) || new Error('模型没有返回内容');
   const parsed = extractJson(text);
   if (parsed?.error) throw new Error(String(parsed.error).slice(0, 80));
   return normalizeLabelResult(parsed);

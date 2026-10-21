@@ -119,3 +119,19 @@ export function checkConsistency(per100) {
     message: `对不上：标称 ${round1(stated)} kcal，按蛋白/脂肪/碳水算却是 ${computed} kcal。最可能是抄错了行或单位（把「千焦」当「千卡」最常见）。`,
   };
 }
+
+/**
+ * 照片读出来的数字自己对不上时，额外要告诉她「怎么办」。
+ *
+ * 为什么需要单独一句：这些数字她没敲过，是「读出来的」，所以看到「对不上」也不知道该改哪个 ——
+ * 真正该做的不是改数字，是重拍。只有照片来源才给这句，手动填的时候不该出现（那是她自己抄的）。
+ * 偏差 20% 以内不给（包装上的膳食纤维/糖醇本来就会让两者差一点，喊重拍是白折腾）。
+ *
+ * @param {{stated:number|null, diffPct:number}} consistency checkConsistency 的结果
+ * @returns {string} 不需要时返回空字符串
+ */
+export function photoRetakeHint(consistency) {
+  if (!consistency || consistency.stated === null || consistency.stated === undefined) return '';
+  if (!(consistency.diffPct > 20)) return '';
+  return '⚠️ 这张照片可能没读准（最常见的是把上一行/下一行的数字读串了）。重拍一张会更快：把营养成分表拍满画面、正对着、别反光；也可以照着包装手动改这几个数 —— 先别直接保存。';
+}

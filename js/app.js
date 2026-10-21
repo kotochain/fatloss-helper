@@ -24,7 +24,7 @@ import {
   readLabelImage, askCoach,
 } from './ai.js';
 import { buildCoachBrief, localCoachAdvice, checkCoachText } from './coach.js';
-import { labelToPer100, checkConsistency } from './label.js';
+import { labelToPer100, checkConsistency, photoRetakeHint } from './label.js';
 import { PRESETS, findPreset } from './providers.js';
 import {
   achievements, plantState, weeklyReview, weeklyHighlight, afterLogMessage,
@@ -2068,6 +2068,8 @@ function openLabelSheet(mealKey = null) {
     onMount: (body, foot) => {
       const el = (id) => $(id, body);
       let unit = 'kJ';
+      // 这几个数字是「照片读出来的」还是「她自己敲的」—— 分不清就不知道该劝重拍还是劝改数字
+      let fromPhoto = false;
       const preview = el('#labelPreview');
 
       const readForm = () => ({
@@ -2087,10 +2089,16 @@ function openLabelSheet(mealKey = null) {
           return;
         }
         const c = checkConsistency(r.per100);
+        // 照片读出来的数字自己对不上，多半是读串了行 —— 该劝重拍，而不是让她猜哪个数错了
+        const retake = fromPhoto ? photoRetakeHint(c) : '';
         preview.className = c.level === 'warn' ? 'warn' : 'warn info';
-        preview.innerHTML = `每 100 克：<b>${r.per100.kcal}</b> kcal · 蛋白 ${r.per100.protein} g · 脂肪 ${r.per100.fat} g · 碳水 ${r.per100.carb} g<br>${esc(c.message)}`;
+        preview.innerHTML = `每 100 克：<b>${r.per100.kcal}</b> kcal · 蛋白 ${r.per100.protein} g · 脂肪 ${r.per100.fat} g · 碳水 ${r.per100.carb} g<br>${esc(c.message)}`
+          + (retake ? `<br><b>${esc(retake)}</b>` : '');
       };
-      body.querySelectorAll('input').forEach((i) => i.addEventListener('input', update));
+      body.querySelectorAll('input').forEach((i) => i.addEventListener('input', () => {
+        fromPhoto = false; // 她自己动过手了，这就不是「纯读出来」的数字了
+        update();
+      }));
       el('#labelUnit').addEventListener('click', (ev) => {
         const btn = ev.target.closest('[data-unit]');
         if (!btn) return;
@@ -2127,6 +2135,7 @@ function openLabelSheet(mealKey = null) {
             fill('#labelProtein', r.protein);
             fill('#labelFat', r.fat);
             fill('#labelCarb', r.carb);
+            fromPhoto = true;
             update();
             const empty = !r.energy && r.protein === null && r.fat === null && r.carb === null;
             hint.textContent = empty

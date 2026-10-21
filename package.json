@@ -9,6 +9,7 @@
     "serve": "node tools/serve.mjs",
     "check": "node tools/check-all.mjs fast",
     "check:full": "node tools/check-all.mjs full",
-    "check:live": "node tools/check-all.mjs live"
+    "check:live": "node tools/check-all.mjs live",
+    "check:label-live": "node tools/label-live.mjs"
   }
 }
