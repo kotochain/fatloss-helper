@@ -405,6 +405,8 @@ async function main() {
     await ev(client, `document.querySelector('#labelPreview')?.scrollIntoView({ block: 'center' })`);
     await sleep(350);
     const shotRetake = await client.send('Page.captureScreenshot', { format: 'png' });
+    // CI 上 .selfcheck/ 不存在（被 gitignore 了），先建出来再写
+    fs.mkdirSync(path.join(root, '.selfcheck'), { recursive: true });
     fs.writeFileSync(path.join(root, '.selfcheck', 'shot-label-retake.png'), Buffer.from(shotRetake.data, 'base64'));
 
     // 她动手改过一个数，就别再念重拍（改完还挂着警告，像在怪她）
