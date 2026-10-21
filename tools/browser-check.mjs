@@ -293,6 +293,47 @@ async function main() {
       await screenshot(client, path.join(outDir, `shot-${size.name}-tab-${view}.png`));
     }
 
+    // 第五步一：图标系统（issue #9）—— 界面上不该再有 emoji，图标不许有兜底方块/缺尺寸
+    await evaluate(client, `document.querySelector('.tab[data-view="today"]').click()`);
+    await sleep(350);
+    const iconAudit = await evaluate(client, `(() => {
+      const EMOJI = /[\\u{1F000}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{2B00}-\\u{2BFF}\\u{FE0F}]/u;
+      const lines = (document.body.innerText || '').split('\\n').map((x) => x.trim()).filter(Boolean);
+      const badLines = lines.filter((l) => EMOJI.test(l)).slice(0, 6);
+      const svgs = [...document.querySelectorAll('svg.icon')];
+      return {
+        图标数: svgs.length,
+        兜底方块: svgs.filter((s) => s.dataset.kind === 'fallback').map((s) => s.dataset.icon),
+        缺尺寸: svgs.filter((s) => !s.getAttribute('width') || !s.getAttribute('height')).length,
+        emoji行: badLines,
+      };
+    })()`);
+
+    // 成长弹层（植物插画 + 徽章墙）
+    await evaluate(client, `document.querySelector('[data-act="growth"]')?.click()`);
+    await sleep(400);
+    const growth = await evaluate(client, `(() => ({
+      标题: document.querySelector('#sheetTitle')?.textContent || '',
+      植物: document.querySelectorAll('.plant-art svg.icon[data-kind="plant"]').length,
+      徽章图标: document.querySelectorAll('.ach-icon svg.icon').length,
+      兜底: [...document.querySelectorAll('#sheetBody svg.icon[data-kind="fallback"]')].length,
+    }))()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-6-growth.png`));
+    await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+
+    // 设置页（一排图标）
+    await evaluate(client, `document.querySelector('#profileBtn')?.click()`);
+    await sleep(400);
+    const settings = await evaluate(client, `(() => ({
+      图标: document.querySelectorAll('#sheetBody .set-ico svg.icon').length,
+      行数: document.querySelectorAll('#sheetBody .set-row').length,
+      兜底: [...document.querySelectorAll('#sheetBody svg.icon[data-kind="fallback"]')].length,
+    }))()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-7-settings.png`));
+    await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+
     // 第五步半：PWA 清单能不能被浏览器正确解析（决定「添加到主屏幕」是否可用）
     const manifest = await evaluate(client, `(async () => {
       const res = await fetch('manifest.webmanifest');
@@ -313,7 +354,7 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, profilePreview, manifest };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, iconAudit, growth, settings, profilePreview, manifest };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -351,12 +392,19 @@ function printReport(report) {
     console.log(`  份量预览：${r.amountPreview}`);
     console.log(`  加入记录后：${JSON.stringify(r.afterAdd)}`);
     console.log(`  四个标签页卡片数：${JSON.stringify(r.tabs)}`);
+    console.log(`  图标：${r.iconAudit.图标数} 个｜兜底方块 ${r.iconAudit.兜底方块.length} 个｜缺尺寸 ${r.iconAudit.缺尺寸} 个｜界面残留 emoji ${r.iconAudit.emoji行.length} 行`);
+    if (r.iconAudit.emoji行.length) for (const l of r.iconAudit.emoji行) console.log(`       ↳ 还有 emoji：${l}`);
+    console.log(`  成长弹层：植物插画 ${r.growth.植物} 个｜徽章图标 ${r.growth.徽章图标} 个｜兜底 ${r.growth.兜底} 个`);
+    console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜兜底 ${r.settings.兜底} 个`);
     console.log(`  资料页预览：${r.profilePreview}`);
     console.log(`  PWA 清单：${r.manifest.name}｜display=${r.manifest.display}｜start_url=${r.manifest.start_url}｜图标 ${r.manifest.icons.join(' ')}`);
     console.log(`  控制台报错：${s.consoleErrors.length ? s.consoleErrors.join(' | ') : '无'}`);
     const iconBad = r.manifest.icons.some((x) => x.includes('❌'));
+    const uiIconBad = r.iconAudit.emoji行.length > 0 || r.iconAudit.兜底方块.length > 0 || r.iconAudit.缺尺寸 > 0
+      || r.growth.植物 !== 1 || r.growth.兜底 > 0 || r.settings.图标 < 5 || r.settings.兜底 > 0;
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
-      || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone') problems += 1;
+      || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
+      || uiIconBad) problems += 1;
   }
   console.log(`\n${problems === 0 ? '✅ 浏览器自检全部通过' : `❌ 浏览器自检有 ${problems} 处问题`}`);
   console.log(`截图与报告在 ${outDir}`);

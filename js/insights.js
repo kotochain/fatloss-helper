@@ -97,7 +97,7 @@ function proteinInsight(rows, targets) {
 
   return {
     kind: 'protein',
-    icon: '🥚',
+    icon: 'egg',
     title: diff < 0 ? '吃够蛋白的日子，总热量反而更低' : '吃够蛋白的日子吃得更多',
     detail: diff < 0
       ? `你有 ${hit.length} 天吃够了蛋白，平均 ${hitAvg} kcal；另外 ${miss.length} 天没吃够，平均 ${missAvg} kcal —— 差了约 ${Math.abs(diff)} kcal。蛋白顶饱，这个规律很常见。`
@@ -114,7 +114,7 @@ function exerciseInsight(rows) {
   if (!c) return null;
   return {
     kind: 'habit',
-    icon: '🏃‍♀️',
+    icon: 'run',
     title: c.diff > 0 ? '运动日你会多吃一些' : '运动日你反而没多吃',
     detail: `运动日平均 ${c.aAvg} kcal（${withEx.length} 天），不运动的日子平均 ${c.bAvg} kcal（${without.length} 天），差约 ${Math.abs(c.diff)} kcal。${
       c.diff > 0 ? '运动后饿是正常的，只要总缺口还在就没问题。' : '这是好事 —— 运动的热量没有被吃回去。'
@@ -143,7 +143,7 @@ function topSourceInsight(rows, days) {
   if (share < 15) return null;
   return {
     kind: 'calories',
-    icon: '🔍',
+    icon: 'search',
     title: `${food.name}是你这几天的热量大头`,
     detail: `最近 ${logged.length} 天里，${food.name}平均每天贡献约 ${perDay} kcal，占你总摄入的 ${share}%。${
       share >= 30 ? '不是让你别吃 —— 是这个量值得看一眼，份量差一点影响挺大。' : '想减总量的话，从这里调最省力。'
@@ -165,7 +165,7 @@ function weekendInsight(rows) {
   if (!c) return null;
   return {
     kind: 'habit',
-    icon: c.diff > 0 ? '📅' : '📅',
+    icon: 'calendar',
     title: c.diff > 0 ? '周末比工作日吃得多一些' : '周末比工作日吃得少',
     detail: `周末平均 ${c.aAvg} kcal（${weekend.length} 天），工作日平均 ${c.bAvg} kcal（${weekday.length} 天），差约 ${Math.abs(c.diff)} kcal。${
       c.diff > 0 ? '这很常见。知道差多少，就能提前安排 —— 比如周末留出一顿想吃的，别的地方收一点。' : ''
@@ -183,7 +183,7 @@ function rhythmInsight(rows) {
   if (fullDays / logged.length >= 0.8) {
     return {
       kind: 'habit',
-      icon: '🍽️',
+      icon: 'bowl',
       title: '你大部分日子三餐都记全了',
       detail: `${logged.length} 天里有 ${fullDays} 天记满三餐。这种记录最有参考价值 —— 漏记一餐会让总热量看起来偏低，容易误判。`,
       days: logged.length,
@@ -193,7 +193,7 @@ function rhythmInsight(rows) {
   if (light >= 2) {
     return {
       kind: 'habit',
-      icon: '📝',
+      icon: 'note',
       title: '有些日子只记了一餐',
       detail: `${logged.length} 天里有 ${light} 天只记了一餐。只记一餐的话，总热量会显得比实际低 —— 不是让你记全，是提醒你别被那个数字骗了。`,
       days: logged.length,
@@ -219,7 +219,7 @@ function weightInsight(state, days, targets) {
   if (Math.abs(change) < 0.3) {
     return {
       kind: 'weight',
-      icon: '⚖️',
+      icon: 'scale',
       title: '体重基本没动',
       detail: `最近 ${spanDays} 天称了 ${recent.length} 次，变化不到 0.3 kg。这个时间跨度太短、正常波动就有这么大 —— 别看单次数字，看两周以上的趋势。`,
       days: recent.length,
@@ -228,7 +228,7 @@ function weightInsight(state, days, targets) {
   const fast = Math.abs(weekly) > 1;
   return {
     kind: 'weight',
-    icon: '⚖️',
+    icon: 'scale',
     title: change < 0 ? `体重在往下走（约每周 ${Math.abs(weekly)} kg）` : `体重在往上走（约每周 ${Math.abs(weekly)} kg）`,
     detail: `最近 ${spanDays} 天从 ${first.kg} kg 到 ${last.kg} kg。${
       change < 0

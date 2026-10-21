@@ -133,5 +133,5 @@ export function checkConsistency(per100) {
 export function photoRetakeHint(consistency) {
   if (!consistency || consistency.stated === null || consistency.stated === undefined) return '';
   if (!(consistency.diffPct > 20)) return '';
-  return '⚠️ 这张照片可能没读准（最常见的是把上一行/下一行的数字读串了）。重拍一张会更快：把营养成分表拍满画面、正对着、别反光；也可以照着包装手动改这几个数 —— 先别直接保存。';
+  return '这张照片可能没读准（最常见的是把上一行/下一行的数字读串了）。重拍一张会更快：把营养成分表拍满画面、正对着、别反光；也可以照着包装手动改这几个数 —— 先别直接保存。';
 }

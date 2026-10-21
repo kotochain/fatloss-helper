@@ -8,6 +8,7 @@ import {
   defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, LIMITS, round,
 } from './calc.js';
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount, kcalOnlyFood } from './foods.js';
+import { icon } from './icons.js';
 import { searchFoods, MEAL_SLOTS } from './foodlog.js';
 import {
   listExercises, buildWeekPlan, EXERCISES,
@@ -204,10 +205,18 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function toast(msg) {
+/**
+ * 顶部短提示。
+ * iconName 可选：图标是我们自己的内联 SVG（可信），正文用 textContent 塞进去 ——
+ * 食物名里可能有尖括号之类的字符，不能拼进 HTML。
+ */
+function toast(msg, iconName = '') {
   const el = document.createElement('div');
   el.className = 'toast';
-  el.textContent = msg;
+  if (iconName) el.innerHTML = icon(iconName, { size: 16 });
+  const text = document.createElement('span');
+  text.textContent = msg;
+  el.appendChild(text);
   document.body.appendChild(el);
   // 从顶部滑下来：底部是会放输入框和按钮的地方，挡住最常用的操作很烦
   requestAnimationFrame(() => el.classList.add('in'));
@@ -482,7 +491,7 @@ function onboardIntro(review = false) {
     title: '先说三件事',
     body: `
       <div class="onboard-step">1 / 4</div>
-      <div class="onboard-hero">🍚</div>
+      <div class="onboard-hero">${icon('bowl', { size: 52 })}</div>
       <div class="onboard-h">
         <b>它帮你算「今天该吃多少」</b>
         <p>不是让你少吃，是让你知道自己在吃多少。填几个数字，它会算出你的热量和蛋白脂肪碳水目标，
@@ -554,7 +563,7 @@ function onboardFirst(review = false) {
     title: '最后一步',
     body: `
       <div class="onboard-step">4 / 4</div>
-      <div class="onboard-hero">🌱</div>
+      <div class="onboard-hero">${icon('plant-sprout', { size: 52 })}</div>
       <div class="onboard-h">
         <b>${review ? '记一笔试试' : '记下第一笔，就开始了'}</b>
         <p>不用追求记得准。第一笔随便记点什么 —— 早饭、一杯奶茶、一顿外卖都行。
@@ -612,7 +621,7 @@ function renderWelcome() {
   const trouble = startupNotice?.kind === 'error'
     ? `
     <div class="card" style="border:1px solid #F3C7CF;background:#FFF6F7">
-      <div class="card-title">⚠️ 有一份记录没读出来</div>
+      <div class="card-title">${icon('alert', { size: 16 })} 有一份记录没读出来</div>
       <p class="small" style="margin:0 0 8px">${esc(startupNotice.text)}</p>
       <p class="tiny muted" style="margin:0 0 12px">
         原始内容我已经原样留在这台手机里了，没有删。你可以先导出一份发我，或者重新开始 —— 原来的记录不会因为重新开始就被抹掉。
@@ -626,7 +635,7 @@ function renderWelcome() {
   app.innerHTML = `
     ${trouble}
     <div class="card">
-      <div class="onboard-hero">🍚</div>
+      <div class="onboard-hero">${icon('bowl', { size: 52 })}</div>
       <div class="card-title">知道自己在吃多少，比少吃更有用</div>
       <p class="small muted" style="margin:0 0 14px">
         记一句话就能记下吃了什么，它会算出你每天该吃多少、给你配餐和运动方案。
@@ -716,7 +725,7 @@ function renderToday() {
 
   app.innerHTML = `
     <div class="card hero">
-      <div class="greet">${greet.emoji} <span>${greet.name ? `${esc(greet.word)}，<b>${esc(greet.name)}</b>` : esc(greet.word)}</span></div>
+      <div class="greet">${icon(greet.icon, { size: 18 })} <span>${greet.name ? `${esc(greet.word)}，<b>${esc(greet.name)}</b>` : esc(greet.word)}</span></div>
       <div class="ring-wrap">
         <svg class="ring" viewBox="0 0 190 190" aria-hidden="true">
           <defs>
@@ -765,7 +774,7 @@ function renderToday() {
         <div class="card-title">你的规律</div>
         ${myInsights(3).map((x) => `
           <div class="insight">
-            <span class="insight-ico">${x.icon}</span>
+            <span class="insight-ico">${icon(x.icon, { size: 18 })}</span>
             <div>
               <b>${esc(x.title)}</b>
               <p>${esc(x.detail)}</p>
@@ -782,7 +791,7 @@ function renderToday() {
     </div>
 
     <button class="plant-card" data-act="growth">
-      <span class="plant-emoji-sm">${plant.state.stage.emoji}</span>
+      <span class="plant-icon-sm">${icon(plant.state.stage.icon, { size: 30 })}</span>
       <span class="plant-text">
         <b>${esc(plant.state.stage.name)}</b>
         <em>${plant.ach.unlocked.length} 个徽章 · ${plant.state.nextStage ? `再记 ${plant.state.toNext} 天长大` : '已长成'}</em>
@@ -811,12 +820,12 @@ function renderToday() {
           return `<div class="entry">
             <span class="name">${esc(e.food.name)}<em>${e.food.kcalOnly ? '按热量记' : `${e.grams} 克`}</em></span>
             <span class="kcal">${Math.round(f.kcal)} kcal</span>
-            <button class="del" data-act="del-food" data-id="${e.id}" aria-label="删除">✕</button>
+            <button class="del" data-act="del-food" data-id="${e.id}" aria-label="删除">${icon('close', { size: 14 })}</button>
           </div>`;
         }).join('') || '<div class="tiny muted">还没记</div>'}
         <div class="row" style="gap:6px;margin-top:8px">
           <button class="add-line grow" data-act="add-food" data-meal="${slot.key}" style="margin-top:0">＋ 加食物</button>
-          <button class="add-line grow" data-act="quick-fill" data-meal="${slot.key}" style="margin-top:0">💬 说一句</button>
+          <button class="add-line grow" data-act="quick-fill" data-meal="${slot.key}" style="margin-top:0">${icon('chat', { size: 15 })} 说一句</button>
         </div>
       </div>`;
     }).join('')}
@@ -828,7 +837,7 @@ function renderToday() {
         return `<div class="entry">
           <span class="name">${esc(info.name)}<em>${info.minutes} 分钟${info.intensityName ? ` · ${esc(info.intensityName)}` : ''}</em></span>
           <span class="kcal">约 ${info.kcal} kcal</span>
-          <button class="del" data-act="del-exercise" data-id="${x.id}" aria-label="删除">✕</button>
+          <button class="del" data-act="del-exercise" data-id="${x.id}" aria-label="删除">${icon('close', { size: 14 })}</button>
         </div>`;
       }).join('') || '<div class="tiny muted">还没记（走路也算，记上会更准）</div>'}
       <button class="add-line" data-act="add-exercise">＋ 加运动</button>
@@ -885,8 +894,8 @@ function renderLog() {
   const tab = currentRecordTab();
   app.innerHTML = `
     <div class="segments" id="recordTabs" role="tablist" aria-label="记什么">
-      <button class="seg-btn ${tab === 'food' ? 'on' : ''}" data-record-tab="food" role="tab" aria-selected="${tab === 'food'}">🍚 吃的</button>
-      <button class="seg-btn ${tab === 'training' ? 'on' : ''}" data-record-tab="training" role="tab" aria-selected="${tab === 'training'}">🏃 练的</button>
+      <button class="seg-btn ${tab === 'food' ? 'on' : ''}" data-record-tab="food" role="tab" aria-selected="${tab === 'food'}">${icon('bowl', { size: 16 })} 吃的</button>
+      <button class="seg-btn ${tab === 'training' ? 'on' : ''}" data-record-tab="training" role="tab" aria-selected="${tab === 'training'}">${icon('run', { size: 16 })} 练的</button>
     </div>
     ${tab === 'training' ? renderTrainingPane() : renderFoodPane()}`;
   app.querySelectorAll('[data-record-tab]').forEach((b) => {
@@ -1053,7 +1062,7 @@ function trainingRow(it, { showDate = false } = {}) {
     <div class="entry">
       <span class="name">${esc(it.name)}<em>${showDate ? `${dayLabel(it.dateKey)} · ` : ''}${it.minutes} 分钟${it.intensityName ? ` · ${esc(it.intensityName)}` : ''}${it.note ? ` · ${esc(it.note)}` : ''}</em></span>
       <span class="kcal">约 ${it.kcal} kcal</span>
-      <button class="del" data-act="del-exercise" data-id="${it.id}"${showDate ? ` data-date="${it.dateKey}"` : ''} aria-label="删除">✕</button>
+      <button class="del" data-act="del-exercise" data-id="${it.id}"${showDate ? ` data-date="${it.dateKey}"` : ''} aria-label="删除">${icon('close', { size: 14 })}</button>
     </div>`;
 }
 
@@ -1075,7 +1084,7 @@ function renderTrainingPane() {
           <em>${esc(cardioPick.equipment.map((k) => EQUIPMENT[k]?.name || k).join('、'))}</em>
         </summary>
         <div class="chips" id="trainEquip">
-          ${listEquipment().map((eq) => `<button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-train-eq="${eq.key}">${eq.icon} ${eq.name}</button>`).join('')}
+          ${listEquipment().map((eq) => `<button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-train-eq="${eq.key}">${icon(eq.icon, { size: 15 })} ${eq.name}</button>`).join('')}
         </div>
         <p class="tiny muted" style="margin:8px 0 0">勾了哪些，下面就只列哪些做得了的动作（和「计划」页共用同一份勾选）。</p>
       </details>
@@ -1474,7 +1483,7 @@ function drawDraft() {
     // 先给一句落在「记录」这件事上的反馈，再检查有没有解锁新徽章
     const t = targets();
     const msg = afterLogMessage(state, savedMeal, t?.proteinG || 60);
-    toast(`${msg.emoji} ${msg.text}`);
+    toast(msg.text, msg.icon);
     checkNewAchievements();
   });
   $('#draftCancel', box)?.addEventListener('click', () => {
@@ -1531,7 +1540,7 @@ function renderPlan() {
     <div class="card">
       <div class="card-title">每天的固定提醒</div>
       <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
-        ${myInsights(2).map((x) => `<li style="margin-bottom:4px">${x.icon} <b>${esc(x.title)}</b><br><span class="muted">${esc(x.detail)}</span></li>`).join('')
+        ${myInsights(2).map((x) => `<li style="margin-bottom:4px">${icon(x.icon, { size: 16 })} <b>${esc(x.title)}</b><br><span class="muted">${esc(x.detail)}</span></li>`).join('')
           || buildDailyTips(t, plan.cookingOilG).map((x) => `<li style="margin-bottom:4px">${esc(x)}</li>`).join('')}
       </ul>
     </div>
@@ -1599,7 +1608,7 @@ function renderCardioCard() {
       <label class="field"><span>今天有哪些器械？（可多选）</span>
         <div class="chips" id="equipChips">
           ${listEquipment().map((eq) => `
-            <button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-eq="${eq.key}">${eq.icon} ${eq.name}</button>
+            <button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-eq="${eq.key}">${icon(eq.icon, { size: 15 })} ${eq.name}</button>
           `).join('')}
         </div>
       </label>
@@ -1879,7 +1888,7 @@ function openFoodSheet(mealKey) {
       <div id="paneSearch">
         <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off" style="margin-top:10px">
         <div id="foodResults" style="margin-top:6px"></div>
-        <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">📋 照包装营养成分表填（更准）</button>
+        <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">${icon('clipboard', { size: 16 })} 照包装营养成分表填（更准）</button>
       </div>
 
       <div id="paneSay" class="hidden">
@@ -2157,7 +2166,7 @@ function openLabelSheet(mealKey = null) {
       </p>
       ${canPhoto ? `
         <input type="file" id="labelFile" accept="image/*" style="display:none">
-        <button class="btn ghost block" id="labelShot">📷 拍营养成分表，自动读出来</button>
+        <button class="btn ghost block" id="labelShot">${icon('camera', { size: 16 })} 拍营养成分表，自动读出来</button>
         <p class="tiny muted" id="labelShotHint" style="margin:8px 0 0">照片只会发给你在设置里配置的 AI 服务商。读出来先核对，再保存。</p>
       ` : `
         <p class="tiny" style="margin:0 0 12px;color:var(--ink-3)">
@@ -2298,7 +2307,7 @@ function openLabelSheet(mealKey = null) {
    ─────────────────────────────────────────── */
 
 function celebrate(opts) {
-  const { emoji, title, sub, badge } = opts;
+  const { iconName = 'sparkles', title, sub } = opts;
   if (state?.settings?.celebrations === false) return;
   // 刚刚存盘失败：这时候庆祝「解锁徽章 / 成了」是假的，先不庆祝
   if (!lastSaveOk) return;
@@ -2307,7 +2316,7 @@ function celebrate(opts) {
   el.innerHTML = `
     <div class="confetti">${Array.from({ length: 14 }, (_, i) => `<i style="--i:${i};--x:${(i * 37) % 100};--d:${(i % 5) * 0.12}s"></i>`).join('')}</div>
     <div class="celebrate-card">
-      <div class="celebrate-emoji">${badge || emoji || '🎉'}</div>
+      <div class="celebrate-emoji">${icon(iconName, { size: 52 })}</div>
       <div class="celebrate-title">${esc(title || '解锁了一个徽章')}</div>
       ${sub ? `<div class="celebrate-sub">${esc(sub)}</div>` : ''}
       <button class="btn block" id="celebrateOk">好</button>
@@ -2331,7 +2340,7 @@ function checkNewAchievements() {
   markAchievementsSeen(state, a.justUnlocked.map((x) => x.id));
   save();
   celebrate({
-    badge: first.emoji,
+    iconName: first.icon,
     title: badgeLabel(state, first),
     sub: first.congrats,
   });
@@ -2342,7 +2351,7 @@ function checkNewAchievements() {
     state.achievements.milestones = [...(state.achievements?.milestones || []), mile.days];
     save();
     setTimeout(() => celebrate({
-      badge: mile.emoji,
+      iconName: mile.icon,
       title: mile.text,
       sub: '记录满这个数了，给你一朵。',
     }), 1400);
@@ -2459,7 +2468,7 @@ function openSettingsSheet() {
     title: '设置',
     body: `
       <button class="set-row" data-set="profile">
-        <span class="set-ico">👤</span>
+        <span class="set-ico">${icon('user', { size: 18 })}</span>
         <span class="set-main"><b>你的资料</b><em>${state.profile ? `${state.profile.heightCm} cm · ${state.profile.weightKg} kg · ${state.profile.age} 岁` : '还没填'}</em></span>
         <span class="set-go">›</span>
       </button>
@@ -2479,37 +2488,37 @@ function openSettingsSheet() {
       </div>
 
       <button class="set-row" data-set="ai">
-        <span class="set-ico">✨</span>
+        <span class="set-ico">${icon('sparkles', { size: 18 })}</span>
         <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（普通模式不需要）'}</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="growth">
-        <span class="set-ico">${plant.stage.emoji}</span>
+        <span class="set-ico">${icon('tree', { size: 18 })}</span>
         <span class="set-main"><b>我的成长</b><em>${a.unlocked.length} / ${a.list.length} 个徽章 · ${plant.stage.name}</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="backup">
-        <span class="set-ico">💾</span>
+        <span class="set-ico">${icon('save', { size: 18 })}</span>
         <span class="set-main"><b>数据与备份</b><em>存档 v${SCHEMA_VERSION}${backup ? ` · 有升级前快照（${String(backup.savedAt).slice(0, 10)}）` : ''}</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="wipe">
-        <span class="set-ico">🧹</span>
+        <span class="set-ico">${icon('trash', { size: 18 })}</span>
         <span class="set-main"><b>从头开始</b><em>清掉这台手机上的记录，重新走一遍新手引导</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="guide">
-        <span class="set-ico">🧭</span>
+        <span class="set-ico">${icon('compass', { size: 18 })}</span>
         <span class="set-main"><b>重看新手引导</b><em>忘了怎么用、想换模式，都从这里（不会动你的记录）</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="about">
-        <span class="set-ico">ℹ️</span>
+        <span class="set-ico">${icon('info', { size: 18 })}</span>
         <span class="set-main"><b>关于</b><em>算得准不准、数据存在哪、更新怎么生效</em></span>
         <span class="set-go">›</span>
       </button>
@@ -2703,7 +2712,7 @@ function openInsightsSheet() {
     body: `
       ${list.length ? list.map((x) => `
         <div class="insight full">
-          <span class="insight-ico">${x.icon}</span>
+          <span class="insight-ico">${icon(x.icon, { size: 18 })}</span>
           <div>
             <b>${esc(x.title)}</b>
             <p>${esc(x.detail)}</p>
@@ -2973,19 +2982,19 @@ function openGrowthSheet() {
     title: '我的成长',
     body: `
       <div class="plant-box">
-        <div class="plant-emoji">${plant.stage.emoji}</div>
+        <div class="plant-art">${icon(plant.stage.icon, { size: 56 })}</div>
         <div class="plant-info">
           <div class="plant-name">${esc(plant.stage.name)}</div>
           <div class="tiny muted">${esc(plant.line)}</div>
           <div class="plant-bar"><i style="width:${plant.nextStage ? Math.min(100, Math.round((plant.total / plant.nextStage.min) * 100)) : 100}%"></i></div>
-          <div class="tiny muted">${plant.nextStage ? `再记 ${plant.toNext} 天，就会${esc(plant.nextStage.name)}` : '已经长到最大了 🌳'}</div>
+          <div class="tiny muted">${plant.nextStage ? `再记 ${plant.toNext} 天，就会${esc(plant.nextStage.name)}` : '已经长到最大了'}</div>
         </div>
       </div>
 
       ${showWeekly ? `
         <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFCFC;border:1px solid var(--line)">
           <div class="card-title">这周的小结</div>
-          <div class="hl">${hl.emoji} <b>${esc(hl.text)}</b></div>
+          <div class="hl">${icon(hl.icon, { size: 16 })} <b>${esc(hl.text)}</b></div>
           ${review.lines.map((l) => `<div class="small muted" style="margin:4px 0">· ${esc(l)}</div>`).join('')}
           <div class="week-dots">
             ${review.days.map((d) => `<span class="${d.logged ? 'on' : ''}" title="${d.date}">${d.date.slice(-2)}</span>`).join('')}
@@ -2997,7 +3006,7 @@ function openGrowthSheet() {
         <div class="badge-grid">
           ${a.list.map((x) => `
             <div class="ach ${x.unlocked ? 'on' : ''}" data-ach="${x.id}">
-              <span class="ach-emoji">${x.unlocked ? x.emoji : '🔒'}</span>
+              <span class="ach-icon">${x.unlocked ? icon(x.icon, { size: 30 }) : icon('lock', { size: 22 })}</span>
               <span class="ach-name">${esc(badgeLabel(x))}</span>
               ${x.unlocked ? '' : `<span class="ach-bar"><i style="width:${x.pct}%"></i></span>`}
             </div>`).join('')}
@@ -3008,13 +3017,13 @@ function openGrowthSheet() {
       </div>
 
       ${recent.length ? `
-        <div class="small muted" style="text-align:center;margin-top:10px">最近拿到：${recent.map((x) => x.emoji + x.name).join('、')}</div>` : ''}`,
+        <div class="small muted" style="text-align:center;margin-top:10px">最近拿到：${recent.map((x) => icon(x.icon, { size: 14 }) + x.name).join('、')}</div>` : ''}`,
     onMount: (body) => {
       body.querySelectorAll('[data-ach]').forEach((el) => {
         el.addEventListener('click', () => {
           const x = a.list.find((y) => y.id === el.dataset.ach);
           if (!x) return;
-          toast(x.unlocked ? `${x.emoji} ${x.congrats}` : `${x.hint}（${x.value}/${x.target}）`);
+          toast(x.unlocked ? x.congrats : `${x.hint}（${x.value}/${x.target}）`, x.unlocked ? x.icon : 'lock');
         });
       });
     },
@@ -3161,7 +3170,7 @@ function drawAiSettings(cfg, relay, then = null) {
       <div class="chips" id="presetChips">
         ${PRESETS.map((p) => `
           <button class="chip ${presetId === p.id ? 'on' : ''}" data-preset="${p.id}">
-            ${esc(p.name)}${p.recommended ? ' ★' : ''}${p.directCall === false ? ' ⚠' : ''}
+            ${esc(p.name)}${p.recommended ? ` ${icon('star', { size: 12 })}` : ''}${p.directCall === false ? '（需中转）' : ''}
           </button>`).join('')}
       </div>
     </label>
@@ -3331,7 +3340,7 @@ function drawAiSettings(cfg, relay, then = null) {
     show('已保存，正在测试连通…', 'info');
     const t = await testConnection();
     if (t.ok) {
-      show(`✅ 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>已经切到 AI 模式：现在你怎么写都能听懂了。`, 'info');
+      show(`${icon('check', { size: 15 })} 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>已经切到 AI 模式：现在你怎么写都能听懂了。`, 'info');
       ai = { configured: true, checked: true, mode: currentAiConfig().mode };
       // 保存完把输入框清空，只留占位提示：密钥不该一直明文摊在屏幕上，
       // 也让「留空则不改」这句话在同一个弹层里就变成真的
@@ -3352,8 +3361,8 @@ function drawAiSettings(cfg, relay, then = null) {
   $('#aiTest')?.addEventListener('click', async () => {
     show('正在测试…（最多 20 秒）', 'info');
     const r = await testConnection();
-    if (r.ok) show(`✅ 连通正常（${esc(r.model || '')} 回复：${esc(r.reply || '正常')}）${r.via === 'relay' ? '（走电脑中转）' : ''}`, 'info');
-    else show(`❌ ${esc(r.error)}`, '');
+    if (r.ok) show(`${icon('check', { size: 15 })} 连通正常（${esc(r.model || '')} 回复：${esc(r.reply || '正常')}）${r.via === 'relay' ? '（走电脑中转）' : ''}`, 'info');
+    else show(`${icon('alert', { size: 15 })} ${esc(r.error)}`, '');
   });
 
   $('#aiClear')?.addEventListener('click', () => {
@@ -3747,7 +3756,7 @@ if (bootParams.has('__selfcheck')) {
 if (startupNotice) {
   setTimeout(() => {
     if (startupNotice.kind === 'error') {
-      celebrate({ badge: '⚠️', title: '记录读取有问题', sub: startupNotice.text });
+      celebrate({ iconName: 'alert', title: '记录读取有问题', sub: startupNotice.text });
     } else {
       toast(startupNotice.text);
     }

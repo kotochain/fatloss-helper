@@ -231,7 +231,7 @@ test('没有「专属徽章」这种概念：所有徽章对所有人都成立',
   // 曾经有 3 个「小繁专属」徽章。要给别人用就去掉了 ——
   // 别人看到「别人的名字专属徽章」会觉得这不是给自己做的。
   assert.equal(ACHIEVEMENTS.filter((a) => a.special).length, 0, '不该再有专属徽章');
-  assert.ok(ACHIEVEMENTS.every((a) => a.emoji && a.name && a.congrats), '每个徽章都要有表情、名字和一句祝贺');
+  assert.ok(ACHIEVEMENTS.every((a) => a.icon && a.name && a.congrats), '每个徽章都要有图标、名字和一句祝贺');
   assert.ok(ACHIEVEMENTS.every((a) => !/专属/.test(a.name)), '徽章名字里不该出现「专属」');
 
   // 换个名字用，徽章完全一样
@@ -259,7 +259,7 @@ test('里程碑：每满 10 天踩到一次，且不会重复弹', () => {
   assert.equal(hitMilestone(loggedState(9)), null, '第 9 天不该触发');
   const m10 = hitMilestone(loggedState(10));
   assert.ok(m10 && m10.days === 10, '第 10 天应当触发');
-  assert.ok(m10.emoji && m10.text, '里程碑要有表情和一句话');
+  assert.ok(m10.icon && m10.text, '里程碑要有图标和一句话');
   const m30 = hitMilestone(loggedState(30));
   assert.equal(m30.days, 30);
   // 第 11 天不该再触发 10 天那个
@@ -298,7 +298,7 @@ test('蛋白达标时明确告诉她是这件事最值钱', () => {
   const target = Math.max(1, dayTotals(s, todayKey()).protein - 10); // 保证达标
   const msg = afterLogMessage(s, 'dinner', target);
   assert.ok(msg.text.includes('蛋白'), `达标时的反馈应当点明蛋白：${msg.text}`);
-  assert.ok(msg.emoji, '应当带一个表情');
+  assert.ok(msg.icon, '应当带一个图标');
 });
 
 test('周报把行为放前面，体重只作为其中一个数字', () => {
@@ -321,7 +321,7 @@ test('一周没记录时不说重话，而是给台阶', () => {
 });
 
 test('周报高光：记录多、蛋白好、运动勤分别有不同说法', () => {
-  assert.equal(weeklyHighlight({ loggedDays: 7 }).emoji, '🏆');
+  assert.equal(weeklyHighlight({ loggedDays: 7 }).icon, 'badge-trophy');
   assert.ok(weeklyHighlight({ loggedDays: 5, proteinHitDays: 5 }).text.includes('蛋白'));
   assert.ok(weeklyHighlight({ loggedDays: 5, proteinHitDays: 1, exerciseDays: 4 }).text.includes('动'));
   assert.ok(weeklyHighlight({ loggedDays: 2, proteinHitDays: 0, exerciseDays: 0 }).text.includes('开始') || weeklyHighlight({ loggedDays: 2 }).text.includes('稳定'));

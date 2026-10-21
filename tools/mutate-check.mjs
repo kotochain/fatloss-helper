@@ -103,6 +103,10 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: "if (!Number.isFinite(k) || k <= 0) return { ok: false, error: '热量要填一个大于 0 的数字（kcal）。' };", to: 'if (!Number.isFinite(k)) return { ok: false };', why: '「只填热量」要挡住 0 / 负数（否则会记一条 0 kcal 的空记录）' },
   { file: 'js/foods.js', from: 'if (k > 5000) return { ok: false', to: 'if (k > 99999) return { ok: false', why: '「只填热量」要挡住明显多填一位的数字' },
   { file: 'js/store.js', from: '      if (e.food.kcalOnly) continue;', to: '      if (false) continue;', why: '「只填热量」的条目不该出现在「常吃的」里（否则变成 100 克 = 650 kcal 的怪快捷项）' },
+  // ── 第十二轮：emoji 换内联 SVG 图标 ──
+  { file: 'js/icons.js', from: "    ? ' stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"'", to: "    ? ''", why: '线性图标必须在根 svg 上带描边（漏了就是整片透明，界面上只剩空位）' },
+  { file: 'js/icons.js', from: '    body = LINE[key] || LINE._fallback;', to: '    body = LINE[key];', why: '未知图标名要有兜底字形（不能把 undefined 塞进 DOM）' },
+  { file: 'js/icons.js', from: "  const badgeKey = key.startsWith('badge-') ? key.slice(6) : key;", to: '  const badgeKey = key;', why: '徽章名带 badge- 前缀，查表时要剥掉（否则全部退化成方块）' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

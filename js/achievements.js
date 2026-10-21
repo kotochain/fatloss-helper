@@ -51,7 +51,7 @@ export function greeting(state, hour = new Date().getHours()) {
         : hour >= 18 && hour < 23 ? '晚上好'
           : '这么晚还没睡呀';
   return {
-    emoji: hour >= 18 || hour < 5 ? '🌙' : '🌤️',
+    icon: hour >= 18 || hour < 5 ? 'moon' : 'sun',
     word,
     name,
     // 没填称呼时不要留一个孤零零的逗号
@@ -125,12 +125,12 @@ export function recentDays(n, today = todayKey()) {
 /* ── 小植物 ─────────────────────────────── */
 
 export const PLANT_STAGES = [
-  { min: 0, emoji: '🌱', name: '刚发芽', line: '记一笔，它就会长一点。' },
-  { min: 3, emoji: '🌿', name: '长叶子了', line: '三天了，它开始有样子了。' },
-  { min: 7, emoji: '🪴', name: '变成小盆栽', line: '一周的记录，它站住了。' },
-  { min: 14, emoji: '🌷', name: '开花了', line: '两周。这已经不是"试试看"了。' },
-  { min: 30, emoji: '🌻', name: '长成一朵向日葵', line: '一个月，养成了。' },
-  { min: 60, emoji: '🌳', name: '长成一棵树', line: '两个月，谁也别想让你放弃了。' },
+  { min: 0, icon: 'plant-sprout', name: '刚发芽', line: '记一笔，它就会长一点。' },
+  { min: 3, icon: 'plant-leaf', name: '长叶子了', line: '三天了，它开始有样子了。' },
+  { min: 7, icon: 'plant-pot', name: '变成小盆栽', line: '一周的记录，它站住了。' },
+  { min: 14, icon: 'plant-tulip', name: '开花了', line: '两周。这已经不是"试试看"了。' },
+  { min: 30, icon: 'plant-sunflower', name: '长成一朵向日葵', line: '一个月，养成了。' },
+  { min: 60, icon: 'plant-tree', name: '长成一棵树', line: '两个月，谁也别想让你放弃了。' },
 ];
 
 /**
@@ -167,7 +167,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'first_log',
     name: '第一次记录',
-    emoji: '🌱',
+    icon: 'badge-sprout',
     hint: '记下第一笔饮食',
     target: 1,
     progress: (s) => (totalLoggedDays(s) >= 1 ? 1 : 0),
@@ -176,7 +176,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'days_3',
     name: '三天不断',
-    emoji: '🌿',
+    icon: 'badge-leaf',
     hint: '累计记录 3 天',
     target: 3,
     progress: (s) => totalLoggedDays(s),
@@ -185,7 +185,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'days_7',
     name: '一周记录',
-    emoji: '🪴',
+    icon: 'badge-pot',
     hint: '累计记录 7 天',
     target: 7,
     progress: (s) => totalLoggedDays(s),
@@ -194,7 +194,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'days_30',
     name: '一个月',
-    emoji: '🌻',
+    icon: 'badge-sunflower',
     hint: '累计记录 30 天',
     target: 30,
     progress: (s) => totalLoggedDays(s),
@@ -203,7 +203,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'streak_7',
     name: '连记七天',
-    emoji: '🔥',
+    icon: 'badge-flame',
     hint: '连续记录 7 天',
     target: 7,
     progress: (s) => currentStreak(s),
@@ -212,7 +212,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'streak_14',
     name: '两周不间断',
-    emoji: '💫',
+    icon: 'badge-sparkle',
     hint: '连续记录 14 天',
     target: 14,
     progress: (s) => currentStreak(s),
@@ -221,7 +221,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'streak_30',
     name: '三十天没断',
-    emoji: '🏔️',
+    icon: 'badge-mountain',
     hint: '连续记录 30 天',
     target: 30,
     progress: (s) => currentStreak(s),
@@ -230,7 +230,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'protein_1',
     name: '第一次吃够蛋白',
-    emoji: '💪',
+    icon: 'badge-muscle',
     hint: '有一天蛋白质达标',
     target: 1,
     progress: (s, proteinTarget) => proteinDays(s, proteinTarget),
@@ -239,7 +239,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'protein_7',
     name: '蛋白七日达标',
-    emoji: '🥚',
+    icon: 'badge-egg',
     hint: '累计 7 天蛋白质达标',
     target: 7,
     progress: (s, proteinTarget) => proteinDays(s, proteinTarget),
@@ -248,7 +248,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'protein_30',
     name: '蛋白三十日达标',
-    emoji: '🍗',
+    icon: 'badge-protein',
     hint: '累计 30 天蛋白质达标',
     target: 30,
     progress: (s, proteinTarget) => proteinDays(s, proteinTarget),
@@ -257,7 +257,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'first_exercise',
     name: '动了第一次',
-    emoji: '🏃‍♀️',
+    icon: 'badge-run',
     hint: '记下第一次运动',
     target: 1,
     progress: (s) => exerciseCount(s),
@@ -266,7 +266,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'exercise_10',
     name: '运动十次',
-    emoji: '🎽',
+    icon: 'badge-jersey',
     hint: '累计记录 10 次运动',
     target: 10,
     progress: (s) => exerciseCount(s),
@@ -275,7 +275,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'weight_2',
     name: '敢上秤的人',
-    emoji: '⚖️',
+    icon: 'badge-scale',
     hint: '记录 2 次体重',
     target: 2,
     progress: (s) => (s?.weights || []).length,
@@ -284,7 +284,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'weight_10',
     name: '十次体重记录',
-    emoji: '📈',
+    icon: 'badge-trend',
     hint: '累计记录 10 次体重',
     target: 10,
     progress: (s) => (s?.weights || []).length,
@@ -293,7 +293,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'custom_food',
     name: '自己建了食物',
-    emoji: '🧾',
+    icon: 'badge-receipt',
     hint: '新增一个自定义食物',
     target: 1,
     progress: (s) => (s?.customFoods || []).length,
@@ -302,7 +302,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'start_badge',
     name: '开始的人',
-    emoji: '🌼',
+    icon: 'badge-flower',
     hint: '记下第一笔就有',
     target: 1,
     progress: (s) => (totalLoggedDays(s) >= 1 ? 1 : 0),
@@ -311,7 +311,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'steady_week',
     name: '稳定的一周',
-    emoji: '💮',
+    icon: 'badge-blossom',
     hint: '累计记录 7 天',
     target: 7,
     progress: (s) => totalLoggedDays(s),
@@ -320,7 +320,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'steady_month',
     name: '一个月',
-    emoji: '🌸',
+    icon: 'badge-flower',
     hint: '累计记录 30 天',
     target: 30,
     progress: (s) => totalLoggedDays(s),
@@ -329,7 +329,7 @@ export const ACHIEVEMENTS = [
   {
     id: 'honest_log',
     name: '如实记录',
-    emoji: '🫶',
+    icon: 'badge-heart',
     hint: '有一天吃了 3 餐以上',
     target: 1,
     progress: (s) => (maxMealsInADay(s) >= 3 ? 1 : 0),
@@ -382,7 +382,7 @@ export function achievements(state, proteinTarget) {
     return {
       id: a.id,
       name: a.name,
-      emoji: a.emoji,
+      icon: a.icon,
       hint: a.hint,
       congrats: a.congrats,
       target: a.target,
@@ -429,15 +429,15 @@ export function afterLogMessage(state, mealKey, proteinTarget, today = todayKey(
 
   const name = nickname(state);
   if (streak === 1 && totalLoggedDays(state) === 1) {
-    return { text: name ? `${name}的第一笔记录，成了。` : '第一笔记录，成了。', emoji: '🌼' };
+    return { text: name ? `${name}的第一笔记录，成了。` : '第一笔记录，成了。', icon: 'badge-flower' };
   }
-  if (streak === 3) return { text: '连着三天了，数据开始有形状。', emoji: '🌿' };
-  if (streak === 7) return { text: name ? `${name}一整周没落下。` : '一整周没落下。', emoji: '💮' };
-  if (proteinPct >= 1) return { text: '今天的蛋白质达标了，这条最值钱。', emoji: '💪' };
-  if (meals >= 3) return { text: '三餐都记全了，这种记录最有参考价值。', emoji: '🫶' };
-  if (mealKey === 'breakfast') return { text: '早餐记上了 —— 很多人的早餐是最大的盲区。', emoji: '☀️' };
-  if (streak >= 2) return { text: `第 ${streak} 天了，记着就行。`, emoji: '✨' };
-  return { text: '记上了。', emoji: '✅' };
+  if (streak === 3) return { text: '连着三天了，数据开始有形状。', icon: 'badge-leaf' };
+  if (streak === 7) return { text: name ? `${name}一整周没落下。` : '一整周没落下。', icon: 'badge-blossom' };
+  if (proteinPct >= 1) return { text: '今天的蛋白质达标了，这条最值钱。', icon: 'badge-muscle' };
+  if (meals >= 3) return { text: '三餐都记全了，这种记录最有参考价值。', icon: 'badge-heart' };
+  if (mealKey === 'breakfast') return { text: '早餐记上了 —— 很多人的早餐是最大的盲区。', icon: 'sun' };
+  if (streak >= 2) return { text: `第 ${streak} 天了，记着就行。`, icon: 'badge-sparkle' };
+  return { text: '记上了。', icon: 'check' };
 }
 
 /* ── 周报 ───────────────────────────────── */
@@ -491,21 +491,21 @@ export function weeklyReview(state, { proteinTarget = 60, calorieTarget = 1500, 
 
 /** 一周里的高光（用来做周报标题） */
 export function weeklyHighlight(review) {
-  if (review.loggedDays >= 7) return { emoji: '🏆', text: '整整七天都记了' };
-  if (review.proteinHitDays >= 5) return { emoji: '💪', text: '这周蛋白质吃得很好' };
-  if (review.exerciseDays >= 3) return { emoji: '🏃‍♀️', text: '这周动得挺勤' };
-  if (review.loggedDays >= 4) return { emoji: '🌿', text: '记录得挺稳定' };
-  if (review.loggedDays >= 1) return { emoji: '🌱', text: '开始记了，这就够了' };
-  return { emoji: '🫶', text: '这周先歇着也行' };
+  if (review.loggedDays >= 7) return { icon: 'badge-trophy', text: '整整七天都记了' };
+  if (review.proteinHitDays >= 5) return { icon: 'badge-muscle', text: '这周蛋白质吃得很好' };
+  if (review.exerciseDays >= 3) return { icon: 'badge-run', text: '这周动得挺勤' };
+  if (review.loggedDays >= 4) return { icon: 'badge-leaf', text: '记录得挺稳定' };
+  if (review.loggedDays >= 1) return { icon: 'badge-sprout', text: '开始记了，这就够了' };
+  return { icon: 'badge-heart', text: '这周先歇着也行' };
 }
 
 /** 里程碑：每满 10 天给一张不同的花（对所有用户一样） */
 export const MILESTONES = [
-  { days: 10, emoji: '🌷', text: '十天了' },
-  { days: 20, emoji: '🌻', text: '二十天了' },
-  { days: 30, emoji: '🌸', text: '一个月了' },
-  { days: 50, emoji: '💐', text: '五十天了' },
-  { days: 100, emoji: '🏵️', text: '一百天' },
+  { days: 10, icon: 'badge-tulip', text: '十天了' },
+  { days: 20, icon: 'badge-sunflower', text: '二十天了' },
+  { days: 30, icon: 'badge-blossom', text: '一个月了' },
+  { days: 50, icon: 'badge-bouquet', text: '五十天了' },
+  { days: 100, icon: 'badge-medal', text: '一百天' },
 ];
 
 /**

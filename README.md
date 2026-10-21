@@ -153,6 +153,36 @@
 
 ---
 
+## 〇·五、界面不再用 emoji（2026-10-21，v26，issue #9）
+
+以前整界面靠 emoji 当图标：**123 处、约 50 种**（徽章 55、器械 24、界面 29、洞察 14）。
+问题不是「不好看」这么简单：
+
+- 同一颗 emoji 在 iPhone / 安卓 / Windows 上是三套完全不同的画 —— 产品在别人手机上长什么样，我们控制不了；
+- 风格不统一：有的带底色块、有的纯线、有的立体渐变；
+- 读屏软件会念「米饭 emoji」这种噪音；
+- 换字号时 emoji 的宽窄会变，CI 上真出现过单个 emoji 撑到 37px 挤到旁边文字。
+
+现在全部换成 **内联 SVG**（`js/icons.js`），不引外部字体、不引 CDN、不加位图，断网照样显示：
+
+| 用途 | 形式 |
+| --- | --- |
+| 按钮 / 分段 / 设置行 / 洞察 / 器械 | 单色线性，24 网格、1.6 描边、跟着 `currentColor` 变 |
+| 徽章（19 个） | 柔和底色的圆形勋章 + 同名字形，2 色（底色 + 字形色） |
+| 植物（6 个阶段） | 2~3 色插画（发芽 → 叶子 → 盆栽 → 开花 → 向日葵 → 树） |
+
+**护栏**（防止过两周又混进 emoji）：
+
+- `tests/icons.test.mjs`：扫 `js/*.js` 与 `index.html`，出现 emoji 就红；
+- 每个图标名都要真的存在（写错名字不会静默变方块）；
+- 线性图标必须在根 `<svg>` 上带描边 —— 这条是真踩过的坑：漏了之后所有图标「透明」，
+  页面上只剩布局空位，肉眼要滑到设置页才发现；
+- 真浏览器自检（`browser-check`）会数页面上的图标、兜底方块、缺尺寸，以及界面上残留的 emoji 行。
+
+**可复现**：`npm test`、`node tools/browser-check.mjs`（截图在 `.selfcheck/shot-phone-*`）。
+
+---
+
 ## 待办（GitHub Issues）
 
 **[→ 全部 issue](https://github.com/kotochain/fatloss-helper/issues)**
@@ -323,8 +353,8 @@ npm run check:full      # 全套 11 项（含全按钮清扫、AI 失败注入�
 npm run check:live      # 只测线上：文件逐字节一致 + 真打开线上网址跑一遍（需联网）
 
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
-npm test                       # 296 个自动化测试
-node tools/mutate-check.mjs    # 反向验证：故意改坏 69 处代码，确认测试符合预期（在临时副本里做）
+npm test                       # 302 个自动化测试
+node tools/mutate-check.mjs    # 反向验证：故意改坏 72 处代码，确认测试符合预期（在临时副本里做）
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程
 
