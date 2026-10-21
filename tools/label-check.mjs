@@ -393,6 +393,20 @@ async function main() {
     else if (!/别直接保存/.test(shifted)) fail('劝重拍时没拦住「直接保存」');
     else pass('对不上时直接说「重拍一张」，不让她自己找哪个数错了');
 
+    // 上一段保存食物会弹「第一次记录」的庆祝层（它是延后出现的），等它出来再关掉，否则截图被挡
+    for (let i = 0; i < 6; i++) {
+      await sleep(400);
+      // 可能叠了两层（记一笔 / 徽章），一次点掉所有
+      const n = await ev(client, `(() => { const bs = [...document.querySelectorAll('#celebrateOk')]; bs.forEach((b) => b.click()); return bs.length; })()`);
+      if (!n) break;
+      await sleep(300);
+    }
+    // 截图要拍到那句「重拍」—— 它在下半屏，先滚过去
+    await ev(client, `document.querySelector('#labelPreview')?.scrollIntoView({ block: 'center' })`);
+    await sleep(350);
+    const shotRetake = await client.send('Page.captureScreenshot', { format: 'png' });
+    fs.writeFileSync(path.join(root, '.selfcheck', 'shot-label-retake.png'), Buffer.from(shotRetake.data, 'base64'));
+
     // 她动手改过一个数，就别再念重拍（改完还挂着警告，像在怪她）
     await ev(client, `(() => {
       const el = document.getElementById('labelProtein');
