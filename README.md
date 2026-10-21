@@ -190,11 +190,14 @@
 | # | 事项 | 类型 |
 | --- | --- | --- |
 | [6](https://github.com/kotochain/fatloss-helper/issues/6) | 真机试用：把发现的问题记在这里 | 进行中 |
-| [5](https://github.com/kotochain/fatloss-helper/issues/5) | AI 教练：基于她自己的记录给具体建议 | 已完成（v21），等真机反馈 |
 | [1](https://github.com/kotochain/fatloss-helper/issues/1) | 会员制度：不用自己配 API，充值即用 | 日后 |
 
-已关闭：[#2 普通模式](https://github.com/kotochain/fatloss-helper/issues/2)（8 项验收全部满足）、
-[#3 份量配对](https://github.com/kotochain/fatloss-helper/issues/3)、[#4 器械勾选](https://github.com/kotochain/fatloss-helper/issues/4)（都在 v20 修完）。
+已关闭：[#2 普通模式](https://github.com/kotochain/fatloss-helper/issues/2)、
+[#3 份量配对](https://github.com/kotochain/fatloss-helper/issues/3)、[#4 器械勾选](https://github.com/kotochain/fatloss-helper/issues/4)（v20）、
+[#5 AI 教练](https://github.com/kotochain/fatloss-helper/issues/5)（v21）、
+[#7 点哪一餐记哪一餐](https://github.com/kotochain/fatloss-helper/issues/7) / [#8 模式切换](https://github.com/kotochain/fatloss-helper/issues/8)（v24）、
+[#10 密钥留空误报](https://github.com/kotochain/fatloss-helper/issues/10) / [#11 只填热量](https://github.com/kotochain/fatloss-helper/issues/11)（v25）、
+[#9 emoji 换图标](https://github.com/kotochain/fatloss-helper/issues/9)（v26）。
 
 > **为什么先停在试用**：到现在为止所有验证都是无头浏览器跑出来的，一次真机手点都没有。
 > 引导会不会太长、份量档位准不准、装到主屏幕后什么样 —— 这些在电脑上永远测不出来。
