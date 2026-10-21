@@ -312,12 +312,20 @@ async function main() {
     // 成长弹层（植物插画 + 徽章墙）
     await evaluate(client, `document.querySelector('[data-act="growth"]')?.click()`);
     await sleep(400);
-    const growth = await evaluate(client, `(() => ({
-      标题: document.querySelector('#sheetTitle')?.textContent || '',
-      植物: document.querySelectorAll('.plant-art svg.icon[data-kind="plant"]').length,
-      徽章图标: document.querySelectorAll('.ach-icon svg.icon').length,
-      兜底: [...document.querySelectorAll('#sheetBody svg.icon[data-kind="fallback"]')].length,
-    }))()`);
+    const growth = await evaluate(client, `(() => {
+      const achSvgs = [...document.querySelectorAll('.ach-icon svg.icon[data-kind="badge"]')];
+      return {
+        标题: document.querySelector('#sheetTitle')?.textContent || '',
+        植物: document.querySelectorAll('.plant-art svg.icon[data-kind="plant"]').length,
+        徽章图标: achSvgs.length,
+        徽章尺寸: achSvgs.length ? Math.min(...achSvgs.map((s) => Number(s.getAttribute('width')) || 0)) : 0,
+        标签数: [...document.querySelectorAll('.ach-name')].filter((x) => x.textContent.trim()).length,
+        空标签: [...document.querySelectorAll('.ach-name')].filter((x) => !x.textContent.trim()).length,
+        未解锁: document.querySelectorAll('[data-ach]:not(.on)').length,
+        锁标: document.querySelectorAll('.ach-lock').length,
+        兜底: [...document.querySelectorAll('#sheetBody svg.icon[data-kind="fallback"]')].length,
+      };
+    })()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-6-growth.png`));
     await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
     await sleep(300);
@@ -325,11 +333,17 @@ async function main() {
     // 设置页（一排图标）
     await evaluate(client, `document.querySelector('#profileBtn')?.click()`);
     await sleep(400);
-    const settings = await evaluate(client, `(() => ({
-      图标: document.querySelectorAll('#sheetBody .set-ico svg.icon').length,
-      行数: document.querySelectorAll('#sheetBody .set-row').length,
-      兜底: [...document.querySelectorAll('#sheetBody svg.icon[data-kind="fallback"]')].length,
-    }))()`);
+    const settings = await evaluate(client, `(() => {
+      const tiles = [...document.querySelectorAll('#sheetBody .set-ico')];
+      const svgs = tiles.map((t) => t.querySelector('svg.icon')).filter(Boolean);
+      return {
+        图标: svgs.length,
+        行数: document.querySelectorAll('#sheetBody .set-row').length,
+        图标尺寸: svgs.length ? Math.min(...svgs.map((s) => Number(s.getAttribute('width')) || 0)) : 0,
+        图标块最小: tiles.length ? Math.round(Math.min(...tiles.map((t) => t.getBoundingClientRect().width))) : 0,
+        兜底: [...document.querySelectorAll('#sheetBody svg.icon[data-kind="fallback"]')].length,
+      };
+    })()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-7-settings.png`));
     await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
     await sleep(300);
@@ -394,14 +408,20 @@ function printReport(report) {
     console.log(`  四个标签页卡片数：${JSON.stringify(r.tabs)}`);
     console.log(`  图标：${r.iconAudit.图标数} 个｜兜底方块 ${r.iconAudit.兜底方块.length} 个｜缺尺寸 ${r.iconAudit.缺尺寸} 个｜界面残留 emoji ${r.iconAudit.emoji行.length} 行`);
     if (r.iconAudit.emoji行.length) for (const l of r.iconAudit.emoji行) console.log(`       ↳ 还有 emoji：${l}`);
-    console.log(`  成长弹层：植物插画 ${r.growth.植物} 个｜徽章图标 ${r.growth.徽章图标} 个｜兜底 ${r.growth.兜底} 个`);
-    console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜兜底 ${r.settings.兜底} 个`);
+    console.log(`  成长弹层：植物插画 ${r.growth.植物} 个｜徽章图标 ${r.growth.徽章图标} 个（最小 ${r.growth.徽章尺寸}px）｜徽章名 ${r.growth.标签数} 个（空 ${r.growth.空标签} 个）｜未解锁 ${r.growth.未解锁} 个 / 锁标 ${r.growth.锁标} 个｜兜底 ${r.growth.兜底} 个`);
+    if (r.growth.空标签) console.log(`       ↳ 有 ${r.growth.空标签} 个徽章没有名字（badgeLabel 少传了参数就会这样）`);
+    console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜图标 ${r.settings.图标尺寸}px / 图标块 ${r.settings.图标块最小}px（要求 ≥22 / ≥34）｜兜底 ${r.settings.兜底} 个`);
     console.log(`  资料页预览：${r.profilePreview}`);
     console.log(`  PWA 清单：${r.manifest.name}｜display=${r.manifest.display}｜start_url=${r.manifest.start_url}｜图标 ${r.manifest.icons.join(' ')}`);
     console.log(`  控制台报错：${s.consoleErrors.length ? s.consoleErrors.join(' | ') : '无'}`);
     const iconBad = r.manifest.icons.some((x) => x.includes('❌'));
+    // 图标这轮（v27）新增三条：徽章要有名字、徽章和设置图标要真的放大到看得清
     const uiIconBad = r.iconAudit.emoji行.length > 0 || r.iconAudit.兜底方块.length > 0 || r.iconAudit.缺尺寸 > 0
-      || r.growth.植物 !== 1 || r.growth.兜底 > 0 || r.settings.图标 < 5 || r.settings.兜底 > 0;
+      || r.growth.植物 !== 1 || r.growth.兜底 > 0 || r.growth.空标签 > 0
+      || r.growth.徽章图标 > 0 && r.growth.徽章尺寸 < 48
+      || r.growth.锁标 !== r.growth.未解锁
+      || r.settings.图标 < 5 || r.settings.兜底 > 0
+      || r.settings.图标 > 0 && (r.settings.图标尺寸 < 22 || r.settings.图标块最小 < 34);
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
       || uiIconBad) problems += 1;

@@ -162,6 +162,10 @@ export function plantState(state, today = todayKey()) {
 /**
  * 每个徽章给出：当前进度、目标、是否解锁。
  * kind 只用行为类（记录 / 蛋白 / 运动 / 体重 / 累计），不用「少吃」类。
+ *
+ * **条件不许重复**：v27 以前这里混进了 3 枚跟别人一模一样的徽章
+ * （「开始的人」= 第一次记录、「稳定的一周」= 一周记录、「一个月」出现两次），
+ * 以前徽章名是空的看不出来，名字修好后一眼就发现重复。现在 16 枚，各管一件事。
  */
 export const ACHIEVEMENTS = [
   {
@@ -298,33 +302,6 @@ export const ACHIEVEMENTS = [
     target: 1,
     progress: (s) => (s?.customFoods || []).length,
     congrats: '会看营养标签、会自己建食物，这就比大多数人专业了。',
-  },
-  {
-    id: 'start_badge',
-    name: '开始的人',
-    icon: 'badge-flower',
-    hint: '记下第一笔就有',
-    target: 1,
-    progress: (s) => (totalLoggedDays(s) >= 1 ? 1 : 0),
-    congrats: '开始了。最难的就是这一步。',
-  },
-  {
-    id: 'steady_week',
-    name: '稳定的一周',
-    icon: 'badge-blossom',
-    hint: '累计记录 7 天',
-    target: 7,
-    progress: (s) => totalLoggedDays(s),
-    congrats: '一周了。记录这件事你已经做顺了。',
-  },
-  {
-    id: 'steady_month',
-    name: '一个月',
-    icon: 'badge-flower',
-    hint: '累计记录 30 天',
-    target: 30,
-    progress: (s) => totalLoggedDays(s),
-    congrats: '一个月了。你比自己想的更有耐心。',
   },
   {
     id: 'honest_log',
@@ -504,7 +481,7 @@ export const MILESTONES = [
   { days: 10, icon: 'badge-tulip', text: '十天了' },
   { days: 20, icon: 'badge-sunflower', text: '二十天了' },
   { days: 30, icon: 'badge-blossom', text: '一个月了' },
-  { days: 50, icon: 'badge-bouquet', text: '五十天了' },
+  { days: 50, icon: 'badge-crown', text: '五十天了' },
   { days: 100, icon: 'badge-medal', text: '一百天' },
 ];
 

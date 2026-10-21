@@ -93,7 +93,7 @@ export const MIGRATIONS = [
         : profile;
       // 徽章 id 改名了：旧的三枚专属徽章换成通用的成长线，已解锁状态要跟过去
       const ach = data.achievements || {};
-      const renameMap = { fan_badge: 'start_badge', fan_week: 'steady_week', fan_month: 'steady_month' };
+      const renameMap = { fan_badge: 'first_log', fan_week: 'days_7', fan_month: 'days_30' };
       const seen = (Array.isArray(ach.seen) ? ach.seen : []).map((id) => renameMap[id] || id);
       return { ...data, profile: cleaned, achievements: { ...ach, seen } };
     },

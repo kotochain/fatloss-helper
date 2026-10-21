@@ -84,6 +84,10 @@ test('额度已经吃超时不建议再吃（不能一边超一边劝加餐）',
   const text = localCoachAdvice(brief).lines.join('');
   assert.ok(text.includes('超出'), `应当说清已超出：${text}`);
   assert.ok(!/再加一份|来一份|补法/.test(text), '已经超了还在劝加餐');
+  // 只查上面那几个词不太够：删掉「吃超了」这个分支后，会退回去劝「优先吃蛋白质」，
+  // 上面两条照样过（文本仍是「超出」，也没出现「再加一份」）。这里断言真的在劝她别再补。
+  assert.ok(text.includes('别再补'), `吃超了要说「别再补了」，实际：${text}`);
+  assert.ok(!/优先吃/.test(text), `吃超了不该再推荐吃什么，实际：${text}`);
 });
 
 test('蛋白已经够了就不硬塞蛋白食物', () => {

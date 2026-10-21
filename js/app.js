@@ -213,7 +213,10 @@ function esc(s) {
 function toast(msg, iconName = '') {
   const el = document.createElement('div');
   el.className = 'toast';
-  if (iconName) el.innerHTML = icon(iconName, { size: 16 });
+  if (iconName) {
+    // 徽章在 toast 里出现得比较多，16px 会糊成一团；线性图标 18px 也不挤
+    el.innerHTML = icon(iconName, { size: 18 });
+  }
   const text = document.createElement('span');
   text.textContent = msg;
   el.appendChild(text);
@@ -2316,7 +2319,7 @@ function celebrate(opts) {
   el.innerHTML = `
     <div class="confetti">${Array.from({ length: 14 }, (_, i) => `<i style="--i:${i};--x:${(i * 37) % 100};--d:${(i % 5) * 0.12}s"></i>`).join('')}</div>
     <div class="celebrate-card">
-      <div class="celebrate-emoji">${icon(iconName, { size: 52 })}</div>
+      <div class="celebrate-icon">${icon(iconName, { size: 76 })}</div>
       <div class="celebrate-title">${esc(title || '解锁了一个徽章')}</div>
       ${sub ? `<div class="celebrate-sub">${esc(sub)}</div>` : ''}
       <button class="btn block" id="celebrateOk">好</button>
@@ -2468,7 +2471,7 @@ function openSettingsSheet() {
     title: '设置',
     body: `
       <button class="set-row" data-set="profile">
-        <span class="set-ico">${icon('user', { size: 18 })}</span>
+        <span class="set-ico" data-tone="rose">${icon('user', { size: 23 })}</span>
         <span class="set-main"><b>你的资料</b><em>${state.profile ? `${state.profile.heightCm} cm · ${state.profile.weightKg} kg · ${state.profile.age} 岁` : '还没填'}</em></span>
         <span class="set-go">›</span>
       </button>
@@ -2488,37 +2491,37 @@ function openSettingsSheet() {
       </div>
 
       <button class="set-row" data-set="ai">
-        <span class="set-ico">${icon('sparkles', { size: 18 })}</span>
+        <span class="set-ico" data-tone="gold">${icon('sparkles', { size: 23 })}</span>
         <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（普通模式不需要）'}</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="growth">
-        <span class="set-ico">${icon('tree', { size: 18 })}</span>
+        <span class="set-ico" data-tone="green">${icon('sprout', { size: 23 })}</span>
         <span class="set-main"><b>我的成长</b><em>${a.unlocked.length} / ${a.list.length} 个徽章 · ${plant.stage.name}</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="backup">
-        <span class="set-ico">${icon('save', { size: 18 })}</span>
+        <span class="set-ico" data-tone="blue">${icon('database', { size: 23 })}</span>
         <span class="set-main"><b>数据与备份</b><em>存档 v${SCHEMA_VERSION}${backup ? ` · 有升级前快照（${String(backup.savedAt).slice(0, 10)}）` : ''}</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="wipe">
-        <span class="set-ico">${icon('trash', { size: 18 })}</span>
+        <span class="set-ico" data-tone="red">${icon('trash', { size: 23 })}</span>
         <span class="set-main"><b>从头开始</b><em>清掉这台手机上的记录，重新走一遍新手引导</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="guide">
-        <span class="set-ico">${icon('compass', { size: 18 })}</span>
+        <span class="set-ico" data-tone="mauve">${icon('play', { size: 23 })}</span>
         <span class="set-main"><b>重看新手引导</b><em>忘了怎么用、想换模式，都从这里（不会动你的记录）</em></span>
         <span class="set-go">›</span>
       </button>
 
       <button class="set-row" data-set="about">
-        <span class="set-ico">${icon('info', { size: 18 })}</span>
+        <span class="set-ico" data-tone="gray">${icon('info', { size: 23 })}</span>
         <span class="set-main"><b>关于</b><em>算得准不准、数据存在哪、更新怎么生效</em></span>
         <span class="set-go">›</span>
       </button>
@@ -3006,8 +3009,8 @@ function openGrowthSheet() {
         <div class="badge-grid">
           ${a.list.map((x) => `
             <div class="ach ${x.unlocked ? 'on' : ''}" data-ach="${x.id}">
-              <span class="ach-icon">${x.unlocked ? icon(x.icon, { size: 30 }) : icon('lock', { size: 22 })}</span>
-              <span class="ach-name">${esc(badgeLabel(x))}</span>
+              <span class="ach-icon">${icon(x.icon, { size: 58, label: badgeLabel(state, x) })}${x.unlocked ? '' : `<span class="ach-lock">${icon('lock', { size: 12 })}</span>`}</span>
+              <span class="ach-name">${esc(badgeLabel(state, x))}</span>
               ${x.unlocked ? '' : `<span class="ach-bar"><i style="width:${x.pct}%"></i></span>`}
             </div>`).join('')}
         </div>
@@ -3017,7 +3020,7 @@ function openGrowthSheet() {
       </div>
 
       ${recent.length ? `
-        <div class="small muted" style="text-align:center;margin-top:10px">最近拿到：${recent.map((x) => icon(x.icon, { size: 14 }) + x.name).join('、')}</div>` : ''}`,
+        <div class="small muted" style="text-align:center;margin-top:10px">最近拿到：${recent.map((x) => icon(x.icon, { size: 18 }) + x.name).join('、')}</div>` : ''}`,
     onMount: (body) => {
       body.querySelectorAll('[data-ach]').forEach((el) => {
         el.addEventListener('click', () => {

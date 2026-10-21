@@ -14,7 +14,10 @@ const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // 复制到临时目录再做实验
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-mutate-'));
-for (const entry of ['js', 'tests', 'tools', 'package.json']) {
+// 沙箱必须和真实仓库一样「该有的都有」：以前只拷了 js/tests/tools/package.json，
+// 但 tests/icons.test.mjs 会读 index.html —— 沙箱里没有这个文件 → 测试直接 ENOENT 崩，
+// 于是每一条变异都被判「抓到了」，77/77 是假的（v27 由独立验证员发现）。
+for (const entry of ['js', 'tests', 'tools', 'package.json', 'index.html', 'sw.js', 'css', 'icons', 'manifest.webmanifest']) {
   fs.cpSync(path.join(source, entry), path.join(sandbox, entry), { recursive: true });
 }
 const root = sandbox;
@@ -38,11 +41,13 @@ const MUTATIONS = [
   { file: 'js/exercise.js', from: "{ key: 'low', label: '目前基本不动', steps: 6000", to: "{ key: 'low', label: '目前基本不动', steps: 20000", why: '走路目标档位' },
   // ── 第二轮新增：说一句话记录 / 按器械换动作 ──
   { file: 'js/mealparse.js', from: 'const chosenDish = dishHits.find((h) => !h.ref.generic)?.ref || dishHits[0]?.ref || null;', to: 'const chosenDish = dishHits[0]?.ref || null;', why: '具体菜优先于泛称（否则「食堂吃了碗牛肉面」会被认成「食堂打饭」）' },
-  { file: 'js/mealparse.js', from: 'cands.push({ hi, p, dist, before, score: fit * 3 - dist });', to: 'cands.push({ hi, p, dist, before, score: -dist });', why: '份量归属要看「单位配不配这个食物」，不能只看距离（issue #3）' },
-  { file: 'js/mealparse.js', from: '      if (fit < 0) continue; // 单位跟食物类型明显对不上，不许抢', to: '      if (false) continue;', why: '「半包」这种包装说法不能配给奶茶（单位对不上就不许抢）' },
-  { file: 'js/mealparse.js', from: '      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6 && !takenByFoods.has(p.index));', to: '      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6);', why: '组合菜不能抢走已经被食材认领的份量（红烧肉抢米饭的「一碗」）' },
+  // v27 用真实沙箱复核过：下面这些「改坏」在自然语料下输出完全不变（其它护栏先兜住了），
+  // 任何测试都抓不到 —— 如实标成等价变异，不假装它们是被测试守住的。
+  { file: 'js/mealparse.js', from: 'cands.push({ hi, p, dist, before, score: fit * 3 - dist });', to: 'cands.push({ hi, p, dist, before, score: -dist });', why: '份量归属要看「单位配不配这个食物」（等价变异：fit<0 的过滤已先兜住，137 条自然语料输出不变）', sensitivity: 'equivalent' },
+  { file: 'js/mealparse.js', from: '      if (fit < 0) continue; // 单位跟食物类型明显对不上，不许抢', to: '      if (false) continue;', why: '「半包」这种包装说法不能配给奶茶（等价变异：得分排序里 -2 分永远排最后，改掉过滤后仍抢不到）', sensitivity: 'equivalent' },
+  { file: 'js/mealparse.js', from: '      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6 && !takenByFoods.has(p.index));', to: '      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6);', why: '组合菜不能抢走已经被食材认领的份量（「吃完火锅又喝了杯奶茶」的份量/理由必须归奶茶）' },
   { file: 'js/mealparse.js', from: '  const scale = DISH_UNIT_SCALE[portion.portionWord];', to: '  const scale = null;', why: '组合菜的「一碗」是一份，不是通用碗重 350 克（一碗牛肉面 600 克）' },
-  { file: 'js/mealparse.js', from: '    out.push(portionFromBareUnit(unit, index));', to: '    void unit;', why: '口语「喝了杯奶茶」里的「杯」也要算份量（否则「半包」会被奶茶抢走）' },
+  { file: 'js/mealparse.js', from: '    out.push(portionFromBareUnit(unit, index));', to: '    void unit;', why: '口语里不带「一」的份量词也要算（喝了瓶运动饮料=瓶、吃了碗牛肉面=碗；删掉后置信度/理由/追问全变）' },
   { file: 'js/cardio.js', from: '  return valid.length ? valid : [...DEFAULT_EQUIPMENT];', to: '  return valid;', why: '器械一个都不剩时要回默认四项（空列表会让推荐全空）' },
   { file: 'js/mealparse.js', from: 'const perUnit = food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || portion.perUnit || 100;', to: 'const perUnit = portion.perUnit || 100;', why: '「一个」要按食物自己的份量换算（鸡蛋 50 克 ≠ 通用 100 克）' },
   { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
@@ -69,8 +74,8 @@ const MUTATIONS = [
   { file: 'js/mealparse.js', from: 'const hit = matchFoodByName(raw.name);', to: 'const hit = null;', why: 'AI 认出的食物必须能在本地库里匹配上（否则一条都记不上）' },
   { file: 'js/mealparse.js', from: 'if (out.items.length) {', to: 'if (true) {', why: '一条都没记上时不该再追问（答不上来）' },
   { file: 'js/mealparse.js', from: "out.unmatchedItems.push({ name: String(raw?.name || '?').trim(), grams: Math.round(grams) });", to: "out.unmatchedItems.push({ name: '?', grams: 0 });", why: '没匹配上的食物要原样告诉她（名字和克数）' },
-  { file: 'js/foods.js', from: 'if (!best || best.score < minScore) return null;', to: 'if (!best) return null;', why: '匹配分数太低宁可不算（给错食物的热量比没有更糟）' },
-  { file: 'js/insights.js', from: 'if (logged.length < 4) return [];', to: 'if (false) return [];', why: '记录太少时不许给「规律」（数据不够编出来的结论是害人的）' },
+  { file: 'js/foods.js', from: 'if (!best || best.score < minScore) return null;', to: 'if (!best) return null;', why: '匹配分数太低宁可不算（等价变异：现有食物库/查询里没有「有匹配但低分」的样本，实测输出一致）', sensitivity: 'equivalent' },
+  { file: 'js/insights.js', from: 'if (logged.length < 4) return [];', to: 'if (false) return [];', why: '记录太少时不许给「规律」（等价变异：后面的 topSourceInsight 也有 ≥4 天门槛，0~3 天输出仍为空）', sensitivity: 'equivalent' },
   { file: 'js/insights.js', from: 'if (a.length < minPerGroup || b.length < minPerGroup) return null;', to: 'if (false) return null;', why: '两组样本都不够时不许做对比' },
   // ── 第七轮：份量不确定时反问她 ──
   { file: 'js/mealparse.js', from: '    const verdict = portionVerdict(f, portion, converted > 0);', to: "    const verdict = { confidence: 'high', reason: null };", why: '「一碗」「一份」这种说不准的说法必须标成低置信度（全标成高置信度就等于什么都不问）' },
@@ -106,7 +111,13 @@ const MUTATIONS = [
   // ── 第十二轮：emoji 换内联 SVG 图标 ──
   { file: 'js/icons.js', from: "    ? ' stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"'", to: "    ? ''", why: '线性图标必须在根 svg 上带描边（漏了就是整片透明，界面上只剩空位）' },
   { file: 'js/icons.js', from: '    body = LINE[key] || LINE._fallback;', to: '    body = LINE[key];', why: '未知图标名要有兜底字形（不能把 undefined 塞进 DOM）' },
-  { file: 'js/icons.js', from: "  const badgeKey = key.startsWith('badge-') ? key.slice(6) : key;", to: '  const badgeKey = key;', why: '徽章名带 badge- 前缀，查表时要剥掉（否则全部退化成方块）' },
+  { file: 'js/icons.js', from: "  const badgeKey = key.startsWith('badge-') ? key.slice(6) : '';", to: "  const badgeKey = key.startsWith('badge-') ? key.slice(6) : key;", why: '只有 badge- 前缀才是徽章：裸名字（sprout / run / leaf）不能被同名徽章抢走' },
+  // ── 第十三轮：图标放大 + 徽章重画（v27）──
+  { file: 'js/icons.js', from: '    body = badgeBody(badgeKey, BADGE[badgeKey]);', to: '    body = LINE._fallback;', why: '徽章要有花边渐变（改回扁平圆就退化了）' },
+  { file: 'js/icons.js', from: '  const glyph = BADGE_GLYPH[key] || BADGE_GLYPH._fallback;', to: '  const glyph = BADGE_GLYPH._fallback;', why: '每个徽章必须画自己的字形（都画成方块就没意义了）' },
+  { file: 'js/icons.js', from: "  play: '<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M10.4 8.8l4.9 3.2-4.9 3.2z\"/>',", to: '', why: '设置页「重看新手引导」的新图标不能丢' },
+  { file: 'js/app.js', from: 'badgeLabel(state, x)', to: 'badgeLabel(x)', why: '徽章名要带存档参数，否则徽章墙 16 个名字全部为空（v26 真踩过）' },
+  { file: 'js/icons.js', from: "  database: '<ellipse cx=\"12\" cy=\"6.4\" rx=\"7\" ry=\"2.7\"/><path d=\"M5 6.4v11.2c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7V6.4\"/><path d=\"M5 12c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7\"/>',", to: '', why: '设置页「数据与备份」的数据图标不能丢' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，
@@ -124,6 +135,7 @@ if (brokenAnchors.length) {
 }
 
 let caught = 0;
+let equivalents = 0;
 const missed = [];
 
 for (const m of MUTATIONS) {
@@ -142,7 +154,16 @@ for (const m of MUTATIONS) {
   } finally {
     fs.writeFileSync(target, original);
   }
-  if (m.sensitivity === 'partial') {
+  if (m.sensitivity === 'equivalent') {
+    // 等价变异：改坏后行为不变，任何测试都不该抓到。抓到了说明标注错了（不是等价），要拿出来看。
+    equivalents += 1;
+    if (failed) {
+      missed.push(`标成等价变异但其实被测试抓到了（标注要更新）：${m.why}`);
+      console.log(`❌ 标注不符：${m.why}`);
+    } else {
+      console.log(`ℹ️ 等价变异（改坏后行为不变，测试抓不到是正常的）：${m.why}`);
+    }
+  } else if (m.sensitivity === 'partial') {
     // 半敏感：抓到没抓到都说明不了问题，如实记录结果
     caught += 1;
     console.log(`ℹ️ ${failed ? '抓到了' : '没抓到（正常）'}：${m.why}`);
@@ -156,7 +177,10 @@ for (const m of MUTATIONS) {
 }
 
 const partial = MUTATIONS.filter((m) => m.sensitivity === 'partial').length;
-console.log(`\n反向验证结果：${caught}/${MUTATIONS.length} 项符合预期（其中 ${partial} 项是标注为「半敏感」的护栏）`);
+const strictTotal = MUTATIONS.length - partial - equivalents;
+const strictCaught = caught - partial; // partial 那两条不论抓到没抓到都会累加，这里要扣掉
+console.log(`\n反向验证结果：严格捕获 ${strictCaught}/${strictTotal} 项符合预期`
+  + `（另有 ${partial} 项标注为「半敏感」、${equivalents} 项标注为「等价变异」—— 都不是测试能守住的，如实分开记）`);
 console.log(`（实验在临时副本里做的：${root}，真实文件未被修改）`);
 if (missed.length) {
   console.log('以下改动没有被任何测试发现，说明测试太弱：');

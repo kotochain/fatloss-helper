@@ -825,14 +825,25 @@ details[open] summary { margin-bottom: 4px; }
 }
 .set-row:active { background: var(--rose-soft); }
 .set-ico {
-  /* 矢量图标尺寸固定，不会再出现「不同系统 emoji 宽窄不一挤到文字」的问题 */
-  min-width: 26px;
+  /* 彩色图标块：38px 圆角方块 + 23px 线框图标 —— 18px 的灰色线条在真机上太小、也认不出。
+     颜色跟徽章用的是同一套暖色，一行一个色，靠颜色和形状一起表意。 */
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
   line-height: 1;
   flex: 0 0 auto;
   color: var(--ink-2);
+  background: #F2F0EA;
 }
+.set-ico[data-tone="rose"] { background: #FDECF0; color: #D9677F; }
+.set-ico[data-tone="gold"] { background: #FDF3E2; color: #B98432; }
+.set-ico[data-tone="green"] { background: #EEF6F0; color: #4F8368; }
+.set-ico[data-tone="blue"] { background: #EDF2F4; color: #5C7D8A; }
+.set-ico[data-tone="red"] { background: #FBEAE2; color: #C2694B; }
+.set-ico[data-tone="mauve"] { background: #F6EFF5; color: #96648A; }
+.set-ico[data-tone="gray"] { background: #F2F0EA; color: #7A7264; }
 .set-main { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .set-main b { font-size: 14px; font-weight: 650; }
 .set-main em { font-style: normal; font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -903,13 +914,13 @@ details[open] summary { margin-bottom: 4px; }
 .week-dots span.on { background: var(--grad-soft); color: var(--rose-deep); font-weight: 680; }
 
 /* 徽章墙 */
-.badge-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.badge-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .ach {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 11px 6px 9px;
+  gap: 5px;
+  padding: 12px 5px 10px;
   border-radius: var(--radius-sm);
   background: #FAF6F7;
   cursor: pointer;
@@ -921,9 +932,26 @@ details[open] summary { margin-bottom: 4px; }
 .ach.special.on { background: linear-gradient(150deg, #FFF6E6, #FFEEDC); box-shadow: 0 2px 10px rgba(220, 160, 80, 0.16); }
 .ach.special .ach-name { color: #8A5A1E; }
 .ach.special.on .ach-icon { animation: bob 2.4s ease-in-out infinite; }
-.ach-icon { display: flex; align-items: center; justify-content: center; line-height: 0; filter: grayscale(1); opacity: .45; }
-.ach.on .ach-icon { filter: none; opacity: 1; }
-.ach-name { font-size: 10.5px; color: var(--ink-2); text-align: center; line-height: 1.35; }
+/* 灰度只作用在勋章本身：小锁是 sibling，不能被父级的 filter 一起拖灰、拖淡 */
+.ach-icon { position: relative; display: flex; align-items: center; justify-content: center; line-height: 0; }
+.ach-icon > svg.icon { filter: grayscale(1); opacity: .5; }
+.ach.on .ach-icon > svg.icon { filter: none; opacity: 1; }
+/* 没解锁也把勋章的样子显示出来（灰版）+ 右下角一把小锁：知道「要拿的是这个」比只看到一个锁更有动力 */
+.ach-lock {
+  position: absolute;
+  right: -2px;
+  bottom: -1px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #FFFDFC;
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+  box-shadow: 0 1px 3px rgba(120, 70, 85, .12);
+}
+.ach-name { font-size: 11.5px; color: var(--ink-2); text-align: center; line-height: 1.3; }
 .ach.on .ach-name { color: var(--rose-deep); font-weight: 620; }
 .ach-bar { width: 70%; height: 4px; border-radius: 99px; background: #EFE6E8; overflow: hidden; }
 .ach-bar > i { display: block; height: 100%; background: #E4B9C4; border-radius: 99px; }

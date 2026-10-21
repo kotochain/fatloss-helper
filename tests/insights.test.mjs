@@ -58,6 +58,16 @@ test('记录太少时一条洞察都不给 —— 宁可不说，也不要用 1 
   assert.deepEqual(insights(s, { proteinG: target.proteinG }), [], '3 天还不够，不该给结论');
 });
 
+test('没有运动的日子里，不许编出「运动日 vs 不运动日」的对比', () => {
+  // compare() 要求两组样本都 ≥2。删掉这个判断后，0 个运动日会被算成均值 0，
+  // 于是编出「运动日平均 0 kcal、不运动日平均 604 kcal」这种荒唐结论 —— 数据不够就是不能说话。
+  const s = base();
+  for (let i = 0; i < 5; i++) logFullDay(s, shiftDate(todayKey(), -i));
+  const out = insights(s, { proteinG: target.proteinG });
+  assert.ok(!out.some((x) => x.icon === 'run' || x.title.includes('运动日')),
+    `一个运动日都没有，不该出现运动洞察：${JSON.stringify(out)}`);
+});
+
 test('算洞察不能往存档里写东西 —— 光打开页面不该把「空日子」记成有记录', () => {
   // 真出过的错：看数据的函数用了 getDay()（没有就新建），于是打开一次今天页，
   // 最近 14 天全被写进存档，「数据与备份」显示「14 天的记录」（其实只记了 1 天），

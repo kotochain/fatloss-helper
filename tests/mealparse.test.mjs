@@ -147,6 +147,33 @@ test('「加饭」「加肉」这种加多少全看她手的，要问；「加�
   assert.deepEqual(egg.portionChoices, []);
 });
 
+test('口语里不带「一」的份量词也要认（喝了瓶 → 就是「瓶」）', () => {
+  // 她说「喝了瓶运动饮料」时，「瓶」是有固定规格的 —— 不该退化成「你没说多少」再问一遍。
+  // 以前有人把「裸量词」这条逻辑删掉，其它断言全过（因为都落在别的字段上），实测才发现漏了。
+  const drink = item('喝了瓶运动饮料', '运动饮料');
+  assert.equal(drink.confidence, 'high', '「瓶」有固定规格，不该再问她');
+  assert.equal(drink.grams, 500);
+  assert.equal(drink.confidenceReason, null);
+
+  // 「食堂吃了碗牛肉面」：碗确实说不准，但理由必须落在「碗」上，而不是「没说量」。
+  const noodle = item('食堂吃了碗牛肉面', '牛肉面');
+  assert.equal(noodle.confidence, 'low');
+  assert.ok(noodle.confidenceReason.includes('碗'), `理由要落在「碗」上：${noodle.confidenceReason}`);
+  assert.ok(!/你没说/.test(noodle.confidenceReason), `她明明说了「碗」：${noodle.confidenceReason}`);
+});
+
+test('组合菜不能抢走「一杯奶茶」这种明显给饮料的份量（issue #3）', () => {
+  // 「吃完火锅又喝了杯奶茶」里，火锅和奶茶都可能去抢「杯」。
+  // 以前组合菜会把「杯」抢走：火锅的理由变成「『杯』没有固定规格」、追问也变成问锅底。
+  const r = parseDescription('吃完火锅又喝了杯奶茶');
+  const firepot = r.items.find((i) => i.name.includes('火锅'));
+  const tea = r.items.find((i) => i.name.includes('奶茶'));
+  assert.ok(firepot && tea, '火锅和奶茶都要在');
+  assert.ok(!firepot.confidenceReason.includes('杯'), `火锅的理由不该是「杯」：${firepot.confidenceReason}`);
+  assert.ok(firepot.question.includes('多大'), `火锅该问份量大小，实际问的是：${firepot.question}`);
+  assert.ok(tea.confidenceReason.includes('杯'), `奶茶才该拿「杯」，实际：${tea.confidenceReason}`);
+});
+
 test('批量过一遍常见说法：低置信度的档位必须都能点', () => {
   const phrases = [
     '一碗米饭', '两碗米饭', '一小碗粥', '一份黄焖鸡米饭', '一份麻辣烫', '一碗牛肉面', '一碗馄饨',

@@ -131,7 +131,7 @@ test('升级会把旧徽章 id 跟到新 id（已解锁状态不能丢）', () =
   const legacy = legacyV1();
   legacy.achievements = { seen: ['fan_badge', 'days_3', 'fan_week'], lastWeeklyAt: null, milestones: [10] };
   const r = migrateToCurrent(legacy);
-  assert.deepEqual(r.data.achievements.seen, ['start_badge', 'days_3', 'steady_week']);
+  assert.deepEqual(r.data.achievements.seen, ['first_log', 'days_3', 'days_7']);
   assert.deepEqual(r.data.achievements.milestones, [10], '里程碑进度也要保留');
 });
 
