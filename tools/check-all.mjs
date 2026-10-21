@@ -127,7 +127,7 @@ async function main() {
   await run('照包装营养成分表（手动填 + 拍照读表）', 'tools/label-check.mjs');
   if (mode === 'full') {
     await run('AI 失败路径与存档异常', 'tools/resilience-check.mjs');
-    await run('全界面按钮清扫（310 次点击）', 'tools/sweep-check.mjs');
+    await run('全界面按钮清扫（320 次点击）', 'tools/sweep-check.mjs');
     await run('小屏与系统大字号排版', 'tools/layout-check.mjs');
   }
   return finish();

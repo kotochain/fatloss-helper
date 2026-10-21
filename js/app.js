@@ -353,8 +353,8 @@ function render() {
   bindCommon();
   if (view === 'today') {
     bindQuickLog();
-    $('#aiSettingsBtn')?.addEventListener('click', openAiSettingsSheet);
   }
+  syncTestState();
 }
 
 /**
@@ -387,6 +387,7 @@ function handleAction(act, data) {
     case 'growth': return openGrowthSheet();
     case 'insights': return openInsightsSheet();
     case 'coach': return openCoachSheet();
+    case 'usage-mode': return openModeSheet();
     case 'crash-retry': view = view || 'today'; return render();
     case 'crash-other': return goView('today');
     case 'crash-export': return exportData();
@@ -901,8 +902,9 @@ function renderFoodPane() {
   return `
     <div class="card">
       <div class="card-title">说一句就记上
-        <button class="btn ghost" id="aiSettingsBtn" style="padding:3px 10px;font-size:12px">
-          ${!ai.checked ? '检查中…' : ai.configured ? 'AI 已开启' : '去设置 AI'}
+        <!-- 这里是「模式」不是「AI 配置」：她每天可能都想换一句谁来听，不该藏在设置里 -->
+        <button class="mode-pill" id="usageModeBtn" title="切换使用模式">
+          ${useMode() === 'ai' ? 'AI 模式' : '普通模式'}<span class="mode-pill-go">›</span>
         </button>
       </div>
       <textarea id="quickText" rows="3" placeholder="今天吃了什么？例如：中午吃了碗牛肉面，加了个蛋"></textarea>
@@ -970,7 +972,8 @@ function bindFoodPane() {
   });
   $('#customFoodBtn').addEventListener('click', () => openLabelSheet());
   bindQuickLog();
-  $('#aiSettingsBtn')?.addEventListener('click', openAiSettingsSheet);
+  // 模式胶囊在「说一句」卡片右上角：点它就是切模式（不是跳 AI 配置，那是两件事）
+  $('#usageModeBtn')?.addEventListener('click', openModeSheet);
   app.querySelectorAll('[data-act="quick-add"]').forEach((el) => {
     el.addEventListener('click', () => {
       const food = [...state.customFoods, ...FOODS].find((f) => f.id === el.dataset.id);
@@ -1230,7 +1233,7 @@ function bindQuickLog() {
     const text = input.value.trim();
     if (!text) return toast('先写一句你吃了什么。');
     btn.disabled = true;
-    btn.textContent = ai.configured ? 'AI 正在解析…' : '正在解析…';
+    btn.textContent = aiOn() ? 'AI 正在解析…' : '正在解析…';
     try {
       await runQuickParse(text);
     } finally {
@@ -1253,8 +1256,9 @@ function openDraftSheet() {
   });
 }
 
-async function runQuickParse(text) {
-  const meal = quickMealHint || guessMeal();
+async function runQuickParse(text, mealOverride = null) {
+  // 餐次优先级：调用方指定（「加到午餐」里说的）> 今天页那个按钮带的提示 > 按时钟猜
+  const meal = mealOverride || quickMealHint || guessMeal();
   let items = [];
   let questions = [];
   let source = 'offline';
@@ -1262,7 +1266,7 @@ async function runQuickParse(text) {
   let aiNote = null;
   let unmatchedItems = [];
 
-  if (ai.configured) {
+  if (aiOn()) {
     const res = await askAi(text, { meal });
     if (res.ok && res.items.length) {
       const norm = normalizeAiItems(
@@ -1756,7 +1760,18 @@ function renderProgress() {
   const max = Math.max(...list.map((w) => w.kg), 1);
   const min = Math.min(...list.map((w) => w.kg), max - 1);
 
+  const mode = useMode();
   app.innerHTML = `
+    <button class="set-row" data-act="usage-mode">
+      <span class="set-main">
+        <b>使用模式</b>
+        <em>${mode === 'ai'
+          ? 'AI 模式：说一句由模型听懂（要联网、要密钥）'
+          : '普通模式：内置规则算，不联网也能用'}</em>
+      </span>
+      <span class="mode-pill">${mode === 'ai' ? 'AI 模式' : '普通模式'}<span class="mode-pill-go">›</span></span>
+    </button>
+
     ${t ? `
     <div class="card">
       <div class="card-title">目标 <button class="btn ghost" data-act="edit-profile" style="padding:4px 10px;font-size:12px">修改资料</button></div>
@@ -1837,15 +1852,60 @@ function renderProgress() {
 
 /* ── 弹层：加食物 ────────────────────────── */
 
+/**
+ * 「加到某一餐」的弹层：两条路。
+ *
+ * 以前只有「搜食物库」：她已经点了「午餐」，脑子里是「一碗牛肉面加个蛋」，
+ * 却得先去库里搜「牛肉面」再挑份量 —— 逆着她的意图走。
+ * 现在顶部可以切到「说一句」，解析走的是和记录页顶部同一个流程（草稿确认 → 记进这一餐），
+ * 差别只是**默认餐次已经定好**，不用她再选。
+ */
 function openFoodSheet(mealKey) {
   const slot = MEAL_SLOTS.find((s) => s.key === mealKey) || MEAL_SLOTS[0];
+  // 记住上次用的哪条路：习惯说一句的人，不用每次再切一遍
+  let pane = state.settings?.foodSheetPane === 'say' ? 'say' : 'search';
+
   openSheet({
     title: `加到${slot.label}`,
     body: `
-      <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off">
-      <div id="foodResults" style="margin-top:6px"></div>
-      <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">📋 照包装营养成分表填（更准）</button>`,
+      <div class="chips" id="foodPaneChips">
+        <button class="chip" data-pane="search">搜食物库</button>
+        <button class="chip" data-pane="say">说一句</button>
+      </div>
+
+      <div id="paneSearch">
+        <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off" style="margin-top:10px">
+        <div id="foodResults" style="margin-top:6px"></div>
+        <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">📋 照包装营养成分表填（更准）</button>
+      </div>
+
+      <div id="paneSay" class="hidden">
+        <textarea id="foodSayText" rows="3" style="margin-top:10px" placeholder="例如：一碗牛肉面，加了个蛋"></textarea>
+        <button class="btn block" id="foodSayParse" style="margin-top:8px">解析并记到${slot.label}</button>
+        <p class="tiny muted" style="margin:8px 0 0">
+          解析完先给你看清单，克数能改，确认了才记上。连着说几样也行（「米饭一碗、青菜一份」）。
+        </p>
+      </div>`,
     onMount: (body) => {
+      const chips = [...body.querySelectorAll('#foodPaneChips [data-pane]')];
+      const paneSearch = body.querySelector('#paneSearch');
+      const paneSay = body.querySelector('#paneSay');
+      const paint = () => {
+        chips.forEach((c) => c.classList.toggle('on', c.dataset.pane === pane));
+        paneSearch.classList.toggle('hidden', pane !== 'search');
+        paneSay.classList.toggle('hidden', pane !== 'say');
+        const focus = pane === 'search' ? body.querySelector('#foodSearch') : body.querySelector('#foodSayText');
+        setTimeout(() => focus?.focus(), 60);
+      };
+      chips.forEach((c) => c.addEventListener('click', () => {
+        pane = c.dataset.pane;
+        state.settings = { ...(state.settings || {}), foodSheetPane: pane };
+        save();
+        paint();
+      }));
+      paint();
+
+      /* 路一：搜食物库（和原来一样） */
       const input = $('#foodSearch', body);
       const results = $('#foodResults', body);
       const draw = () => {
@@ -1854,7 +1914,7 @@ function openFoodSheet(mealKey) {
           <div class="search-hit" data-pick="${f.id}">
             <span class="nm">${esc(f.name)}<em>每 100 克</em></span>
             <span class="kk">${f.kcal} kcal</span>
-          </div>`).join('') : '<div class="tiny muted">没搜到。可以用下面的「照包装营养成分表填」，或者回「记录」页手动记一笔。</div>';
+          </div>`).join('') : '<div class="tiny muted">没搜到。可以用下面的「照包装营养成分表填」，或者切到「说一句」直接描述。</div>';
       };
       draw();
       input.addEventListener('input', draw);
@@ -1864,10 +1924,25 @@ function openFoodSheet(mealKey) {
         const food = [...state.customFoods, ...FOODS].find((f) => f.id === hit.dataset.pick);
         openAmountSheet(food, mealKey);
       });
-      setTimeout(() => input.focus(), 60);
       $('#foodLabelBtn', body).addEventListener('click', () => {
         closeSheet();
         openLabelSheet(mealKey);
+      });
+
+      /* 路二：说一句 —— 关掉这个弹层，走「草稿确认」那条老路，餐次锁定这一餐 */
+      const sayBtn = body.querySelector('#foodSayParse');
+      sayBtn.addEventListener('click', async () => {
+        const text = body.querySelector('#foodSayText').value.trim();
+        if (!text) return toast('先写一句你吃了什么。');
+        sayBtn.disabled = true;
+        sayBtn.textContent = aiOn() ? 'AI 正在解析…' : '正在解析…';
+        closeSheet(); // 草稿弹层要占同一个位置，先收起这个
+        try {
+          await runQuickParse(text, slot.key);
+        } finally {
+          sayBtn.disabled = false;
+          sayBtn.textContent = `解析并记到${slot.label}`;
+        }
       });
     },
   });
@@ -2030,7 +2105,7 @@ function fileToCompressedDataUrl(file, maxEdge = 1400, quality = 0.82) {
  * 还是由她核对后保存；单位换算和 4/9/4 对账全在本地做（js/label.js）。
  */
 function openLabelSheet(mealKey = null) {
-  const canPhoto = Boolean(ai.configured) && ai.mode !== 'relay';
+  const canPhoto = aiOn() && ai.mode !== 'relay';
   const slot = MEAL_SLOTS.find((s) => s.key === mealKey) || null;
   openSheet({
     title: slot ? `照包装记 → ${slot.label}` : '照包装营养成分表记',
@@ -2261,6 +2336,17 @@ function useMode() {
   return state?.settings?.mode === 'ai' ? 'ai' : 'basic';
 }
 
+/**
+ * 现在会不会真的去调 AI = 模式是 AI **且** 密钥配好了。
+ *
+ * 为什么要有这个函数：以前全站只判断 ai.configured，模式只改了几个字 ——
+ * 她切到「普通模式」后，只要配过密钥，点解析照样发请求（也照样花钱）。
+ * 「普通模式：不联网、不花钱」这句承诺，得由代码兑现，不能只写在文案里。
+ */
+function aiOn() {
+  return useMode() === 'ai' && Boolean(ai.configured);
+}
+
 function setMode(next) {
   state.settings = { ...(state.settings || {}), mode: next === 'ai' ? 'ai' : 'basic' };
   // 切回普通模式时把没确认的 AI 解析草稿丢掉：那份草稿带着 AI 的追问，
@@ -2269,6 +2355,55 @@ function setMode(next) {
   if (next !== 'ai') draft = null;
   save();
   render();
+}
+
+/**
+ * 弹层：使用模式（普通 / AI）。
+ *
+ * 为什么要单独一个弹层：这个开关是「今天想不想花额度」级别的日常决定，
+ * 藏在「我 → 设置」里等于没有。入口两处：记录页「说一句」卡片右上角、以及「我」页顶部。
+ * 切换后立刻重绘（卡片胶囊、按钮文案都跟着变），不静默。
+ */
+function openModeSheet() {
+  const current = useMode();
+  const cfg = currentAiConfig();
+  openSheet({
+    title: '使用模式',
+    body: `
+      <div class="mode-chips" id="usageModeChips">
+        <button class="mode-chip ${current === 'basic' ? 'on' : ''}" data-usage-mode="basic">
+          <b>普通模式</b>
+          <em>内置规则算，不联网、不花钱</em>
+        </button>
+        <button class="mode-chip ${current === 'ai' ? 'on' : ''}" data-usage-mode="ai">
+          <b>AI 模式</b>
+          <em>${cfg.configured ? '已配好，说一句更好懂' : '还没填密钥，点它会先带你去配'}</em>
+        </button>
+      </div>
+      <p class="tiny muted" style="margin:12px 0 0">
+        两种模式记下来的东西完全一样（同一份记录、同一套算法、同一个目标），
+        换的只是「这句话谁来听懂」。随时可以切，不会丢任何记录。
+      </p>`,
+    foot: '<button class="btn ghost block" id="usageModeClose">知道了</button>',
+    onMount: (body, foot) => {
+      foot.querySelector('#usageModeClose').addEventListener('click', closeSheet);
+      body.querySelectorAll('[data-usage-mode]').forEach((b) => {
+        b.addEventListener('click', () => {
+          const next = b.dataset.usageMode;
+          // 没配密钥就想去 AI 模式：直接带她去配，别只弹一句「请先配置」
+          if (next === 'ai' && !cfg.configured) {
+            closeSheet();
+            openAiSettingsSheet({ then: () => openModeSheet() });
+            return;
+          }
+          if (next === current) { closeSheet(); return; }
+          setMode(next);
+          closeSheet();
+          toast(next === 'ai' ? '已切到 AI 模式：点「解析这一句」时才发请求' : '已切到普通模式：不联网也能记。');
+        });
+      });
+    },
+  });
 }
 
 function openSettingsSheet() {
@@ -2585,7 +2720,7 @@ function coachBody() {
 function coachFoot() {
   const v = coachView;
   if (v.loading) return '';
-  if (!ai.configured) {
+  if (!aiOn()) {
     return `<button class="btn ghost grow" data-coach="close">知道了</button>
       <button class="btn grow" data-coach="config">配一下 AI（可选）</button>`;
   }
@@ -2642,7 +2777,7 @@ function openCoachSheet() {
     brief,
     local: localCoachAdvice(brief),
     aiText: null,
-    note: ai.configured ? null : 'AI 版要先在设置里配一个模型；上面这份是本地算的，不配也够用。',
+    note: aiOn() ? null : 'AI 版要先在设置里配一个模型、并切到 AI 模式；上面这份是本地算的，不配也够用。',
     loading: false,
   };
   paintCoach();
@@ -3140,8 +3275,13 @@ function drawAiSettings(cfg, relay, then = null) {
     show('已保存，正在测试连通…', 'info');
     const t = await testConnection();
     if (t.ok) {
-      show(`✅ 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>现在你怎么写都能听懂了。`, 'info');
+      show(`✅ 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>已经切到 AI 模式：现在你怎么写都能听懂了。`, 'info');
       ai = { configured: true, checked: true, mode: currentAiConfig().mode };
+      // 刚配好密钥就自动进 AI 模式 —— 不然她配完发现「还是没反应」（普通模式本来就不调 AI）
+      if (useMode() !== 'ai') {
+        state.settings = { ...(state.settings || {}), mode: 'ai' };
+        save();
+      }
     } else {
       show(`设置已保存，但连通测试失败：<b>${esc(t.error)}</b><br>修好之前会用离线识别记录（常见说法也能认）。`, '');
       ai = { configured: false, checked: true, reason: t.error };
@@ -3495,7 +3635,11 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 
 // 问一次服务端「AI 配好了没」。没配也不影响使用，只是走离线解析。
-aiStatus().then((st) => { ai = { ...st, checked: true }; if (view === 'log') render(); }).catch(() => {});
+aiStatus().then((st) => {
+  ai = { ...st, checked: true };
+  syncTestState();
+  if (view === 'log') render();
+}).catch(() => {});
 
 /** 启动失败的兜底：不让用户看到一片空白 */
 function renderBootFailure(err) {
@@ -3551,5 +3695,20 @@ if (startupNotice) {
 }
 
 // 启动成功的标记：浏览器自检靠它判断「模块有没有炸掉导致白屏」
+/**
+ * 给自检用的只读快照。
+ *
+ * 为什么需要：`ai` 是异步拿到的（aiStatus()），而界面文案会随后重绘 ——
+ * 自检若能直接读到「模式 / AI 是否就绪」，就不用靠猜某个按钮的文字，也不会因为
+ * 我们把「AI 已开启」改成「AI 模式」这种文案调整而误判。测试只读，不改任何东西。
+ */
+function syncTestState() {
+  window.__appState = {
+    mode: useMode(),
+    aiConfigured: Boolean(ai.configured),
+    aiChecked: Boolean(ai.checked),
+  };
+}
+
 window.__appReady = true;
 

@@ -761,6 +761,20 @@ details[open] summary { margin-bottom: 4px; }
 .coach-note { margin: 10px 0 0; }
 
 /* 模式切换（普通 / AI） */
+/* 模式胶囊：一眼看出现在用的是哪种模式，点一下就能换（不用进设置） */
+.mode-pill {
+  display: inline-flex; align-items: center; gap: 3px;
+  border: 0; cursor: pointer; font: inherit; white-space: nowrap;
+  padding: 5px 10px 5px 12px; border-radius: 999px;
+  background: var(--rose-soft); color: var(--rose-deep);
+  font-size: 12px; font-weight: 650;
+}
+.mode-pill:active { transform: scale(.97); }
+.mode-pill-go { font-size: 13px; opacity: .55; }
+
+/* 通用的「先藏起来」：说一句 / 搜食物 两个面板切换用 */
+.hidden { display: none; }
+
 .mode-switch { margin-bottom: 14px; }
 .mode-head { font-size: 12.5px; font-weight: 650; color: var(--ink-2); margin-bottom: 8px; }
 .mode-chips { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }

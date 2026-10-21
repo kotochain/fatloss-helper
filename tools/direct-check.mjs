@@ -235,10 +235,11 @@ async function main() {
   console.log('请求 /api/ai-status 的结果：', noRelay, noRelay === 404 ? '（预期：没有中转服务）' : '');
 
   console.log('\n=== 二、在设置里选「自定义」直连假服务商 ===');
-  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
-  await sleep(400);
-  await evaluate(`document.querySelector('#aiSettingsBtn').click()`);
-  await sleep(800);
+  // 入口走真实路径：顶栏头像 → 设置 → AI 设置（记录页原来那个按钮已换成「模式胶囊」，两件事分开了）
+  await evaluate(`document.querySelector('#profileBtn').click()`);
+  await sleep(500);
+  await evaluate(`document.querySelector('[data-set="ai"]').click()`);
+  await sleep(900);
   await evaluate(`document.querySelector('#presetChips [data-preset="custom"]').click()`);
   await sleep(200);
   await evaluate(`(() => {
@@ -284,6 +285,11 @@ async function main() {
   await sleep(300);
 
   console.log('\n=== 三、直连解析一句话（中转服务不存在，只能靠直连） ===');
+  // 上一段停在「我的 → AI 设置」弹层里，先收起来回到记录页
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(300);
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(500);
   await evaluate(`(() => {
     const ta = document.querySelector('#quickText');
     ta.value = '中午吃了半碗炒河粉加了三个小肉丸两串骨肉相连';
@@ -323,6 +329,48 @@ async function main() {
 
   const shot = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-direct-ai.png'), Buffer.from(shot.data, 'base64'));
+
+  console.log('\n=== 三·二、切到普通模式后，真的不再发请求（「不花钱」得由代码兑现）===');
+  // 这条守的是真事故级问题：模式以前只改文案，配过密钥后切到普通模式照样调 AI。
+  const beforeChats = hits.chat;
+  const modeStateBefore = await evaluate(`window.__appState || null`);
+  if (!modeStateBefore || modeStateBefore.mode !== 'ai') problems.push(`配好密钥后应当自动进 AI 模式，实际 ${JSON.stringify(modeStateBefore)}`);
+
+  await evaluate(`document.querySelector('#usageModeBtn')?.click()`);
+  await sleep(350);
+  await evaluate(`document.querySelector('#usageModeChips [data-usage-mode="basic"]')?.click()`);
+  await sleep(500);
+  const afterSwitch = await evaluate(`window.__appState || null`);
+  console.log(`   切到普通模式 → mode=${afterSwitch?.mode}｜aiConfigured=${afterSwitch?.aiConfigured}`);
+  if (afterSwitch?.mode !== 'basic') problems.push('点了「普通模式」但状态没变');
+
+  // 再解析一句（离线认识的说法），应当完全不发请求
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '中午吃了碗牛肉面';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#quickParse').click();
+  })()`);
+  await sleep(2500);
+  const basicParse = await evaluate(`(() => ({
+    方式: document.querySelector('#draftHost .warn')?.textContent.replace(/\s+/g, ' ').trim().slice(0, 24) || '',
+    条数: document.querySelectorAll('#draftHost .entry').length,
+  }))()`);
+  const chatsInBasic = hits.chat - beforeChats;
+  console.log(`   普通模式解析：${basicParse.条数} 条｜来源「${basicParse.方式}」｜新增请求 ${chatsInBasic} 次`);
+  if (chatsInBasic !== 0) problems.push(`普通模式下还发了 ${chatsInBasic} 次请求（说好的不联网不花钱呢）`);
+  if (!basicParse.条数) problems.push('普通模式下离线解析也没认出来（切模式不能把功能弄坏）');
+  if (/AI 识别/.test(basicParse.方式)) problems.push('普通模式下结果来源还被标成 AI 识别');
+  await evaluate(`document.querySelector('#draftCancel')?.click(); document.querySelector('#sheetClose')?.click(); true`);
+  await sleep(300);
+
+  // 切回 AI 模式，后面的教练用例还要用
+  await evaluate(`document.querySelector('#usageModeBtn')?.click()`);
+  await sleep(350);
+  await evaluate(`document.querySelector('#usageModeChips [data-usage-mode="ai"]')?.click()`);
+  await sleep(450);
+  const backToAi = await evaluate(`window.__appState?.mode || null`);
+  if (backToAi !== 'ai') problems.push('切不回 AI 模式');
 
   console.log('\n=== 四、教练：AI 只组织语言，数字本地算 ===');
   await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);

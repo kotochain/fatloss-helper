@@ -58,8 +58,8 @@ const REVERSE_ONLY = ARGS.includes('--reverse-only');
 const DRAFT_ONLY = ARGS.includes('--draft-only');
 
 /** 脚本自身的时间预算（远小于 6 分钟硬上限，给报告和收尾留余量） */
-const MAIN_BUDGET_MS = 245000;     // 两套状态的主清扫
-const REVERSE_BUDGET_MS = 32000;   // 反向验证
+const MAIN_BUDGET_MS = 262000;     // 两套状态的主清扫（界面元素变多后要跟着调）
+const REVERSE_BUDGET_MS = 52000;   // 反向验证（三个用例各要重扫一整面，32 秒会被截断成假失败）
 const MAX_PROBES_PER_STATE = 200;
 const MAX_SURFACES_PER_STATE = 45;
 
@@ -2207,7 +2207,10 @@ async function main() {
   }
 
   // 反向验证（预算单独留，必须执行）
+  // 注意：除了时间，还要给**点击次数**预算 —— 主清扫把 330 次点完了，
+  // 反向验证第一步就会因为「全局点击预算到」立刻 break，表现为「一个元素都没点」→ 假失败。
   ctx.deadline = Math.max(ctx.deadline, now() + REVERSE_BUDGET_MS);
+  ctx.probeBudget = Math.max(ctx.probeBudget, ctx.probeCount + 90);
   try {
     ctx.reverse = await runReverse();
   } catch (err) {
@@ -2230,7 +2233,7 @@ async function main() {
   finishAndExit(report.exitCode, [() => client.close(), () => ctx.chrome && ctx.chrome.kill && ctx.chrome.kill(), () => ctx.server && ctx.server.stop()]);
 }
 
-armWatchdog('sweep-check.mjs', 330);
+armWatchdog('sweep-check.mjs', 390);
 
 main().catch((err) => {
   logLine(`\n清扫脚本自身失败：${err && err.message ? err.message : err}`);

@@ -731,6 +731,107 @@ async function main() {
   await evaluate(`document.querySelector('[data-coach="close"]')?.click()`);
   await sleep(250);
 
+  console.log('\n=== 一·九、记录页：点「午餐」也能直接说一句（issue #7）===');
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(450);
+  await evaluate(`[...document.querySelectorAll('[data-act="add-food"]')].find((b) => b.dataset.meal === 'lunch')?.click()`);
+  await sleep(500);
+  const foodSheet = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    面板: [...document.querySelectorAll('#foodPaneChips [data-pane]')].map((b) => b.textContent.trim()),
+    当前搜索面板可见: !document.querySelector('#paneSearch')?.classList.contains('hidden'),
+  }))()`);
+  console.log(`   弹层：「${foodSheet.标题}」｜切换项：${foodSheet.面板.join(' / ')}`);
+  if (!foodSheet.标题.includes('午餐')) problems.push('点「午餐」没打开加到午餐的弹层');
+  if (foodSheet.面板.length !== 2) problems.push('加食物弹层没有「说一句」这个切换项');
+
+  // 切到「说一句」，写一句，解析
+  await evaluate(`document.querySelector('#foodPaneChips [data-pane="say"]').click()`);
+  await sleep(250);
+  const sayPane = await evaluate(`(() => ({
+    输入框可见: !!document.querySelector('#foodSayText') && !document.querySelector('#paneSay').classList.contains('hidden'),
+    按钮: document.querySelector('#foodSayParse')?.textContent.trim() || '',
+  }))()`);
+  const shotSay = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-food-say.png'), Buffer.from(shotSay.data, 'base64'));
+  if (!sayPane.输入框可见) problems.push('切到「说一句」后没有出现输入框');
+  if (!sayPane.按钮.includes('午餐')) problems.push(`解析按钮没说明会记到哪一餐：${sayPane.按钮}`);
+
+  await evaluate(`(() => {
+    const ta = document.querySelector('#foodSayText');
+    ta.value = '一碗米饭，还有一份炒青菜';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#foodSayParse').click();
+  })()`);
+  await waitFor(() => evaluate(`document.querySelectorAll('#draftHost .entry').length || null`), { what: '说一句的解析结果出现' });
+  const sayDraft = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    条数: document.querySelectorAll('#draftHost .entry').length,
+    餐次: [...document.querySelectorAll('#draftMeal .chip.on')].map((b) => b.dataset.meal).join(','),
+  }))()`);
+  console.log(`✅ 解析结果：${sayDraft.条数} 条｜默认餐次 ${sayDraft.餐次}`);
+  // 关键：从「加到午餐」说出来，默认就该是午餐，不用她再选一次
+  if (sayDraft.餐次 !== 'lunch') problems.push(`从「加到午餐」进来说一句，默认餐次却是「${sayDraft.餐次}」`);
+
+  await evaluate(`document.querySelector('#draftSave').click()`);
+  await sleep(600);
+  const lunchSaved = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}');
+    const key = new Date().toLocaleDateString('sv-SE');
+    const meals = st.days?.[key]?.meals || {};
+    return {
+      午餐: (meals.lunch || []).length,
+      其他: Object.entries(meals).filter(([k]) => k !== 'lunch').map(([k, v]) => k + ':' + v.length).join(','),
+    };
+  })()`);
+  console.log(`✅ 落库：午餐 ${lunchSaved.午餐} 条｜其他餐 ${lunchSaved.其他 || '（没有）'}`);
+  if (lunchSaved.午餐 < 2) problems.push(`说一句记到午餐失败：午餐只有 ${lunchSaved.午餐} 条`);
+  // 关掉可能还开着的庆祝层
+  for (let i = 0; i < 6; i++) {
+    const n = await evaluate(`(() => { const bs = [...document.querySelectorAll('#celebrateOk')]; bs.forEach((b) => b.click()); return bs.length; })()`);
+    if (!n) break;
+    await sleep(300);
+  }
+
+  console.log('\n=== 一·十、模式切换不再藏在设置里（issue #8）===');
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(450);
+  const pill = await evaluate(`(() => {
+    const b = document.querySelector('#usageModeBtn');
+    return { 有胶囊: !!b, 文案: b ? b.textContent.replace(/\s+/g, '').trim() : '' };
+  })()`);
+  console.log(`   记录页胶囊：「${pill.文案}」`);
+  if (!pill.有胶囊) problems.push('记录页没有模式胶囊');
+  if (!/普通模式|AI 模式/.test(pill.文案)) problems.push(`模式胶囊没说清当前是哪种模式：${pill.文案}`);
+
+  await evaluate(`document.querySelector('#usageModeBtn')?.click()`);
+  await sleep(400);
+  const modeSheet = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    选项: [...document.querySelectorAll('#usageModeChips [data-usage-mode]')].map((b) => b.dataset.usageMode + (b.classList.contains('on') ? '(选中)' : '')),
+  }))()`);
+  console.log(`   模式弹层：「${modeSheet.标题}」｜${modeSheet.选项.join(' / ')}`);
+  if (!modeSheet.标题.includes('模式')) problems.push('点模式胶囊没有打开模式弹层');
+  if (modeSheet.选项.length !== 2) problems.push('模式弹层没有两个选项');
+  const shotMode = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-mode-sheet.png'), Buffer.from(shotMode.data, 'base64'));
+  await evaluate(`document.querySelector('#usageModeClose')?.click()`);
+  await sleep(250);
+
+  // 「我」页顶部也要有这张卡
+  await evaluate(`document.querySelector('.tab[data-view="progress"]').click()`);
+  await sleep(500);
+  const meCard = await evaluate(`(() => {
+    const row = document.querySelector('[data-act="usage-mode"]');
+    return { 有卡: !!row, 文案: row ? row.textContent.replace(/\s+/g, ' ').trim() : '' };
+  })()`);
+  console.log(`   「我的」页顶部：${meCard.有卡 ? `「${meCard.文案}」` : '没有模式卡'}`);
+  const shotMe = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-me-mode.png'), Buffer.from(shotMe.data, 'base64'));
+  if (!meCard.有卡) problems.push('「我的」页顶部没有使用模式卡');
+  await evaluate(`document.querySelector('.tab[data-view="today"]').click()`);
+  await sleep(350);
+
   console.log('\n=== 二、按器械换有氧动作 ===');
   await evaluate(`document.querySelector('.tab[data-view="plan"]').click()`);
   await sleep(500);

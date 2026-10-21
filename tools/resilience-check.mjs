@@ -429,13 +429,14 @@ async function persistViaRecordTab() {
   await dismissCelebrate();
 }
 
-/** 等 AI 状态就绪：记录页右上角按钮显示「AI 已开启」时才点解析 ——
- *  否则 ai.configured 可能还没被异步的 aiStatus() 设上，会误走离线路径（测试自己会骗自己）。 */
+/** 等 AI 状态就绪：读应用暴露的只读快照（window.__appState）——
+ *  否则 ai.configured 可能还没被异步的 aiStatus() 设上，会误走离线路径（测试自己会骗自己）。
+ *  以前这里靠「记录页按钮写着 AI 已开启」判断，改文案就会误伤，所以换成读状态。 */
 async function waitAiReady() {
   return await waitFor(async () => {
-    const txt = await evalJs(`document.querySelector('#aiSettingsBtn')?.textContent || ''`);
-    return String(txt).includes('AI 已开启');
-  }, 8000, 120, 'AI 配置生效（按钮显示「AI 已开启」）');
+    const st = await evalJs(`window.__appState || null`);
+    return Boolean(st && st.aiConfigured && st.mode === 'ai');
+  }, 8000, 120, 'AI 配置生效（__appState.aiConfigured === true 且模式是 ai）');
 }
 
 async function openLogTab() {
