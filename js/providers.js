@@ -171,14 +171,21 @@ export function normalizeAiConfigInput(input = {}, existing = null) {
   const preset = findPreset(input.presetId || existing?.presetId || 'custom');
   const baseUrl = String(input.baseUrl ?? existing?.baseUrl ?? preset.baseUrl ?? '').trim().replace(/\/+$/, '');
   const model = String(input.model ?? existing?.model ?? preset.model ?? '').trim();
-  const apiKey = input.apiKey === undefined || input.apiKey === null
-    ? (existing?.apiKey || '')
+  // 「留空则不改」是输入框上写着的承诺 —— 空串（以及只有空格）和「没传」都是留空。
+  // 以前这里只认 undefined，而界面拿到的是 ''，于是她清空输入框点保存会看到「密钥没填」。
+  const askedKey = input.apiKey === undefined || input.apiKey === null
+    ? ''
     : String(input.apiKey).trim();
+  // 但换了服务商就不能沿用上一家的密钥：DeepSeek 的钥匙递给通义，既用不了，也等于泄露给第三方
+  const presetChanged = Boolean(existing?.apiKey && existing.presetId && preset.id !== existing.presetId);
+  const apiKey = askedKey || (presetChanged ? '' : (existing?.apiKey || ''));
   const problems = [];
   if (!baseUrl) problems.push('接口地址没填');
   else if (!/^https?:\/\//.test(baseUrl)) problems.push('接口地址要以 http:// 或 https:// 开头');
   if (!model) problems.push('模型名没填');
-  if (!apiKey && !preset.allowEmptyKey) problems.push('密钥没填');
+  if (!apiKey && !preset.allowEmptyKey) {
+    problems.push(presetChanged ? '换了服务商，密钥要重新填（不会沿用上一家的）' : '密钥没填');
+  }
   const mode = input.mode === 'relay' || input.mode === 'direct'
     ? input.mode
     : (existing?.mode || (preset.directCall === false ? 'relay' : 'direct'));

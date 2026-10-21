@@ -12,7 +12,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FOODS, FOOD_CATEGORIES, checkFoodData, findFood, parseAmount, ALIASES } from '../js/foods.js';
+import { FOODS, FOOD_CATEGORIES, checkFoodData, findFood, parseAmount, ALIASES, kcalOnlyFood } from '../js/foods.js';
+import { calcEntry } from '../js/calc.js';
 import { searchFoods, normalize } from '../js/foodlog.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -147,4 +148,37 @@ test('别名表指向的 id 都必须真实存在', () => {
   for (const key of Object.keys(ALIASES)) {
     assert.ok(findFood(key), `别名表里的 ${key} 在食物库里不存在`);
   }
+});
+
+test('只填热量：正常输入、名称兜底，以及「100 克」这个内部表示', () => {
+  const r = kcalOnlyFood({ name: '楼下的牛肉面', kcal: '650', protein: '30' });
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.food.name, '楼下的牛肉面');
+  assert.equal(r.food.kcal, 650);
+  assert.equal(r.food.kcalOnly, true, '必须打标记，界面上才不显示「100 克」');
+  // 克数固定 100：每 100 克就是这一顿，汇总时算出来正好 650
+  const f = calcEntry(r.food, 100);
+  assert.equal(f.kcal, 650);
+  assert.equal(f.protein, 30);
+
+  // 不写名字也要能用（她经常懒得写）
+  assert.equal(kcalOnlyFood({ kcal: 500 }).food.name, '只记了热量');
+  // 蛋白不填按 0，不能变成 NaN 把全天合计弄坏
+  const noP = kcalOnlyFood({ kcal: 500, protein: '' });
+  assert.equal(noP.food.protein, 0);
+  assert.ok(Number.isFinite(calcEntry(noP.food, 100).kcal));
+});
+
+test('只填热量：离谱数字要挡住，不能悄悄记进去', () => {
+  for (const bad of [0, -5, '', null, undefined, 'abc', NaN]) {
+    assert.equal(kcalOnlyFood({ kcal: bad }).ok, false, `热量 ${String(bad)} 不该通过`);
+  }
+  assert.equal(kcalOnlyFood({ kcal: 5001 }).ok, false, '一次超过 5000 kcal 要让人确认');
+  assert.equal(kcalOnlyFood({ kcal: 600, protein: -1 }).ok, false, '蛋白不能是负数');
+  assert.equal(kcalOnlyFood({ kcal: 600, protein: 301 }).ok, false, '蛋白 300 克以上不合理');
+  // 蛋白自己就有 4 kcal/克：说 20 克蛋白却只有 50 kcal，是填错了
+  assert.equal(kcalOnlyFood({ kcal: 50, protein: 20 }).ok, false, '蛋白热量超过总热量要拦住');
+  // 边界值应当通过
+  assert.equal(kcalOnlyFood({ kcal: 5000 }).ok, true);
+  assert.equal(kcalOnlyFood({ kcal: 50, protein: 12 }).ok, true, '50 kcal / 12 克蛋白（48 kcal）是合理的边缘');
 });

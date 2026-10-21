@@ -281,6 +281,33 @@ async function main() {
   if (!stored.已保存) problems.push('配置没有保存到本机');
   if (stored.模式 !== 'direct') problems.push(`模式不是直连，实际 ${stored.模式}`);
 
+  console.log('\n=== 二·二、留空密钥 = 沿用已保存的那把（她遇到的「密钥没填」） ===');
+  // 输入框上写着「已保存：sk-***（留空则不改）」，那就必须真的不改。
+  // 以前这里只认「没传 apiKey」，而界面拿到的是空字符串，于是留空保存会报「密钥没填」。
+  const beforeBlankChats = hits.chat;
+  await evaluate(`(() => {
+    document.querySelector('#aiKey').value = '';
+    document.querySelector('#aiSave').click();
+  })()`);
+  await sleep(3200);
+  // 截图要拍到密钥框（「已保存…（留空则不改）」）和下面那条成功提示，先滚过去
+  await evaluate(`document.querySelector('#aiKey')?.scrollIntoView({ block: 'center' })`);
+  await sleep(300);
+  const shotBlank = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-ai-blank.png'), Buffer.from(shotBlank.data, 'base64'));
+  const blankSave = await evaluate(`(() => ({
+    提示: document.querySelector('#aiSettingsMsg')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+    占位: document.querySelector('#aiKey')?.placeholder || '',
+    还存着密钥: (localStorage.getItem('fatloss.ai.v1') || '').includes('sk-direct-mode-fake' /* secret-scan:allow 自检用的假密钥 */),
+  }))()`);
+  console.log(`   留空再保存 → 「${blankSave.提示}」`);
+  console.log(`   占位提示：「${blankSave.占位}」｜密钥还在：${blankSave.还存着密钥}`);
+  if (/密钥没填/.test(blankSave.提示)) problems.push('留空密钥保存被拒 —— 输入框写着「留空则不改」，就得真的不改');
+  if (!/连通正常|保存成功/.test(blankSave.提示)) problems.push(`留空保存没成功：${blankSave.提示}`);
+  if (!blankSave.还存着密钥) problems.push('留空保存把已保存的密钥清掉了');
+  if (!blankSave.占位.includes('已保存')) problems.push(`密钥框的占位提示没说已保存：${blankSave.占位}`);
+  if (hits.chat <= beforeBlankChats) problems.push('留空保存没有真的用已保存的密钥发一次连通测试');
+
   await evaluate(`document.querySelector('#sheetClose').click()`);
   await sleep(300);
 

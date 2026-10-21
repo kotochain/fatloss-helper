@@ -743,7 +743,7 @@ async function main() {
   }))()`);
   console.log(`   弹层：「${foodSheet.标题}」｜切换项：${foodSheet.面板.join(' / ')}`);
   if (!foodSheet.标题.includes('午餐')) problems.push('点「午餐」没打开加到午餐的弹层');
-  if (foodSheet.面板.length !== 2) problems.push('加食物弹层没有「说一句」这个切换项');
+  if (foodSheet.面板.length !== 3) problems.push(`加食物弹层应当有三个切换项（搜食物库/说一句/只填热量），实际 ${foodSheet.面板.length} 个`);
 
   // 切到「说一句」，写一句，解析
   await evaluate(`document.querySelector('#foodPaneChips [data-pane="say"]').click()`);
@@ -792,6 +792,73 @@ async function main() {
     if (!n) break;
     await sleep(300);
   }
+
+  console.log('\n=== 一·九·二、只填热量：外面吃的、没包装的那一顿 ===');
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(400);
+  await evaluate(`[...document.querySelectorAll('[data-act="add-food"]')].find((b) => b.dataset.meal === 'lunch')?.click()`);
+  await sleep(450);
+  await evaluate(`document.querySelector('#foodPaneChips [data-pane="kcal"]')?.click()`);
+  await sleep(300);
+  const kcalPane = await evaluate(`(() => ({
+    可见: !document.querySelector('#paneKcal')?.classList.contains('hidden'),
+    有热量框: !!document.querySelector('#kcalValue'),
+    有蛋白框: !!document.querySelector('#kcalProtein'),
+    按钮: document.querySelector('#kcalSave')?.textContent.trim() || '',
+  }))()`);
+  console.log(`   面板：${kcalPane.可见 ? '已切到只填热量' : '没切过去'}｜按钮「${kcalPane.按钮}」`);
+  const shotKcalPane = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-kcal-pane.png'), Buffer.from(shotKcalPane.data, 'base64'));
+  if (!kcalPane.可见 || !kcalPane.有热量框) problems.push('「只填热量」面板没出现');
+  if (!kcalPane.按钮.includes('午餐')) problems.push(`只填热量的按钮没说记到哪一餐：${kcalPane.按钮}`);
+
+  // 什么都不填就保存：必须给一句人话，不能静默失败
+  // 先清掉之前残留的 toast（徽章那条还在屏幕上，会读错对象）
+  await evaluate(`document.querySelectorAll('.toast').forEach((t) => t.remove())`);
+  await evaluate(`document.querySelector('#kcalSave')?.click()`);
+  await sleep(300);
+  const kcalEmpty = await evaluate(`document.querySelector('.toast')?.textContent || ''`);
+  console.log(`   空着点保存 → 「${kcalEmpty}」`);
+  if (!/热量/.test(kcalEmpty)) problems.push('只填热量时热量没填，界面没给提示');
+
+  // 正常填：650 kcal / 蛋白 30 克
+  await evaluate(`(() => {
+    document.querySelector('#kcalName').value = '楼下的牛肉面';
+    document.querySelector('#kcalValue').value = '650';
+    document.querySelector('#kcalProtein').value = '30';
+    document.querySelector('#kcalSave').click();
+  })()`);
+  await sleep(600);
+  const kcalSaved = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}');
+    const key = new Date().toLocaleDateString('sv-SE');
+    const items = (st.days?.[key]?.meals?.lunch) || [];
+    const hit = items.find((e) => e.food && e.food.kcalOnly);
+    return hit ? { 名称: hit.food.name, 千卡: hit.food.kcal, 蛋白: hit.food.protein, 克数: hit.grams } : null;
+  })()`);
+  console.log(`✅ 落库：${kcalSaved ? `${kcalSaved.名称} ${kcalSaved.千卡} kcal / 蛋白 ${kcalSaved.蛋白} g（内部克数 ${kcalSaved.克数}）` : '没找到'}`);
+  if (!kcalSaved) problems.push('只填热量没有真的记进去');
+  else {
+    if (kcalSaved.千卡 !== 650) problems.push(`热量记错了：${kcalSaved.千卡}（应当 650）`);
+    if (Math.abs(kcalSaved.蛋白 - 30) > 0.01) problems.push(`蛋白记错了：${kcalSaved.蛋白}（应当 30）`);
+  }
+
+  // 今天页要显示「按热量记」，不能显示内部用的「100 克」（她从来没填过克数）
+  await evaluate(`document.querySelector('.tab[data-view="today"]').click()`);
+  await sleep(500);
+  const shown = await evaluate(`(() => {
+    const rows = [...document.querySelectorAll('.entry')].map((r) => r.textContent.replace(/\s+/g, ' ').trim());
+    return rows.find((t) => t.includes('楼下的牛肉面')) || '';
+  })()`);
+  console.log(`   今天页显示：${shown}`);
+  if (!shown.includes('650 kcal')) problems.push(`今天页没显示 650 kcal：${shown}`);
+  if (!shown.includes('按热量记')) problems.push(`只填热量的条目应当显示「按热量记」，实际：${shown}`);
+  if (/\b100 克\b/.test(shown)) problems.push('只填热量的条目显示了「100 克」（她没填过克数）');
+
+  const shotKcal = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-kcal-only.png'), Buffer.from(shotKcal.data, 'base64'));
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(400);
 
   console.log('\n=== 一·十、模式切换不再藏在设置里（issue #8）===');
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);

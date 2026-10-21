@@ -7,11 +7,11 @@ import assert from 'node:assert/strict';
 import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   updateFoodEntry, addExercise, removeExercise, addWeight, addCustomFood,
-  weightTrend, analyzeProgress, demoProfile, demoEntries, STATE_VERSION,
+  weightTrend, analyzeProgress, demoProfile, demoEntries, STATE_VERSION, frequentFoods,
 } from '../js/store.js';
 import { migrate } from '../js/schema.js';
 import { calcTargets, calcEntry } from '../js/calc.js';
-import { findFood } from '../js/foods.js';
+import { findFood, kcalOnlyFood } from '../js/foods.js';
 import { calculateTotals, groupByMeal, mealTotals, entryWarnings } from '../js/foodlog.js';
 
 const rice = findFood('rice_cooked');
@@ -273,3 +273,18 @@ test('记录条的 id 不重复', () => {
 });
 
 void calcEntry;
+
+test('「只填热量」记进去就是这一顿的热量，且不会变成「常吃的」快捷项', () => {
+  const s = emptyState();
+  const r = kcalOnlyFood({ name: '楼下的牛肉面', kcal: 650, protein: 30 });
+  const e = addFoodEntry(s, '2026-10-21', 'lunch', r.food, 100);
+  assert.equal(e.food.kcalOnly, true);
+  assert.equal(calcEntry(e.food, e.grams).kcal, 650, '记 100 克就应当是 650 kcal（不是 650/100 克）');
+
+  // 常吃的如果收录它，会变成一个「100 克 = 650 kcal」的怪条目，点它还得再填克数
+  addFoodEntry(s, '2026-10-21', 'lunch', egg, 50);
+  addFoodEntry(s, '2026-10-20', 'lunch', egg, 50);
+  const freq = frequentFoods(s, 8);
+  assert.ok(!freq.some((x) => x.food.kcalOnly), '只填热量的条目不该出现在常吃的里');
+  assert.ok(freq.some((x) => x.food.id === 'egg'));
+});

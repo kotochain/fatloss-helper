@@ -7,7 +7,7 @@ import {
   calcTargets, calcEntry, calcExerciseKcal, diffAgainstTargets, macroSplit,
   defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, LIMITS, round,
 } from './calc.js';
-import { FOODS, FOOD_CATEGORIES, findFood, parseAmount } from './foods.js';
+import { FOODS, FOOD_CATEGORIES, findFood, parseAmount, kcalOnlyFood } from './foods.js';
 import { searchFoods, MEAL_SLOTS } from './foodlog.js';
 import {
   listExercises, buildWeekPlan, EXERCISES,
@@ -411,7 +411,8 @@ function handleAction(act, data) {
     case 'del-food': {
       const day = getDay(state, dateKey);
       const entry = Object.values(day.meals).flat().find((e) => e.id === data.id);
-      if (entry && confirm(`删除「${entry.food.name} ${entry.grams} 克」？`)) {
+      const what = entry ? (entry.food.kcalOnly ? `${entry.food.name}（${entry.food.kcal} kcal）` : `${entry.food.name} ${entry.grams} 克`) : '';
+      if (entry && confirm(`删除「${what}」？`)) {
         removeFoodEntry(state, dateKey, data.id);
         save();
         render();
@@ -808,7 +809,7 @@ function renderToday() {
         ${list.map((e) => {
           const f = calcEntry(e.food, e.grams);
           return `<div class="entry">
-            <span class="name">${esc(e.food.name)}<em>${e.grams} 克</em></span>
+            <span class="name">${esc(e.food.name)}<em>${e.food.kcalOnly ? '按热量记' : `${e.grams} 克`}</em></span>
             <span class="kcal">${Math.round(f.kcal)} kcal</span>
             <button class="del" data-act="del-food" data-id="${e.id}" aria-label="删除">✕</button>
           </div>`;
@@ -1863,7 +1864,8 @@ function renderProgress() {
 function openFoodSheet(mealKey) {
   const slot = MEAL_SLOTS.find((s) => s.key === mealKey) || MEAL_SLOTS[0];
   // 记住上次用的哪条路：习惯说一句的人，不用每次再切一遍
-  let pane = state.settings?.foodSheetPane === 'say' ? 'say' : 'search';
+  const savedPane = state.settings?.foodSheetPane;
+  let pane = ['say', 'kcal'].includes(savedPane) ? savedPane : 'search';
 
   openSheet({
     title: `加到${slot.label}`,
@@ -1871,6 +1873,7 @@ function openFoodSheet(mealKey) {
       <div class="chips" id="foodPaneChips">
         <button class="chip" data-pane="search">搜食物库</button>
         <button class="chip" data-pane="say">说一句</button>
+        <button class="chip" data-pane="kcal">只填热量</button>
       </div>
 
       <div id="paneSearch">
@@ -1885,16 +1888,39 @@ function openFoodSheet(mealKey) {
         <p class="tiny muted" style="margin:8px 0 0">
           解析完先给你看清单，克数能改，确认了才记上。连着说几样也行（「米饭一碗、青菜一份」）。
         </p>
+      </div>
+
+      <div id="paneKcal" class="hidden">
+        <p class="tiny muted" style="margin:10px 0 6px">
+          在外面吃、没包装、也懒得描述时用这个：直接填这一顿大概多少大卡，不用先找食物。
+        </p>
+        <label class="field"><span>吃了什么（可不填，写了方便以后翻）</span>
+          <input type="text" id="kcalName" maxlength="20" placeholder="例如：公司楼下的牛肉面" autocomplete="off">
+        </label>
+        <label class="field"><span>多少 kcal</span>
+          <input type="number" id="kcalValue" inputmode="numeric" min="1" max="5000" placeholder="例如：650">
+        </label>
+        <label class="field"><span>蛋白（克，知道就填）</span>
+          <input type="number" id="kcalProtein" inputmode="decimal" min="0" max="300" placeholder="不填就按 0 算">
+        </label>
+        <button class="btn block" id="kcalSave">记到${slot.label}</button>
+        <p class="tiny muted" style="margin:8px 0 0">
+          只填热量时，蛋白质和碳水那两栏会少算；「今天还能吃多少」不受影响。
+        </p>
       </div>`,
     onMount: (body) => {
       const chips = [...body.querySelectorAll('#foodPaneChips [data-pane]')];
       const paneSearch = body.querySelector('#paneSearch');
       const paneSay = body.querySelector('#paneSay');
+      const paneKcal = body.querySelector('#paneKcal');
       const paint = () => {
         chips.forEach((c) => c.classList.toggle('on', c.dataset.pane === pane));
         paneSearch.classList.toggle('hidden', pane !== 'search');
         paneSay.classList.toggle('hidden', pane !== 'say');
-        const focus = pane === 'search' ? body.querySelector('#foodSearch') : body.querySelector('#foodSayText');
+        paneKcal.classList.toggle('hidden', pane !== 'kcal');
+        const focus = pane === 'search' ? body.querySelector('#foodSearch')
+          : pane === 'say' ? body.querySelector('#foodSayText')
+            : body.querySelector('#kcalValue');
         setTimeout(() => focus?.focus(), 60);
       };
       chips.forEach((c) => c.addEventListener('click', () => {
@@ -1927,6 +1953,21 @@ function openFoodSheet(mealKey) {
       $('#foodLabelBtn', body).addEventListener('click', () => {
         closeSheet();
         openLabelSheet(mealKey);
+      });
+
+      /* 路三：只填热量 —— 她知道这一顿多少大卡，但不想（也没法）描述份量 */
+      body.querySelector('#kcalSave').addEventListener('click', () => {
+        const r = kcalOnlyFood({
+          name: body.querySelector('#kcalName').value,
+          kcal: body.querySelector('#kcalValue').value,
+          protein: body.querySelector('#kcalProtein').value,
+        });
+        if (!r.ok) return toast(r.error);
+        addFoodEntry(state, dateKey, slot.key, r.food, 100);
+        const stored = save();
+        closeSheet();
+        render();
+        if (stored) toast(`已记：${r.food.name} ${r.food.kcal} kcal`);
       });
 
       /* 路二：说一句 —— 关掉这个弹层，走「草稿确认」那条老路，餐次锁定这一餐 */
@@ -3181,13 +3222,28 @@ function drawAiSettings(cfg, relay, then = null) {
   };
   renderModeNote();
 
+  // 密钥框的占位提示必须说真话：同一个服务商 → 留空就用原来那把；
+  // 换了服务商 → 留空不再沿用（原来那句「留空则不改」会误导她以为换了也能用旧密钥）
+  const keyPlaceholder = (p) => {
+    // 读此刻的真实配置，而不是打开弹层那一刻的快照 ——
+    // 这里刚配好、同一个弹层里再点一次保存时，快照还是「没配过」，会又提示「密钥没填」
+    const live = currentAiConfig();
+    const savedPresetId = readAiConfigRaw()?.presetId || live.presetId || null;
+    if (p.allowEmptyKey) return '本地模型随便填，例如 ollama';
+    if (live.configured && live.keyMasked && p.id === savedPresetId) return `已保存：${live.keyMasked}（留空则不改）`;
+    if (live.configured && p.id !== savedPresetId) return '换了服务商，密钥要重新填（不会沿用上一家的）';
+    return '粘贴服务商的 API Key';
+  };
+
+  const findPresetId = () => bodyEl.querySelector('#presetChips .chip.on')?.dataset.preset || presetId;
+
   const applyPreset = (id, { overwrite = true } = {}) => {
     const p = findPreset(id);
     $('#presetNote').innerHTML = `${esc(p.note)}${p.keyUrl ? ` <a href="${esc(p.keyUrl)}" target="_blank" rel="noopener">去拿密钥 →</a>` : ''}`;
     if (overwrite) {
       if (p.baseUrl) $('#aiBaseUrl').value = p.baseUrl;
       if (p.model) $('#aiModel').value = p.model;
-      $('#aiKey').placeholder = p.allowEmptyKey ? '本地模型随便填，例如 ollama' : '粘贴服务商的 API Key';
+      $('#aiKey').placeholder = keyPlaceholder(p);
       if (p.directCall === false) {
         pickedMode = 'relay';
       } else if (pickedMode === 'relay' && !relay.configured) {
@@ -3269,7 +3325,7 @@ function drawAiSettings(cfg, relay, then = null) {
     const input = collect();
     if (!input.baseUrl) return show('接口地址要填。', '');
     if (!input.model) return show('模型名要填 —— 可以点「获取模型列表」自动带出来。', '');
-    if (!input.apiKey && !cfg.configured) return show('密钥还没填。', '');
+    if (!input.apiKey && !currentAiConfig().configured) return show('密钥还没填。', '');
     const saved = saveAiConfigLocal(input);
     if (!saved.ok) return show(esc(saved.problems.join('；')), '');
     show('已保存，正在测试连通…', 'info');
@@ -3277,6 +3333,10 @@ function drawAiSettings(cfg, relay, then = null) {
     if (t.ok) {
       show(`✅ 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>已经切到 AI 模式：现在你怎么写都能听懂了。`, 'info');
       ai = { configured: true, checked: true, mode: currentAiConfig().mode };
+      // 保存完把输入框清空，只留占位提示：密钥不该一直明文摊在屏幕上，
+      // 也让「留空则不改」这句话在同一个弹层里就变成真的
+      $('#aiKey').value = '';
+      $('#aiKey').placeholder = keyPlaceholder(findPreset(findPresetId()));
       // 刚配好密钥就自动进 AI 模式 —— 不然她配完发现「还是没反应」（普通模式本来就不调 AI）
       if (useMode() !== 'ai') {
         state.settings = { ...(state.settings || {}), mode: 'ai' };

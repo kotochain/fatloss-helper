@@ -170,6 +170,9 @@ export function frequentFoods(state, limit = 8) {
   for (const d of dates) {
     for (const e of Object.values(state.days[d].meals || {}).flat()) {
       if (!e || !e.food || !e.food.id) continue;
+      // 「只填热量」是一条一次性的数字，不是一种食物：放进「常吃的」会变成
+      // 一个「100 克 = 650 kcal」的怪快捷项，点它还得再填克数
+      if (e.food.kcalOnly) continue;
       const cur = counter.get(e.food.id) || { food: e.food, count: 0, grams: e.grams };
       cur.count += 1;
       cur.grams = e.grams;

@@ -342,6 +342,44 @@ export function matchFoodByName(name, { minScore = 70 } = {}) {
 }
 
 /**
+ * 「只填热量」用的合成食物。
+ *
+ * 场景：在外面吃、没包装、也懒得描述 —— 她只知道「这一顿大概 650 大卡」。
+ * 以前只能去食物库里找个相近的条目，找不准反而更糟，所以给她一条直路。
+ *
+ * 做法：把它当成「每 100 克 = 这一顿」的食物，克数固定 100 ——
+ * 记录、汇总、删除、导出全都沿用现有结构，不需要新类型。
+ * 标记 kcalOnly，界面上就不显示「100 克」（她从没填过克数）。
+ *
+ * @returns {{ok:true, food:object}|{ok:false, error:string}}
+ */
+export function kcalOnlyFood({ name, kcal, protein } = {}) {
+  const k = Number(kcal);
+  if (!Number.isFinite(k) || k <= 0) return { ok: false, error: '热量要填一个大于 0 的数字（kcal）。' };
+  if (k > 5000) return { ok: false, error: '一次超过 5000 kcal，确认一下是不是多填了一位。' };
+  const rawP = protein === '' || protein === null || protein === undefined ? 0 : Number(protein);
+  if (!Number.isFinite(rawP) || rawP < 0) return { ok: false, error: '蛋白要填一个数字（克），不填就按 0 算。' };
+  if (rawP > 300) return { ok: false, error: '蛋白超过 300 克不太可能，确认一下单位。' };
+  if (rawP * 4 > k) return { ok: false, error: `光蛋白 ${rawP} 克就有 ${Math.round(rawP * 4)} kcal，超过总热量了，核对一下。` };
+  const label = String(name || '').trim() || '只记了热量';
+  return {
+    ok: true,
+    food: {
+      id: 'kcal_only',
+      name: label,
+      kcal: Math.round(k),
+      protein: Math.round(rawP * 10) / 10,
+      fat: 0,
+      carb: 0,
+      category: 'custom',
+      // 界面据此显示「按热量记」而不是「100 克」
+      kcalOnly: true,
+      servings: [['这一顿', 100]],
+    },
+  };
+}
+
+/**
  * 把各种写法统一成克数。
  * 支持：150克 / 150g / 200毫升 / 0.5斤 / 一两 / 一小碗 / 半个 / 两个 / 3个 / 直接写数字
  * 看不懂的返回 null —— 宁可让用户重填，也不要猜一个数出来。

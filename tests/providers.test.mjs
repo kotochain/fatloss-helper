@@ -72,6 +72,28 @@ test('留空密钥表示「不改」，而不是把已保存的密钥清掉', ()
   const r = normalizeAiConfigInput({ presetId: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' }, existing);
   assert.deepEqual(r.problems, []);
   assert.equal(r.config.apiKey, 'sk-existing-key-0001' /* secret-scan:allow 假密钥，仅用于测试 */, '留空时应当保留原密钥');
+
+  // 界面上的「留空」拿到的是空字符串，不是 undefined。
+  // 以前这里只认 undefined，于是她清空输入框点保存，会看到「密钥没填」——
+  // 明明输入框的占位提示写着「已保存：sk-1e***df41（留空则不改）」。
+  const blank = normalizeAiConfigInput({ presetId: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', apiKey: '' }, existing);
+  assert.deepEqual(blank.problems, [], '空字符串也必须当成「不改」，不能报「密钥没填」');
+  assert.equal(blank.config.apiKey, 'sk-existing-key-0001' /* secret-scan:allow 假密钥，仅用于测试 */);
+
+  // 只改空格也算没填
+  const spaces = normalizeAiConfigInput({ presetId: 'deepseek', apiKey: '   ' }, existing);
+  assert.deepEqual(spaces.problems, []);
+  assert.equal(spaces.config.apiKey, 'sk-existing-key-0001' /* secret-scan:allow 假密钥，仅用于测试 */);
+});
+
+test('换了服务商就不沿用上一家的密钥（既不通用，也等于把钥匙递给第三方）', () => {
+  const existing = { presetId: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', apiKey: 'sk-existing-key-0001' /* secret-scan:allow 假密钥，仅用于测试 */ };
+  const r = normalizeAiConfigInput({ presetId: 'dashscope', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', apiKey: '' }, existing);
+  assert.ok(r.problems.some((p) => p.includes('换了服务商')), `应当要求重新填密钥，实际：${JSON.stringify(r.problems)}`);
+  assert.equal(r.config.apiKey, '', '换了服务商绝不能把旧密钥带过去');
+  // 填了新的当然用新的
+  const r2 = normalizeAiConfigInput({ presetId: 'dashscope', apiKey: 'sk-new-key-0002' /* secret-scan:allow 假密钥，仅用于测试 */ }, existing);
+  assert.equal(r2.config.apiKey, 'sk-new-key-0002' /* secret-scan:allow 假密钥，仅用于测试 */);
 });
 
 test('掩码只露头尾，中间打星', () => {

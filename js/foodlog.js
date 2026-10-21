@@ -117,9 +117,11 @@ export function entryWarnings(entry) {
 /** 常用食物：按出现次数排序，用来做「最近吃过」快捷入口 */
 export function frequentFoods(state, limit = 8) {
   const counter = new Map();
-  const dates = Object.keys(state.days || {}).sort().reverse();
+  const dates = Object.keys(state.days || {}).sort().reverse().slice(0, 30);
   for (const d of dates) {
-    for (const e of state.days[d] || []) {
+    // days[d] 是「一天」对象（里面才是 meals），不是条目数组 ——
+    // 这里以前直接 for...of 一个普通对象，一 call 就崩（app 用的是 store.js 里那份，才一直没暴露）
+    for (const e of Object.values(state.days[d]?.meals || {}).flat()) {
       const key = e.food.id;
       const cur = counter.get(key) || { food: e.food, count: 0, grams: e.grams };
       cur.count += 1;

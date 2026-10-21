@@ -97,6 +97,12 @@ const MUTATIONS = [
   { file: 'js/ai-core.js', from: '数字必须和它左边的项目名在**同一行**', to: '数字必须和它左边的项目名在**附近**', why: '读表提示词必须要求「数字和项目名同一行」（糊照片上最容易整行错位）' },
   { file: 'js/ai-core.js', from: "const thinking = String(choice?.message?.reasoning_content || '').trim();", to: "const thinking = '';", why: '正文空但只有思考时，要说是模型在深度思考，不能说成断网' },
   { file: 'js/cardio.js', from: "  return Object.prototype.hasOwnProperty.call(GOALS, key) ? key : 'fat_burn';", to: '  return key;', why: '训练目标认不出来要回「燃脂」（否则推荐拿不到目标）' },
+  // ── 第十一轮：AI 设置留空密钥 + 「只填热量」──
+  { file: 'js/providers.js', from: "const apiKey = askedKey || (presetChanged ? '' : (existing?.apiKey || ''));", to: 'const apiKey = askedKey;', why: '输入框留空（空字符串）必须沿用已保存的密钥，不能报「密钥没填」' },
+  { file: 'js/providers.js', from: "const presetChanged = Boolean(existing?.apiKey && existing.presetId && preset.id !== existing.presetId);", to: 'const presetChanged = false;', why: '换了服务商不能沿用上一家的密钥（等于把钥匙递给第三方）' },
+  { file: 'js/foods.js', from: "if (!Number.isFinite(k) || k <= 0) return { ok: false, error: '热量要填一个大于 0 的数字（kcal）。' };", to: 'if (!Number.isFinite(k)) return { ok: false };', why: '「只填热量」要挡住 0 / 负数（否则会记一条 0 kcal 的空记录）' },
+  { file: 'js/foods.js', from: 'if (k > 5000) return { ok: false', to: 'if (k > 99999) return { ok: false', why: '「只填热量」要挡住明显多填一位的数字' },
+  { file: 'js/store.js', from: '      if (e.food.kcalOnly) continue;', to: '      if (false) continue;', why: '「只填热量」的条目不该出现在「常吃的」里（否则变成 100 克 = 650 kcal 的怪快捷项）' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，
