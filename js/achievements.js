@@ -2,7 +2,7 @@
  * 正反馈系统：成就徽章、小植物、周报
  *
  * 设计原则（很重要，别改坏）：
- *  1) **只庆祝她能控制的行为**：记录了、吃够蛋白、去运动了、坚持了。
+ *  1) **只庆祝用户能控制的行为**：记录了、吃够蛋白、去运动了、坚持了。
  *     绝不庆祝「吃得少」「掉秤快」—— 那等于鼓励节食，长期是有害的。
  *  2) **不给惩罚**：断记录不会让植物枯萎，也不会扣分。有几天没记，徽章还在、植物还在，
  *     回来接着记就行。放弃的代价必须为零，否则一次中断就等于彻底放弃。
@@ -16,7 +16,7 @@ import { todayKey, shiftDate } from './store.js';
 /* ── 称呼 ───────────────────────────────── */
 
 /**
- * 怎么称呼使用的人。可以在「她的资料」里填，留空就不显示称呼。
+ * 怎么称呼使用的人。可以在「用户的资料」里填，留空就不显示称呼。
  *
  * 注意：默认值不再是某个具体名字 —— 这个工具要给别人用，
  * 硬编码人名会让其他人觉得「这不是给我做的」。空字符串表示「不称呼」。
@@ -316,7 +316,7 @@ export const ACHIEVEMENTS = [
 
 /**
  * 蛋白质「达标」的天数。
- * 达标线 = 她自己的蛋白质目标（由 calcTargets 算出）。目标缺失时用 0，
+ * 达标线 = 用户自己的蛋白质目标（由 calcTargets 算出）。目标缺失时用 0，
  * 这样至少不会把「没达标」误判成「达标」。
  */
 export function proteinDays(state, target) {
@@ -347,7 +347,7 @@ export function maxMealsInADay(state) {
 /**
  * 算出全部徽章状态。
  * @param {object} state 存档
- * @param {number} proteinTarget 她的蛋白质目标（用于判断「达标」）
+ * @param {number} proteinTarget 用户的蛋白质目标（用于判断「达标」）
  * @returns {{list:Array, unlocked:Array, next:object|null, justUnlocked:Array}}
  */
 export function achievements(state, proteinTarget) {

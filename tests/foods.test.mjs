@@ -100,7 +100,7 @@ test('搜索：空关键词给出默认列表，且不报错', () => {
 
 test('搜索：自定义食物优先出现在结果里', () => {
   const custom = [{
-    id: 'c_test', name: '她自己的蛋白粉', category: 'custom',
+    id: 'c_test', name: '用户自己的蛋白粉', category: 'custom',
     kcal: 380, protein: 80, fat: 5, carb: 6, servings: [['一勺', 30]],
   }];
   const list = searchFoods('蛋白粉', custom);
@@ -161,7 +161,7 @@ test('只填热量：正常输入、名称兜底，以及「100 克」这个内�
   assert.equal(f.kcal, 650);
   assert.equal(f.protein, 30);
 
-  // 不写名字也要能用（她经常懒得写）
+  // 不写名字也要能用（用户经常懒得写）
   assert.equal(kcalOnlyFood({ kcal: 500 }).food.name, '只记了热量');
   // 蛋白不填按 0，不能变成 NaN 把全天合计弄坏
   const noP = kcalOnlyFood({ kcal: 500, protein: '' });

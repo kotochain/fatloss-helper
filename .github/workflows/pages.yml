@@ -1,4 +1,4 @@
-# 把应用发布成「真正的网址」——她手机上打开网址、加到主屏幕，就是 App。
+# 把应用发布成「真正的网址」——用户手机上打开网址、加到主屏幕，就是 App。
 # 需要你在仓库 Settings → Pages → Source 选 "GitHub Actions"（只需设置一次）。
 name: 发布到 GitHub Pages
 

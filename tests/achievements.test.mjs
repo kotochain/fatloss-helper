@@ -189,7 +189,7 @@ test('空存档不会崩，也不会凭空解锁', () => {
   assert.deepEqual(weeklyReview(s, {}).lines.length > 0, true);
 });
 
-/* ── 个性化（她的昵称与专属徽章）────────────── */
+/* ── 个性化（用户的昵称与专属徽章）────────────── */
 
 test('称呼：默认不称呼，填了才用（工具要给别人用，不能硬编码某个名字）', () => {
   const s = emptyState();
@@ -211,12 +211,12 @@ test('称呼：默认不称呼，填了才用（工具要给别人用，不能�
   assert.deepEqual(bad, [], `代码里出现了硬编码的名字：\n${bad.join('\n')}`);
 });
 
-test('问候语按时间变化，并且带上她的名字', () => {
+test('问候语按时间变化，并且带上用户的名字', () => {
   const s = emptyState();
   s.profile = { nickname: '小繁' };
   const times = [8, 12, 16, 20, 2];
   const texts = times.map((h) => greeting(s, h).text);
-  for (const t of texts) assert.ok(t.includes('小繁'), `问候语里应当有她的名字：${t}`);
+  for (const t of texts) assert.ok(t.includes('小繁'), `问候语里应当有用户的名字：${t}`);
   assert.equal(new Set(texts).size, times.length, '不同时段应当说不同的话');
   assert.ok(greeting(s, 2).word.includes('还没睡'), '深夜的问候要不一样');
   // 名字只能出现一次（之前吃过「小繁，小繁」这个亏）
@@ -278,7 +278,7 @@ test('植物按累计天数生长，且阶段是递增的', () => {
   assert.equal(plantState(loggedState(31)).level, 4);
 });
 
-test('植物会告诉她还差几天长大', () => {
+test('植物会告诉用户还差几天长大', () => {
   const p = plantState(loggedState(5));
   assert.equal(p.nextStage.min, 7);
   assert.equal(p.toNext, 2);
@@ -293,7 +293,7 @@ test('第一笔记录给的是鼓励，而不是评价吃得多不多', () => {
   assert.ok(!/太多|超标|注意/.test(msg.text), `第一笔不该评价吃了多少：${msg.text}`);
 });
 
-test('蛋白达标时明确告诉她是这件事最值钱', () => {
+test('蛋白达标时明确告诉用户是这件事最值钱', () => {
   const s = loggedState(2); // 连续 2 天，避开「第一笔」和「连续 3 天」两个分支
   const target = Math.max(1, dayTotals(s, todayKey()).protein - 10); // 保证达标
   const msg = afterLogMessage(s, 'dinner', target);
@@ -328,9 +328,16 @@ test('周报高光：记录多、蛋白好、运动勤分别有不同说法', ()
 });
 
 test('周报只在周一弹，且这周有记录；同一天不重复弹', () => {
-  const monday = '2026-10-19'; // 周一
-  const tuesday = '2026-10-20';
-  const s = loggedState(3);
+  // 别写死日期：loggedState() 记的是「相对今天」的后三天，写死某个月份的话，
+  // 过几天那两个日期就不在同一个「周」里了 —— 这个测试在 2026-10-22 真的自己红过一次（时间炸弹）。
+  const today = todayKey();
+  const [y, m, d] = today.split('-').map(Number);
+  const monday = shiftDate(today, -((new Date(y, m - 1, d).getDay() + 6) % 7));
+  const tuesday = shiftDate(monday, 1);
+  // 记录必须落在「以这个周一为今天」的那一周里 —— 用今天附近的记录会算不进 7 天窗口。
+  const s = emptyState();
+  s.profile = demoProfile();
+  for (let i = 0; i < 3; i++) addFoodEntry(s, shiftDate(monday, -i), 'lunch', findFood('rice_cooked'), 200);
   assert.equal(shouldShowWeekly(s, tuesday), false, '不是周一不该弹');
   assert.equal(shouldShowWeekly(s, monday), true, '周一且有记录应当弹');
   s.achievements.lastWeeklyAt = monday;

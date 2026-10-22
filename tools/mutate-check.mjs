@@ -17,7 +17,8 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-mutate-'));
 // 沙箱必须和真实仓库一样「该有的都有」：以前只拷了 js/tests/tools/package.json，
 // 但 tests/icons.test.mjs 会读 index.html —— 沙箱里没有这个文件 → 测试直接 ENOENT 崩，
 // 于是每一条变异都被判「抓到了」，77/77 是假的（v27 由独立验证员发现）。
-for (const entry of ['js', 'tests', 'tools', 'package.json', 'index.html', 'sw.js', 'css', 'icons', 'manifest.webmanifest']) {
+// 文案护栏会扫 README / HANDOFF / docs / .github，沙箱里也要有，否则那条变异测不出来
+for (const entry of ['js', 'tests', 'tools', 'package.json', 'index.html', 'sw.js', 'css', 'icons', 'manifest.webmanifest', 'README.md', 'HANDOFF.md', 'docs', '.github']) {
   fs.cpSync(path.join(source, entry), path.join(sandbox, entry), { recursive: true });
 }
 const root = sandbox;
@@ -51,10 +52,10 @@ const MUTATIONS = [
   { file: 'js/cardio.js', from: '  return valid.length ? valid : [...DEFAULT_EQUIPMENT];', to: '  return valid;', why: '器械一个都不剩时要回默认四项（空列表会让推荐全空）' },
   { file: 'js/mealparse.js', from: 'const perUnit = food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || portion.perUnit || 100;', to: 'const perUnit = portion.perUnit || 100;', why: '「一个」要按食物自己的份量换算（鸡蛋 50 克 ≠ 通用 100 克）' },
   { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
-  { file: 'js/cardio.js', from: 'const avail = new Set(availableEquipment || []);', to: 'const avail = new Set(Object.keys(EQUIPMENT));', why: '替代动作必须是她今天能用的器械' },
+  { file: 'js/cardio.js', from: 'const avail = new Set(availableEquipment || []);', to: 'const avail = new Set(Object.keys(EQUIPMENT));', why: '替代动作必须是用户今天能用的器械' },
   { file: 'js/ai-core.js', from: "    if (!(grams > 0) || grams > 5000) continue;", to: "    if (!(grams > -1)) continue;", why: 'AI 返回的离谱份量要被丢掉' },
   // ── 第三轮新增：正反馈系统 ──
-  { file: 'js/achievements.js', from: 'if (t.kcal > 0 && t.protein >= goal) n += 1;', to: 'if (t.kcal > 0) n += 1;', why: '「蛋白达标」必须用她的目标判定，不能只要吃了就算达标' },
+  { file: 'js/achievements.js', from: 'if (t.kcal > 0 && t.protein >= goal) n += 1;', to: 'if (t.kcal > 0) n += 1;', why: '「蛋白达标」必须用用户的目标判定，不能只要吃了就算达标' },
   { file: 'js/achievements.js', from: "const level = PLANT_STAGES.reduce((acc, s, i) => (total >= s.min ? i : acc), 0);", to: "const level = PLANT_STAGES.reduce((acc, s, i) => (streak >= s.min ? i : acc), 0);", why: '小植物按累计天数生长（断档不该倒退）' },
   { file: 'js/achievements.js', from: "  const seen = new Set(state?.achievements?.seen || []);", to: '  const seen = new Set();', why: '庆祝过的徽章不该重复弹' },
   { file: 'js/achievements.js', from: "  if (!isMonday) return false;", to: '  if (isMonday) return false;', why: '周报只在周一弹，不是每天打扰' },
@@ -73,16 +74,16 @@ const MUTATIONS = [
   // ── 第七轮：AI 解析后按名字匹配本地食物（修的是一个「AI 模式从来没工作过」的 bug）──
   { file: 'js/mealparse.js', from: 'const hit = matchFoodByName(raw.name);', to: 'const hit = null;', why: 'AI 认出的食物必须能在本地库里匹配上（否则一条都记不上）' },
   { file: 'js/mealparse.js', from: 'if (out.items.length) {', to: 'if (true) {', why: '一条都没记上时不该再追问（答不上来）' },
-  { file: 'js/mealparse.js', from: "out.unmatchedItems.push({ name: String(raw?.name || '?').trim(), grams: Math.round(grams) });", to: "out.unmatchedItems.push({ name: '?', grams: 0 });", why: '没匹配上的食物要原样告诉她（名字和克数）' },
+  { file: 'js/mealparse.js', from: "out.unmatchedItems.push({ name: String(raw?.name || '?').trim(), grams: Math.round(grams) });", to: "out.unmatchedItems.push({ name: '?', grams: 0 });", why: '没匹配上的食物要原样告诉用户（名字和克数）' },
   { file: 'js/foods.js', from: 'if (!best || best.score < minScore) return null;', to: 'if (!best) return null;', why: '匹配分数太低宁可不算（等价变异：现有食物库/查询里没有「有匹配但低分」的样本，实测输出一致）', sensitivity: 'equivalent' },
   { file: 'js/insights.js', from: 'if (logged.length < 4) return [];', to: 'if (false) return [];', why: '记录太少时不许给「规律」（等价变异：后面的 topSourceInsight 也有 ≥4 天门槛，0~3 天输出仍为空）', sensitivity: 'equivalent' },
   { file: 'js/insights.js', from: 'if (a.length < minPerGroup || b.length < minPerGroup) return null;', to: 'if (false) return null;', why: '两组样本都不够时不许做对比' },
-  // ── 第七轮：份量不确定时反问她 ──
+  // ── 第七轮：份量不确定时反问用户 ──
   { file: 'js/mealparse.js', from: '    const verdict = portionVerdict(f, portion, converted > 0);', to: "    const verdict = { confidence: 'high', reason: null };", why: '「一碗」「一份」这种说不准的说法必须标成低置信度（全标成高置信度就等于什么都不问）' },
   { file: 'js/mealparse.js', from: '  if (VAGUE_UNITS.has(unit)) {', to: '  if (false) {', why: '「碗」「份」「包」这类说不准的量词必须问一句' },
   { file: 'js/mealparse.js', from: '  const below = nearest(true) || { label: labels[0], grams: round5(g * smallK) };', to: '  const below = nearest(true) || { label: labels[0], grams: g };', why: '档位的最小档必须真的比当前值小（否则点了没变化，等于白问）' },
   { file: 'js/mealparse.js', from: '  const above = nearest(false) || { label: labels[2], grams: round5(g * largeK) };', to: '  const above = nearest(false) || { label: labels[2], grams: g };', why: '档位的最大档必须真的比当前值大（否则点了没变化）' },
-  { file: 'js/mealparse.js', from: "  if (portion.counting || !portion.portionWord) return { confidence: 'high', reason: null };", to: "  if (portion.counting) return { confidence: 'high', reason: null };", why: '她说了确切克数（「200克米饭」）就是说清了，不能再问' },
+  { file: 'js/mealparse.js', from: "  if (portion.counting || !portion.portionWord) return { confidence: 'high', reason: null };", to: "  if (portion.counting) return { confidence: 'high', reason: null };", why: '用户说了确切克数（「200克米饭」）就是说清了，不能再问' },
   // ── 第八轮：运动记录与统计 ──
   { file: 'js/exercise.js', from: 'if (key >= start && key <= end) {', to: 'if (key >= start) {', why: '「这周」必须两头都限制（只卡开始日期的话，下周一的记录会被算进这周）' },
   { file: 'js/exercise.js', from: 'minutes += Math.round(Number(x?.minutes) || 0);', to: 'minutes += 1;', why: '运动统计要加时长而不是数次数（今天几分钟、累计几分钟全靠它）' },
@@ -91,14 +92,14 @@ const MUTATIONS = [
   { file: 'js/exercise.js', from: 'cardio: CARDIO.filter((e) => e.equipment.some((q) => avail.has(q))),', to: 'cardio: CARDIO.filter(() => true),', why: '只给今天器械做得了的动作（不能推荐跑步机的动作给只有椭圆机的人）' },
   { file: 'js/exercise.js', from: 'const sinceMonday = (dt.getDay() + 6) % 7;', to: 'const sinceMonday = dt.getDay();', why: '一周从周一算起（写成 getDay 就成了周日算起，周日的记录会串到上一周）' },
   // ── 第九轮：AI 教练（数字本地算，AI 只组织语言）──
-  { file: 'js/coach.js', from: 'const gramsByBudget = Math.floor((budget / f.kcal) * 100 / 10) * 10;', to: 'const gramsByBudget = 300;', why: '教练建议的份量必须受剩余额度限制（不能劝她吃超）' },
+  { file: 'js/coach.js', from: 'const gramsByBudget = Math.floor((budget / f.kcal) * 100 / 10) * 10;', to: 'const gramsByBudget = 300;', why: '教练建议的份量必须受剩余额度限制（不能劝用户吃超）' },
   { file: 'js/coach.js', from: '  if (bad.length) {', to: '  if (false) {', why: 'AI 说了清单外的数字必须退回本地版（模型编数字是这个功能唯一的真风险）' },
   { file: 'js/coach.js', from: "if (/(运动|锻炼|练了|健身|跑步)", to: "if (/(游泳)", why: '不许暗示「运动了可以多吃」（红线）' },
   { file: 'js/coach.js', from: '    if (totals.kcal < MIN_DAY_KCAL) continue;', to: '    if (false) continue;', why: '只记了一百多卡的那天不算「记了」（否则平均热量被拉低）' },
   { file: 'js/coach.js', from: '  if (remainingKcal <= 0) {', to: '  if (false) {', why: '已经吃超了就不能再给加餐建议' },
   { file: 'js/cardio.js', from: '  return CARDIO_MINUTES.reduce((best, m) => (Math.abs(m - v) < Math.abs(best - v) ? m : best), CARDIO_MINUTES[0]);', to: '  return v;', why: '训练时长要吸附到界面的档位（存档里 37 分钟会让所有按钮都不选中）' },
   // ── 第十轮：拍照读表用真模型跑出来的问题 ──
-  { file: 'js/label.js', from: "if (!(consistency.diffPct > 20)) return '';", to: "if (false) return '';", why: '只有真对不上（>20%）才劝重拍，否则每次拍照都吓她一次' },
+  { file: 'js/label.js', from: "if (!(consistency.diffPct > 20)) return '';", to: "if (false) return '';", why: '只有真对不上（>20%）才劝重拍，否则每次拍照都吓用户一次' },
   { file: 'js/ai-core.js', from: '数字必须和它左边的项目名在**同一行**', to: '数字必须和它左边的项目名在**附近**', why: '读表提示词必须要求「数字和项目名同一行」（糊照片上最容易整行错位）' },
   { file: 'js/ai-core.js', from: "const thinking = String(choice?.message?.reasoning_content || '').trim();", to: "const thinking = '';", why: '正文空但只有思考时，要说是模型在深度思考，不能说成断网' },
   { file: 'js/cardio.js', from: "  return Object.prototype.hasOwnProperty.call(GOALS, key) ? key : 'fat_burn';", to: '  return key;', why: '训练目标认不出来要回「燃脂」（否则推荐拿不到目标）' },
@@ -118,6 +119,11 @@ const MUTATIONS = [
   { file: 'js/icons.js', from: "  play: '<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path d=\"M10.4 8.8l4.9 3.2-4.9 3.2z\"/>',", to: '', why: '设置页「重看新手引导」的新图标不能丢' },
   { file: 'js/app.js', from: 'badgeLabel(state, x)', to: 'badgeLabel(x)', why: '徽章名要带存档参数，否则徽章墙 16 个名字全部为空（v26 真踩过）' },
   { file: 'js/icons.js', from: "  database: '<ellipse cx=\"12\" cy=\"6.4\" rx=\"7\" ry=\"2.7\"/><path d=\"M5 6.4v11.2c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7V6.4\"/><path d=\"M5 12c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7\"/>',", to: '', why: '设置页「数据与备份」的数据图标不能丢' },
+  // ── 第十四轮：更新弹窗 + 称呼清理（v28）──
+  { file: 'js/version.js', from: "export const APP_VERSION = 'v28';", to: "export const APP_VERSION = 'v27';", why: '版本号必须和 CHANGELOG 最新一条、sw.js 一致（不一致手机上看版本会对不上）' },
+  { file: 'js/whatsnew.js', from: '  return Number.isFinite(x) && Number.isFinite(y) && x > y;', to: '  return Number.isFinite(x) && Number.isFinite(y) && x < y;', why: '「服务端比本地新」的方向不能反（反了就会说「有新版本」其实没有）' },
+  { file: 'js/whatsnew.js', from: "  if (!lastSeen) return changelog.slice(0, 1);", to: '  if (!lastSeen) return [];', why: '老用户升级到带更新说明的版本时，至少要看一次最新一版的更新' },
+  { file: 'js/app.js', from: "const STORAGE_KEY = 'fatloss.state.v2';", to: "const STORAGE_KEY = 'fatloss.state.v2'; // \u5979", why: '文案护栏：源码/文档里不许再出现第三人称（使用者是自己用的，只能叫「你」）' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

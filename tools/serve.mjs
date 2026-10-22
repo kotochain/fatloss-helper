@@ -229,7 +229,7 @@ if (isMain) {
     const st = aiConfigStatus(root);
     if (st.configured) {
       console.log(`\n  AI 解析：已启用（${st.from}｜模型 ${st.model}）`);
-      console.log('  她说「今天食堂吃了碗面」，由这台电脑代问 AI，密钥不会发到手机上。');
+      console.log('  用户说「今天食堂吃了碗面」，由这台电脑代问 AI，密钥不会发到手机上。');
     } else {
       console.log('\n  AI 解析：未配置 —— 现在用离线规则解析（常见说法能认）。');
       console.log('  两种配置方式，任选：');

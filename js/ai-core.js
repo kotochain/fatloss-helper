@@ -232,7 +232,7 @@ export async function requestModels({ baseUrl, apiKey, fetchImpl = fetch }) {
  *  - 解析一句话：**不许模型输出任何营养数字**，热量由本地食物库算；
  *  - 读营养成分表：**必须**让模型把包装上印的数字读出来 —— 但只许「读」，不许换算、
  *    不许估算、看不清就填 null。读回来的数字还要过本地校验（单位、4/9/4 对账）
- *    并由她确认后才保存。算术仍然在本地，AI 只是 OCR。
+ *    并由用户确认后才保存。算术仍然在本地，AI 只是 OCR。
  */
 
 export function buildLabelPrompt() {

@@ -29,6 +29,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
 import { launchChrome } from './chrome-launch.mjs';
+import { appVersion } from './app-version.mjs';
 
 /**
  * 干完活之后主动退出。
@@ -137,6 +138,7 @@ const FOOD_EGG = { id: 'egg', name: '鸡蛋', category: 'protein', kcal: 143, pr
 const FOOD_BEEF_NOODLE = { id: 'beef_noodle', name: '牛肉面', category: 'dish', kcal: 105, protein: 5.5, fat: 3.5, carb: 13.5, servings: [['一碗', 600]] };
 const FOOD_APPLE = { id: 'apple', name: '苹果', category: 'fruit', kcal: 53, protein: 0.4, fat: 0.2, carb: 13.7, servings: [['一个', 200]] };
 
+const SEEN = appVersion(); // 当前版本：自检造的存档统一算「已看过」，避免更新弹窗干扰
 const EMPTY_ACHIEVEMENTS = { seen: [], lastWeeklyAt: null, milestones: [] };
 
 /**
@@ -596,7 +598,7 @@ function endScenario(sc, actual) {
 async function resetForAi(model, baseUrl = FAKE_BASE) {
   const state = {
     version: 4, schemaVersion: 4, profile: DEMO_PROFILE,
-    settings: { trainDays: 3, stepsKey: 'mid', mode: 'ai' },
+    settings: { trainDays: 3, stepsKey: 'mid', mode: 'ai', lastSeenVersion: SEEN },
     days: {}, customFoods: [], weights: [], achievements: EMPTY_ACHIEVEMENTS,
   };
   const ai = {
@@ -764,8 +766,8 @@ async function scenarioAiProvenanceLie(group, id, title) {
   chk(sc, '列出没匹配上的食物', /量子寿司/.test(r.dom.draftText), '弹层列出「量子寿司」', clip(r.dom.draftText, 200));
   chk(sc, '不显示「AI 识别」', !/AI 识别/.test(r.dom.warnText), '弹层里没有「AI 识别」', `弹层提示「${clip(r.dom.warnText, 180)}」`, '事故级');
   // 产品决定（2026-10-20，Lead）：AI 一条都没匹配上、但离线解析认得出这句话时，
-  // 允许把离线结果给她记 —— 但**来源必须写明「离线识别」**，并把 AI 没匹配上的列出来。
-  // 以前这里要求「不许给记上」，那等于把她这句话作废：离线明明认对了牛肉面。
+  // 允许把离线结果给用户记 —— 但**来源必须写明「离线识别」**，并把 AI 没匹配上的列出来。
+  // 以前这里要求「不许给记上」，那等于把用户这句话作废：离线明明认对了牛肉面。
   chk(sc, '来源写明是离线识别', /离线识别/.test(r.dom.warnText), '弹层写明「离线识别（常见说法）」',
     `弹层提示「${clip(r.dom.warnText, 180)}」`, '事故级');
   chk(sc, '离线认出来了就允许记上', Boolean(r.dom.saveBtn), '有「就这样，记上」按钮',
@@ -838,6 +840,21 @@ function makeCurrentState({ days = {}, weights = [], mode = 'basic' } = {}) {
 
 async function setupStorage(code) {
   await evalJs(`(() => { localStorage.clear(); ${code} return true; })()`);
+  // v28：更新弹窗会在启动时弹（自检造的存档带 profile），它的定时器可能和下一个场景的
+  // 「清空存档 → 跳转」窗口撞车（曾导致一次保存记出两条，见 .audit/v28-verify.md）。
+  // 自检场景统一算「已经看过当前版本」，弹窗不参与；专门测弹窗的地方另用浏览器自检。
+  await evalJs(`(() => {
+    try {
+      const raw = localStorage.getItem('fatloss.state.v2');
+      if (!raw) return true;
+      const st = JSON.parse(raw);
+      if (st && typeof st === 'object') {
+        st.settings = { ...(st.settings || {}), lastSeenVersion: ${JSON.stringify(SEEN)} };
+        localStorage.setItem('fatloss.state.v2', JSON.stringify(st));
+      }
+    } catch { /* 坏 JSON 场景：保持原样，让应用自己去处理 */ }
+    return true;
+  })()`);
   await goto(`${BASE}/`);
 }
 
@@ -1217,7 +1234,7 @@ async function scenarioStorageSnapshotRoundtrip(group) {
 /** 存档 7：「从头开始（清除）」会不会连带删掉刚留的快照，导致恢复不了 */
 async function scenarioStorageWipeDeletesSnapshot(group) {
   // 产品决定（2026-10-20，Lead）：「从头开始」就是真的清干净 —— 包括升级前自动留的快照。
-  // 隐私优先：她输入「清除」两个字，就是要这份数据消失，不能偷偷留一份。
+  // 隐私优先：用户输入「清除」两个字，就是要这份数据消失，不能偷偷留一份。
   // 这里要守的是「不许悄悄删」：清除前的弹层必须写明快照也会一起删掉。
   const sc = beginScenario(group, 'S-7', '快照 → 「从头开始」：快照一并删掉，但界面必须提前说清楚',
     '清除前明确告知快照也会删掉；清除后记录与快照都没了，找回弹层不许谎称还能恢复');
@@ -1624,7 +1641,7 @@ function buildReport() {
   lines.push('');
   lines.push('- **超时时间是 25 秒**（js/ai-core.js 的 `REQUEST_TIMEOUT_MS = 25000`；本次实测超时提示在约 25 秒后才出现）。任务描述里提到「15 秒不应答」，如果希望用户更早得到反馈，可以缩短到 12~15 秒，或者在第 8 秒把按钮文案改成「还在等 AI…」让人知道没死。');
   lines.push('- **错误信息里带上了服务商原始返回体**：例如 401 时界面会显示 `{"error":{"message":"Invalid API key","type":"authentication_error"}}`。对普通用户偏技术，建议只保留中文说明（不影响功能）。');
-  lines.push('- **「没认出来」的弹层里可以带一行 AI 失败原因**：失败详情里已说明错误被吞；修的时候建议就加一行「（AI 这次没成功：密钥失效）」，不要整段堆给她。');
+  lines.push('- **「没认出来」的弹层里可以带一行 AI 失败原因**：失败详情里已说明错误被吞；修的时候建议就加一行「（AI 这次没成功：密钥失效）」，不要整段堆给用户。');
   lines.push('- **更新版本 / 坏存档的提示与保护**（当前工作区已有并行修复，建议保留）：原始内容另存 `fatloss.state.unreadable` + 欢迎页常驻警告 + 「导出一份原始文件」入口，是比「弹 6 秒浮层」更稳的做法。还可以更进一步：在「看示例 / 填资料」真正覆盖主键之前再确认一次，或把原始内容顺手放进导出的备份文件里。');
   lines.push('');
   lines.push('## 六、没测到 / 覆盖盲区（如实列出）');

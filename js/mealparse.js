@@ -2,8 +2,8 @@
  * 把「今天在食堂吃了碗牛肉面」这类大白话，拆成可确认的食物条目。
  *
  * 这里做两件事：
- *  1) 离线解析（parseDescription）：靠关键词匹配 + 份量推断，把她说的东西拆成几项。
- *     解析不了的会标成「需要确认」，界面负责反问她。
+ *  1) 离线解析（parseDescription）：靠关键词匹配 + 份量推断，把用户说的东西拆成几项。
+ *     解析不了的会标成「需要确认」，界面负责反问用户。
  *  2) 整理 AI 返回的结果（normalizeAiItems）：AI 负责听懂，但热量一律由本地数据算，
  *     不让模型自己编数字 —— 那样就没法核对，也没法离线复算。
  *
@@ -12,14 +12,14 @@
  *     portionChoices, needsConfirm, question, source }
  *
  * confidence（'high' | 'low'）说的是「份量有多确定」，不是「这条准不准」：
- * 她给了确切克数、或者用了个头/包装有标准的量词，就是 high；
+ * 用户给了确切克数、或者用了个头/包装有标准的量词，就是 high；
  * 「一碗」「一份」这种说不准的说法、以及什么都没说时，是 low，
- * 界面会拿 portionChoices 里的档位反问她一句，而不是默默按默认值记上。
+ * 界面会拿 portionChoices 里的档位反问用户一句，而不是默默按默认值记上。
  */
 
 import { FOODS, findFood, parseAmount, matchFoodByName } from './foods.js';
 
-/** 单份默认克数：她没说份量时按「正常一份」估，而不是统一 100 克 */
+/** 单份默认克数：用户没说份量时按「正常一份」估，而不是统一 100 克 */
 export const FOOD_DEFAULT_GRAMS = {
   egg: 50, duck_egg: 70, apple: 200, banana: 120, orange: 180, pear: 200, peach: 150,
   kiwi: 100, mango: 200, watermelon: 300, strawberry: 150, blueberry: 100, grape: 150,
@@ -56,9 +56,9 @@ export const PORTION_CHOICES = [
   { label: '超大碗（约 650 克）', value: '超大碗', grams: 650 },
 ];
 
-/* ── 份量置信度：什么时候该反问她 ──────────────────
-   她的原话是「一碗在食堂和家里能差一倍」。所以「说了份量词」不等于「说得够准」：
-     · 「200克」「半斤」「两个鸡蛋」「一罐可乐」→ 能换成一个确定的克数，别打扰她；
+/* ── 份量置信度：什么时候该反问用户 ──────────────────
+   用户的原话是「一碗在食堂和家里能差一倍」。所以「说了份量词」不等于「说得够准」：
+     · 「200克」「半斤」「两个鸡蛋」「一罐可乐」→ 能换成一个确定的克数，别打扰用户；
      · 「一碗」「一份」「半包」→ 碗有大小、份量看食堂、包装有大有小包，问一句比猜准。
    判据落在每条 item 的 confidence / confidenceReason 上，界面据此决定要不要给档位按钮。
    ────────────────────────────────────────────── */
@@ -134,7 +134,7 @@ function prettyTierLabel(raw) {
  * 保证「最小档 < 当前记的克数 < 最大档」—— 否则按钮点了没变化，等于白问一句。
  * @param {object|null} target 食物或组合菜（取它的 servings 和类型）
  * @param {number} defaultGrams 现在按多少克记的
- * @param {number} count 她说的份数（「两碗米饭」的档位也要跟着翻倍）
+ * @param {number} count 用户说的份数（「两碗米饭」的档位也要跟着翻倍）
  * @returns {Array<{label:string, grams:number}>} 小/正常/大 三档，从小到大；不值得问时给空数组
  */
 export function buildPortionChoices(target, defaultGrams, count = 1) {
@@ -145,11 +145,11 @@ export function buildPortionChoices(target, defaultGrams, count = 1) {
   const [smallK, largeK] = KIND_SPREAD[kind] || KIND_SPREAD.plate;
   const labels = KIND_LABELS[kind] || KIND_LABELS.plate;
   const times = Math.max(1, Math.round(Number(count) || 1));
-  // 库里的份量按她说的份数放大（「两碗米饭」的档位就该是 260/360/500）
+  // 库里的份量按用户说的份数放大（「两碗米饭」的档位就该是 260/360/500）
   const table = [];
   for (const [label, grams] of Array.isArray(target?.servings) ? target.servings : []) {
     const v = Math.round(Number(grams) * times);
-    // 离当前值太远的规格不拿出来当档位：说「6 斤米饭」时列一个「一小碗 130 克」，她也选不下去
+    // 离当前值太远的规格不拿出来当档位：说「6 斤米饭」时列一个「一小碗 130 克」，用户也选不下去
     if (v > 0 && v >= g / 3 && v <= g * 2.5) table.push({ label: prettyTierLabel(label), grams: v });
   }
   // 只取离当前值最近的那一头：库里有 130/180/250 时，不会拿 130 当「大碗」
@@ -161,7 +161,7 @@ export function buildPortionChoices(target, defaultGrams, count = 1) {
   const below = nearest(true) || { label: labels[0], grams: round5(g * smallK) };
   const above = nearest(false) || { label: labels[2], grams: round5(g * largeK) };
   const suffix = times > 1 ? `×${times}` : '';
-  // 三档的说法不能撞车（「小包 30」和「小包 50」两个按钮她会不知道选哪个），撞了就用中性说法
+  // 三档的说法不能撞车（「小包 30」和「小包 50」两个按钮用户会不知道选哪个），撞了就用中性说法
   const useLabel = (() => {
     const used = new Set([exact ? exact.label : labels[1]]);
     const alt = ['小一点', '大一点'];
@@ -196,10 +196,10 @@ function servingMatch(food, unit) {
  * 这条的份量算不算说清了。
  * 高：给了克数/斤两，或用了个头、包装有标准的量词（两个鸡蛋、一罐可乐）；
  * 低：什么都没说，或者只有「一碗」「一份」「半包」这种说不准的说法。
- * @param {boolean} converted 她说的那个份量能不能换算成克数（换不出来就等于没说清）
+ * @param {boolean} converted 用户说的那个份量能不能换算成克数（换不出来就等于没说清）
  */
 function portionVerdict(food, portion, converted = true) {
-  // 换不出克数（比如「半包」套在一个没有包装规格的食物上）：等于没说，别拿她没说的量词当理由
+  // 换不出克数（比如「半包」套在一个没有包装规格的食物上）：等于没说，别拿用户没说的量词当理由
   if (!portion || !converted) return { confidence: 'low', reason: '你没说多少，我先按常见的一份记的' };
   if (portion.counting || !portion.portionWord) return { confidence: 'high', reason: null };
   const said = portion.text || portion.portionWord;
@@ -218,7 +218,7 @@ function portionVerdict(food, portion, converted = true) {
 }
 
 /**
- * 组合菜品：她说的是一整份菜（不是单一食材）时用这些。
+ * 组合菜品：用户说的是一整份菜（不是单一食材）时用这些。
  * 数值是「一份 = baseGrams 克」的参考值（家常做法估算，误差较大，靠界面确认）。
  */
 export const DISHES = [
@@ -246,7 +246,7 @@ export const DISHES = [
   { id: 'yogurt_meal', name: '酸奶+水果', baseGrams: 300, kcal: 250, protein: 10, fat: 6, carb: 38, aliases: ['酸奶水果', '水果捞'] },
 ];
 
-/** 常见配料/加料：识别出来就往上加。vague = 加多少全看她手，界面要反问一句 */
+/** 常见配料/加料：识别出来就往上加。vague = 加多少全看用户手，界面要反问一句 */
 const EXTRA_INGREDIENTS = [
   { key: 'egg', aliases: ['加蛋', '加个蛋', '卤蛋', '鸡蛋', '煎蛋', '荷包蛋', '蛋'], foodId: 'egg', defaultGrams: 50 },
   { key: 'beef_extra', aliases: ['加肉', '加牛肉', '加份肉', '肉多'], foodId: 'beef_lean', defaultGrams: 60, vague: true },
@@ -634,7 +634,7 @@ export function parseDescription(raw, defaultMeal = null) {
       grams, chosenDish.baseGrams,
     );
     // 组合菜大多是「一碗」「一份」这种说法（碗有大小、份量看食堂），这里误差最大；
-    // 但她要是直接说了 600 克，那就是说清了，不该再问。组合菜没有份量表，所以第一个参数给 null。
+    // 但用户要是直接说了 600 克，那就是说清了，不该再问。组合菜没有份量表，所以第一个参数给 null。
     const dishVerdict = near
       ? portionVerdict(null, near)
       : { confidence: 'low', reason: '你没说这一份多大，我先按常见的一份记的' };
@@ -701,7 +701,7 @@ export function parseDescription(raw, defaultMeal = null) {
       name: `加${food.name}`,
       grams,
       ...nut,
-      // 「加了个蛋」是一颗标准大小，不用问；「加了点肉/加饭」加多少全看她手，得问一句
+      // 「加了个蛋」是一颗标准大小，不用问；「加了点肉/加饭」加多少全看用户手，得问一句
       confidence: h.ref.vague ? 'low' : 'high',
       confidenceReason: h.ref.vague ? `「${h.text}」没说多少，先按常见的估的` : null,
       portionChoices: h.ref.vague ? buildPortionChoices(food, grams) : [],
@@ -727,7 +727,7 @@ export function parseDescription(raw, defaultMeal = null) {
     }
   }
 
-  // 没认出来的部分，让界面提示她补充
+  // 没认出来的部分，让界面提示用户补充
   const unknown = [];
   if (!items.length) {
     const cleaned = text.replace(/[，,。.、!！?？\s]/g, '');
@@ -747,7 +747,7 @@ export function parseDescription(raw, defaultMeal = null) {
  * AI 模式实际上从来没工作过（只是白花一次调用，然后悄悄退回离线解析）。
  * 现在改成：拿到 AI 给的名字，**由本地自己匹配食物**（matchFoodByName）。
  *
- * 匹配不上也不静默丢弃：放进 `unmatched` 让界面明确告诉她「认出来了，但库里没有」。
+ * 匹配不上也不静默丢弃：放进 `unmatched` 让界面明确告诉用户「认出来了，但库里没有」。
  */
 export function normalizeAiItems(aiResult, defaultMeal = null) {
   const out = { items: [], meal: aiResult?.meal || defaultMeal, questions: [], unmatched: [], unmatchedItems: [] };
@@ -776,7 +776,7 @@ export function normalizeAiItems(aiResult, defaultMeal = null) {
         source: 'ai',
         foodId: food.id,
         foodName: food.name,
-        // AI 说的名字和库里名字不一样时告诉她对应到哪一个，避免她以为记错了
+        // AI 说的名字和库里名字不一样时告诉用户对应到哪一个，避免用户以为记错了
         note: nameDiffers ? `按「${food.name}」算的（${matchedBy}）` : (raw.note || null),
       });
     } else {

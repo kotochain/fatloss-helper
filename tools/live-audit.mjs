@@ -6,7 +6,7 @@
  * 所以这个脚本打开 **真正的线上网址**，用干净的浏览器资料夹，像新用户一样点完整个流程。
  *
  * 和本地自检的区别：
- *  - 本地自检测的是「我电脑上的文件」；这个测的是「她从 GitHub Pages 拿到的文件 + 真正的
+ *  - 本地自检测的是「我电脑上的文件」；这个测的是「用户从 GitHub Pages 拿到的文件 + 真正的
  *    Service Worker + 真正的 GitHub Pages 响应头」。
  *  - 会真的断网重载，验证「装到主屏幕之后离线能用」这句承诺在线上成立。
  *  - 会用老存档、损坏存档、未来版本存档去撞真实的线上页面，验证不会白屏、不会丢数据。
@@ -22,11 +22,12 @@ import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
 import { findChrome } from './chrome-path.mjs';
 import { portAlive, freePort } from './chrome-launch.mjs';
+import { appVersion } from './app-version.mjs';
 
 const BASE = (process.argv[2] || 'https://kotochain.github.io/fatloss-helper').replace(/\/$/, '');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, '.audit', 'live');
-/** 每次都用全新的浏览器资料夹：审计要从「一个干净的新用户」开始，复用旧资料夹会带着她的本地数据（出现过误报） */
+/** 每次都用全新的浏览器资料夹：审计要从「一个干净的新用户」开始，复用旧资料夹会带着用户的本地数据（出现过误报） */
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-live-profile-'));
 const CDP_PORT = 9420;
 const CHROME = findChrome();
@@ -296,7 +297,7 @@ async function main() {
     if (!swState.注册数) fail('线上没有注册 Service Worker（离线打不开）');
     if (swState.缓存 && !swState.缓存.有app) fail('线上 Service Worker 缓存里没有 js/app.js（离线会白屏）');
 
-    // 缓存里的 app.js 必须和线上最新一致，否则她会一直跑旧代码
+    // 缓存里的 app.js 必须和线上最新一致，否则用户会一直跑旧代码
     const cacheFreshness = await evaluate(client, `(async () => {
       const names = await caches.keys();
       for (const n of names) {
@@ -351,7 +352,7 @@ async function main() {
       },
       {
         name: '资料残缺（缺体重字段）',
-        seed: JSON.stringify({ schemaVersion: 4, profile: { sex: 'female', heightCm: 163, age: 26 }, settings: { onboarded: true, mode: 'basic' }, days: { '2026-10-10': { meals: { lunch: [{ id: 'e1', food: { id: 'rice_cooked', name: '米饭', kcal: 116 }, grams: 200 }] } } } }),
+        seed: JSON.stringify({ schemaVersion: 4, profile: { sex: 'female', heightCm: 163, age: 26 }, settings: { onboarded: true, mode: 'basic', lastSeenVersion: appVersion() }, days: { '2026-10-10': { meals: { lunch: [{ id: 'e1', food: { id: 'rice_cooked', name: '米饭', kcal: 116 }, grams: 200 }] } } } }),
         expect: (r) => r.启动 && r.不崩溃 && r.可操作 && r.记录天数 >= 1,
         detail: '不能让今天页崩，应提示补资料且记录还在',
       },
@@ -403,7 +404,7 @@ async function main() {
         fail(`线上遇到「${c.name}」表现不对（${c.detail}）｜实际 ${JSON.stringify(r)}`);
         await shot(client, `06-state-${c.name.replace(/[^\w\u4e00-\u9fa5]/g, '_')}.png`);
       }
-      // 坏 JSON / 未来版本：原始内容必须留一份，否则她点一次「看例子」就真没了
+      // 坏 JSON / 未来版本：原始内容必须留一份，否则用户点一次「看例子」就真没了
       if ((c.name.includes('坏的') || c.name.includes('更新版本')) && !r.留存原样) {
         fail(`「${c.name}」没有把原始内容留存一份 —— 点「看一个填好的例子」就会永久覆盖`);
       }
@@ -574,7 +575,7 @@ async function main() {
     if (looksGreen) fail(`桌面图标还是绿色 rgb(${rgb.join(',')}) —— 界面是温暖米粉配色，图标没跟上`);
     if (manifest.页面主题色 !== manifest.主题色) fail(`页面 theme-color(${manifest.页面主题色}) 与 manifest(${manifest.主题色}) 不一致`);
 
-    console.log('\n=== 六、启动失败兜底（模块加载不起来时，她还能看到什么） ===');
+    console.log('\n=== 六、启动失败兜底（模块加载不起来时，用户还能看到什么） ===');
     /*
      * 这条守的是最坏情况：js/app.js 没下载下来 / 语法炸了 / 被拦截。
      * index.html 里那段内联脚本会负责显示 #bootFail —— 但前提是这个元素真的存在。
@@ -598,7 +599,7 @@ async function main() {
     })()`);
     console.log(`   屏蔽 js/app.js 后：#bootFail 存在 ${bootFail.元素存在}｜可见 ${bootFail.可见}｜「${bootFail.文字}」｜刷新按钮 ${bootFail.有刷新按钮}｜整页空白 ${bootFail.页面空白}`);
     if (!bootFail.元素存在) fail('index.html 里没有 #bootFail 元素 —— 启动失败时页面就是纯白，没有任何提示');
-    else if (!bootFail.可见 || !bootFail.有刷新按钮) fail('启动失败兜底没有显示出来（她只会看到白屏）');
+    else if (!bootFail.可见 || !bootFail.有刷新按钮) fail('启动失败兜底没有显示出来（用户只会看到白屏）');
     await shot(client, '07-bootfail.png');
     await client.send('Network.setBlockedURLs', { urls: [] });
     await client.send('Network.setBypassServiceWorker', { bypass: false });

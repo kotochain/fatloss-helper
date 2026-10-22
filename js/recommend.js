@@ -380,9 +380,9 @@ function composeMeals(targets, seed, carbBudgets) {
       const carbKcal = tpl.key === 'snack' ? left : left * (1 - DAILY_OIL_KCAL_SHARE);
       if (carbFood.kcal <= 0) throw new Error(`${carbFood.name} 没有热量，不能当主食`);
       let grams = (carbKcal * 100) / carbFood.kcal;
-      // 主食也封顶，但上限按「她一天的碳水目标」放大：
+      // 主食也封顶，但上限按「用户一天的碳水目标」放大：
       // 碳水目标 320 克的人（维持期、活动量大）本来就该多吃主食，
-      // 用固定的「几碗饭」去卡会让她怎么都吃不到目标热量（实测差 19%）。
+      // 用固定的「几碗饭」去卡会让用户怎么都吃不到目标热量（实测差 19%）。
       const carbFoodPer100 = carbFood.carb > 0 ? carbFood.carb : 25;
       const carbsPerMealTarget = (targets.carbG || 180) / 4;
       const capByCarbTarget = (carbsPerMealTarget / carbFoodPer100) * 100 * 1.35;
@@ -391,7 +391,7 @@ function composeMeals(targets, seed, carbBudgets) {
         : Math.min(
           // 两个上限取小：
           //  ① 按热量估的份数（吃得多的人可以到 4 份）
-          //  ② 按她的碳水目标估的份数
+          //  ② 按用户的碳水目标估的份数
           // 上限 4 份是有意的：一顿 585 克米饭（4.5 份）看着就不像人吃的。
           Math.min(4, Math.max(2, maxServingsFor(targets.targetCalories, 'carb'))) * (carbFood.servings?.[0]?.[1] || 100),
           capByCarbTarget,

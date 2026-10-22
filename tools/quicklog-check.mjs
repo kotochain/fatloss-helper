@@ -105,7 +105,7 @@ function connect(wsUrl) {
 
 /**
  * 回到「记录」页的「吃的」那一半，并等到输入框真的在。
- * 记录页有分段（吃的/练的），她上次可能停在「练的」；自检脚本不能假设当前状态。
+ * 记录页有分段（吃的/练的），用户上次可能停在「练的」；自检脚本不能假设当前状态。
  */
 async function ensureOnLogPage(evaluate) {
   // 先关掉可能开着的弹层
@@ -224,7 +224,7 @@ async function main() {
    * 这两条都不会让单元测试变红（单元测试加载不了 app.js），只能靠真浏览器守。
    */
   await evaluate(`(() => {
-    // 老版本存档：有记录、没有 profile（她之前用过的版本就是这种形状）
+    // 老版本存档：有记录、没有 profile（用户之前用过的版本就是这种形状）
     const old = {
       version: 1,
       days: { '2026-10-10': { meals: { lunch: [{ id: 'e1', food: { id: 'rice_cooked', name: '米饭（熟）', kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9 }, grams: 200 }] }, exercises: [] } },
@@ -373,8 +373,8 @@ async function main() {
   if (draft.条数 === 0) problems.push('一句话没解析出任何条目');
   if (!draft.有确认按钮) problems.push('缺少「记上」按钮');
 
-  console.log('\n=== 一·二、份量不确定时反问她 ===');
-  // 这段必须放在「改成 800 克」之前：她一旦自己填了数字，追问就会收起来（设计如此）。
+  console.log('\n=== 一·二、份量不确定时反问用户 ===');
+  // 这段必须放在「改成 800 克」之前：用户一旦自己填了数字，追问就会收起来（设计如此）。
   const guess = await evaluate(`(() => {
     const block = document.querySelector('#draftHost [data-guess]');
     if (!block) return null;
@@ -390,10 +390,10 @@ async function main() {
     };
   })()`);
   if (!guess) {
-    console.log('❌ 「一碗牛肉面」这种说不准的份量，界面没有反问她');
-    problems.push('份量说不准时没有反问她（缺档位按钮）');
+    console.log('❌ 「一碗牛肉面」这种说不准的份量，界面没有反问用户');
+    problems.push('份量说不准时没有反问用户（缺档位按钮）');
   } else {
-    console.log(`✅ 反问她一句：「${guess.标注}」${guess.理由}`);
+    console.log(`✅ 反问用户一句：「${guess.标注}」${guess.理由}`);
     console.log(`   档位：${guess.档位.join(' / ')}（共 ${guess.追问块数} 条在问）`);
     if (!(guess.标注 || '').includes('猜的')) problems.push('低置信度条目没有标出「这个份量我是猜的」');
     if (guess.档位.length < 2) problems.push(`份量档位只有 ${guess.档位.length} 个，等于没法选`);
@@ -429,7 +429,7 @@ async function main() {
     console.log(`✅ 点档位「${clicked.档位}」→ 第 ${clicked.索引} 条变成 ${picked.克数} 克（${picked.行内热量}），合计 ${beforePick} → ${picked.合计} kcal`);
     if (Number(picked.克数) !== tierGrams) problems.push(`点档位没有把克数改成档位上的数（点了 ${tierGrams}，实际 ${picked.克数}）`);
     if (beforePick === picked.合计) problems.push('换档位后合计热量没有跟着变');
-    if (picked.追问还在) problems.push('选完档位追问没有收起来（会一直问她同一句）');
+    if (picked.追问还在) problems.push('选完档位追问没有收起来（会一直问用户同一句）');
   }
 
   // 改份量：把第一条改成 800 克，看合计有没有跟着变
@@ -501,7 +501,7 @@ async function main() {
   console.log(noNoise.追问块 === 0
     ? `✅ 都说清了（200克米饭 + 两个鸡蛋）就不问：${noNoise.条数} 条，一个追问都没有`
     : `❌ 说清楚了还要问：${noNoise.追问块} 条`);
-  if (noNoise.追问块 !== 0 || noNoise.猜的标记 !== 0) problems.push('份量说得清楚时不该反问她（多出了追问）');
+  if (noNoise.追问块 !== 0 || noNoise.猜的标记 !== 0) problems.push('份量说得清楚时不该反问用户（多出了追问）');
   await evaluate(`document.querySelector('#sheetClose')?.click()`);
   await sleep(300);
 
@@ -770,7 +770,7 @@ async function main() {
     餐次: [...document.querySelectorAll('#draftMeal .chip.on')].map((b) => b.dataset.meal).join(','),
   }))()`);
   console.log(`✅ 解析结果：${sayDraft.条数} 条｜默认餐次 ${sayDraft.餐次}`);
-  // 关键：从「加到午餐」说出来，默认就该是午餐，不用她再选一次
+  // 关键：从「加到午餐」说出来，默认就该是午餐，不用用户再选一次
   if (sayDraft.餐次 !== 'lunch') problems.push(`从「加到午餐」进来说一句，默认餐次却是「${sayDraft.餐次}」`);
 
   await evaluate(`document.querySelector('#draftSave').click()`);
@@ -843,7 +843,7 @@ async function main() {
     if (Math.abs(kcalSaved.蛋白 - 30) > 0.01) problems.push(`蛋白记错了：${kcalSaved.蛋白}（应当 30）`);
   }
 
-  // 今天页要显示「按热量记」，不能显示内部用的「100 克」（她从来没填过克数）
+  // 今天页要显示「按热量记」，不能显示内部用的「100 克」（用户从来没填过克数）
   await evaluate(`document.querySelector('.tab[data-view="today"]').click()`);
   await sleep(500);
   const shown = await evaluate(`(() => {
@@ -853,7 +853,7 @@ async function main() {
   console.log(`   今天页显示：${shown}`);
   if (!shown.includes('650 kcal')) problems.push(`今天页没显示 650 kcal：${shown}`);
   if (!shown.includes('按热量记')) problems.push(`只填热量的条目应当显示「按热量记」，实际：${shown}`);
-  if (/\b100 克\b/.test(shown)) problems.push('只填热量的条目显示了「100 克」（她没填过克数）');
+  if (/\b100 克\b/.test(shown)) problems.push('只填热量的条目显示了「100 克」（用户没填过克数）');
 
   const shotKcal = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-kcal-only.png'), Buffer.from(shotKcal.data, 'base64'));
@@ -928,13 +928,13 @@ async function main() {
   console.log(`✅ 只勾「椭圆机」后的推荐：${ellipticalOnly.join(' / ')}`);
   if (!ellipticalOnly.some((t) => t.includes('椭圆机'))) problems.push('只勾椭圆机却没有推荐椭圆机');
 
-  // 目标/时长也要存住：她固定练 45 分钟、想练低冲击，不该每次重选
+  // 目标/时长也要存住：用户固定练 45 分钟、想练低冲击，不该每次重选
   await evaluate(`document.querySelector('#goalChips [data-goal="low_impact"]')?.click()`);
   await sleep(250);
   await evaluate(`document.querySelector('#minuteChips [data-min="45"]')?.click()`);
   await sleep(350);
 
-  // issue #4：勾选要存进手机里 —— 重新打开应用不能回到默认四项（她家里有什么器械是稳定的）
+  // issue #4：勾选要存进手机里 —— 重新打开应用不能回到默认四项（用户家里有什么器械是稳定的）
   await evaluate(`location.reload()`);
   await sleep(1200);
   await evaluate(`document.querySelector('.tab[data-view="plan"]')?.click()`);

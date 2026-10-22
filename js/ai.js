@@ -58,7 +58,7 @@ export async function aiStatus() {
  * 拍一张营养成分表 -> 把数字读出来（只支持直连）。
  *
  * 为什么只支持直连：电脑上的中转服务只转发「文字解析」那一个接口，图片不经过它。
- * 返回的是**原始读数**（可能带千焦），单位换算、对账、保存都由界面那层做，她确认后才落库。
+ * 返回的是**原始读数**（可能带千焦），单位换算、对账、保存都由界面那层做，用户确认后才落库。
  */
 export async function readLabelImage(imageDataUrl) {
   const local = readAiConfig();

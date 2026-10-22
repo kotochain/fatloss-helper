@@ -32,6 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
 import { launchChrome, freePort } from './chrome-launch.mjs';
+import { appVersion } from './app-version.mjs';
 
 /* ── 常量 ─────────────────────────────────── */
 
@@ -637,7 +638,8 @@ const SEED_STATE = `(async () => {
   const calc = await import('./js/calc.js');
   const st = store.emptyState();
   st.profile = store.demoProfile();
-  st.settings = { trainDays: 3, stepsKey: 'mid', mode: 'basic', onboarded: true, recordTab: 'food' };
+  // lastSeenVersion：自检造的存档要算「已经看过当前版本」，否则启动会弹更新说明盖住要点的弹层
+  st.settings = { trainDays: 3, stepsKey: 'mid', mode: 'basic', onboarded: true, recordTab: 'food', lastSeenVersion: ${JSON.stringify(appVersion())} };
   const t = calc.calcTargets(st.profile);
   for (let i = 0; i < 6; i++) {
     const key = store.shiftDate(store.todayKey(), -i);

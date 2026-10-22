@@ -1,8 +1,8 @@
 /**
  * 离线解析的「份量置信度」测试
  *
- * 要守住的产品行为（issue #2）：她说得清楚就别打扰她；说不清楚（「一碗」「一份」、
- * 干脆没说）就必须反问一句，并且给出几个按食物类型给的档位，让她一点就选。
+ * 要守住的产品行为（issue #2）：用户说得清楚就别打扰用户；说不清楚（「一碗」「一份」、
+ * 干脆没说）就必须反问一句，并且给出几个按食物类型给的档位，让用户一点就选。
  * 这里同时钉住「不许悄悄改克数」—— 加置信度只是多问一句，不能顺手把估算值改掉。
  */
 
@@ -31,10 +31,10 @@ function assertChoicesSane(it, label) {
   for (let i = 1; i < vals.length; i++) assert.ok(vals[i] > vals[i - 1], `${label}：档位没从小到大 ${vals.join('/')}`);
   assert.ok(vals.every((v) => v >= 5), `${label}：档位小到没有意义 ${vals.join('/')}`);
   const labels = cs.map((c) => c.label);
-  assert.equal(new Set(labels).size, labels.length, `${label}：两个按钮说法一样，她不知道选哪个 → ${labels.join('/')}`);
+  assert.equal(new Set(labels).size, labels.length, `${label}：两个按钮说法一样，用户不知道选哪个 → ${labels.join('/')}`);
 }
 
-test('她说了确切克数 → 高置信度，不该再问', () => {
+test('用户说了确切克数 → 高置信度，不该再问', () => {
   const rice = item('中午吃了200克米饭', '米饭');
   assert.equal(rice.grams, 200, '说好的克数不能被改动');
   assert.equal(rice.confidence, 'high');
@@ -62,7 +62,7 @@ test('「一碗米饭」→ 低置信度，档位就是食物库里那三个碗'
   assert.deepEqual(gramsOf(rice.portionChoices), [130, 180, 250], '米饭的档位该跟食物库的份量表一致');
 });
 
-test('组合菜「一碗牛肉面」→ 一定反问她（这是误差最大的地方）', () => {
+test('组合菜「一碗牛肉面」→ 一定反问用户（这是误差最大的地方）', () => {
   const noodle = item('今天中午在食堂吃了碗牛肉面', '牛肉面');
   assert.equal(noodle.confidence, 'low');
   assert.equal(noodle.source, 'dish');
@@ -72,9 +72,9 @@ test('组合菜「一碗牛肉面」→ 一定反问她（这是误差最大的�
     '一碗面要按碗问，不是按「份」');
 });
 
-test('组合菜只要她说了克数，就别再问（说得清楚就不打扰）', () => {
+test('组合菜只要用户说了克数，就别再问（说得清楚就不打扰）', () => {
   const noodle = item('中午吃了600克牛肉面', '牛肉面');
-  assert.equal(noodle.confidence, 'high', '明说了 600 克还要问，就成了烦她');
+  assert.equal(noodle.confidence, 'high', '明说了 600 克还要问，就成了烦用户');
   assert.equal(noodle.grams, 600);
   assert.deepEqual(noodle.portionChoices, []);
 });
@@ -93,7 +93,7 @@ test('包装有大有小（半包薯片）→ 低置信度', () => {
   assertChoicesSane(chips, '薯片');
 });
 
-test('她什么份量都没说 → 低置信度，理由要说明是按常见的一份记的', () => {
+test('用户什么份量都没说 → 低置信度，理由要说明是按常见的一份记的', () => {
   const veg = item('中午吃了西兰花', '西兰花');
   assert.equal(veg.confidence, 'low');
   assert.ok(veg.confidenceReason.includes('没说'), `理由要说清是「没说」：${veg.confidenceReason}`);
@@ -133,7 +133,7 @@ test('「两碗米饭」的档位要跟着翻倍，不是还按一碗给', () =>
   assert.deepEqual(gramsOf(rice.portionChoices), [260, 360, 500]);
 });
 
-test('「加饭」「加肉」这种加多少全看她手的，要问；「加蛋」是一颗标准大小，不问', () => {
+test('「加饭」「加肉」这种加多少全看用户手的，要问；「加蛋」是一颗标准大小，不问', () => {
   const rice = item('牛肉面加饭', '加米饭');
   assert.equal(rice.confidence, 'low');
   assertChoicesSane(rice, '加饭');
@@ -143,15 +143,15 @@ test('「加饭」「加肉」这种加多少全看她手的，要问；「加�
   assertChoicesSane(meat, '加肉');
 
   const egg = item('牛肉面加蛋', '鸡蛋');
-  assert.equal(egg.confidence, 'high', '一颗蛋是标准大小，不该拿这种问题烦她');
+  assert.equal(egg.confidence, 'high', '一颗蛋是标准大小，不该拿这种问题烦用户');
   assert.deepEqual(egg.portionChoices, []);
 });
 
 test('口语里不带「一」的份量词也要认（喝了瓶 → 就是「瓶」）', () => {
-  // 她说「喝了瓶运动饮料」时，「瓶」是有固定规格的 —— 不该退化成「你没说多少」再问一遍。
+  // 用户说「喝了瓶运动饮料」时，「瓶」是有固定规格的 —— 不该退化成「你没说多少」再问一遍。
   // 以前有人把「裸量词」这条逻辑删掉，其它断言全过（因为都落在别的字段上），实测才发现漏了。
   const drink = item('喝了瓶运动饮料', '运动饮料');
-  assert.equal(drink.confidence, 'high', '「瓶」有固定规格，不该再问她');
+  assert.equal(drink.confidence, 'high', '「瓶」有固定规格，不该再问用户');
   assert.equal(drink.grams, 500);
   assert.equal(drink.confidenceReason, null);
 
@@ -159,7 +159,7 @@ test('口语里不带「一」的份量词也要认（喝了瓶 → 就是「瓶
   const noodle = item('食堂吃了碗牛肉面', '牛肉面');
   assert.equal(noodle.confidence, 'low');
   assert.ok(noodle.confidenceReason.includes('碗'), `理由要落在「碗」上：${noodle.confidenceReason}`);
-  assert.ok(!/你没说/.test(noodle.confidenceReason), `她明明说了「碗」：${noodle.confidenceReason}`);
+  assert.ok(!/你没说/.test(noodle.confidenceReason), `用户明明说了「碗」：${noodle.confidenceReason}`);
 });
 
 test('组合菜不能抢走「一杯奶茶」这种明显给饮料的份量（issue #3）', () => {
@@ -193,7 +193,7 @@ test('批量过一遍常见说法：低置信度的档位必须都能点', () =>
       assert.ok(it.confidenceReason, `${p} / ${it.name}：低置信度要有一句人话解释`);
       assertChoicesSane(it, `${p} / ${it.name}`);
       const vals = gramsOf(it.portionChoices);
-      // 「小碗 130 克」和「大碗 3 公斤」这种跨度她也没法选
+      // 「小碗 130 克」和「大碗 3 公斤」这种跨度用户也没法选
       assert.ok(Math.max(...vals) / Math.min(...vals) <= 5, `${p} / ${it.name}：档位跨度太大 ${vals.join('/')}`);
     }
   }

@@ -2,7 +2,7 @@
  * 线上部署一致性检查（需要联网）
  *
  * 为什么需要：用户手机上的问题，有一半是「线上文件互相不匹配」造成的 ——
- * 比如 index.html 是新版、js/app.js 还是旧版，或者 Service Worker 把旧缓存还给她。
+ * 比如 index.html 是新版、js/app.js 还是旧版，或者 Service Worker 把旧缓存还给用户。
  * 本地测试永远测不到这种情况，因为它测的是本机文件。
  *
  * 这一版升级过：以前只检查 7 个文件 + 几个字符串，等于「文件传上去了」；
@@ -126,6 +126,6 @@ const missingIcons = iconFiles.filter((f) => !fs.existsSync(path.join(root, f)))
 if (missingIcons.length) { bad += 1; console.log('❌ manifest 里引用了不存在的图标：', missingIcons.join(', ')); }
 else console.log(`✅ ${iconFiles.length} 个图标文件都在（${iconFiles.join('，')}）`);
 
-console.log(bad ? `\n❌ 有 ${bad} 项不对，别让她先用` : '\n✅ 线上部署一致，可以让她用');
+console.log(bad ? `\n❌ 有 ${bad} 项不对，别让用户先用` : '\n✅ 线上部署一致，可以让用户用');
 console.log('（这份检查只证明「传上去的文件对」；跑起来对不对，用 node tools/live-audit.mjs）');
 process.exit(bad ? 1 : 0);

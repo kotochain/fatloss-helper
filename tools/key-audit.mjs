@@ -207,7 +207,7 @@ async function main() {
   });
   const keyInAnyUrl = outbound.some((r) => r.url.includes(FAKE_KEY));
   console.log(`  密钥有没有出现在任何 URL 里？${keyInAnyUrl ? '❌ 有（很危险，URL 会被日志记录）' : '✅ 没有'}`);
-  console.log(`  密钥有没有发给我们自己的站点？${keySentToOwnOrigin ? '❌ 有' : '✅ 没有（只发给她自己填的那个服务商）'}`);
+  console.log(`  密钥有没有发给我们自己的站点？${keySentToOwnOrigin ? '❌ 有' : '✅ 没有（只发给用户自己填的那个服务商）'}`);
 
   console.log('\n【4】密钥存在哪里？');
   const storage = await evaluate(`(async () => {
@@ -272,8 +272,8 @@ async function main() {
     const records = localStorage.getItem('fatloss.state.v2');
     return { 本机存储项数: ls, 有配置: !!cfg, 有记录: !!records };
   })()`);
-  console.log(`  当前浏览器（模拟她自己那台）：存储项 ${visitor.本机存储项数} 个`);
-  console.log('  说明：localStorage 是按设备+浏览器隔离的，别人从他的手机打开同一个网址，看到的是空白，读不到她的任何数据。');
+  console.log(`  当前浏览器（模拟用户自己那台）：存储项 ${visitor.本机存储项数} 个`);
+  console.log('  说明：localStorage 是按设备+浏览器隔离的，别人从他的手机打开同一个网址，看到的是空白，读不到用户的任何数据。');
 
   const problems = [];
   if (codeCheck.命中.length) problems.push('页面代码里出现了疑似密钥');
@@ -289,7 +289,7 @@ async function main() {
     for (const p of problems) console.log('  -', p);
     process.exitCode = 1;
   } else {
-    console.log('✅ 密钥只存在她自己那台设备的浏览器里，运行时只发给她自己填的那个 AI 服务商；');
+    console.log('✅ 密钥只存在用户自己那台设备的浏览器里，运行时只发给用户自己填的那个 AI 服务商；');
     console.log('   仓库代码里没有密钥、URL 里没有密钥、离线缓存里没有密钥、清除按钮能清干净。');
   }
   console.log(`\n（本次审计用的是假密钥 ${FAKE_KEY.slice(0, 10)}…，只在这台电脑的临时浏览器配置里，跑完即删）`);

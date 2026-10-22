@@ -74,7 +74,7 @@ test('留空密钥表示「不改」，而不是把已保存的密钥清掉', ()
   assert.equal(r.config.apiKey, 'sk-existing-key-0001' /* secret-scan:allow 假密钥，仅用于测试 */, '留空时应当保留原密钥');
 
   // 界面上的「留空」拿到的是空字符串，不是 undefined。
-  // 以前这里只认 undefined，于是她清空输入框点保存，会看到「密钥没填」——
+  // 以前这里只认 undefined，于是用户清空输入框点保存，会看到「密钥没填」——
   // 明明输入框的占位提示写着「已保存：sk-1e***df41（留空则不改）」。
   const blank = normalizeAiConfigInput({ presetId: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', apiKey: '' }, existing);
   assert.deepEqual(blank.problems, [], '空字符串也必须当成「不改」，不能报「密钥没填」');

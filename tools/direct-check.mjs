@@ -87,7 +87,8 @@ function startFakeProvider() {
         const body = JSON.parse(raw || '{}');
         const userText = body.messages?.find((m) => m.role === 'user')?.content || '';
         const isPing = userText.includes('回复两个字');
-        const isCoach = userText.includes('请把上面的情况说给她听');
+        // 教练请求的识别跟着提示词走：v28 把第三人称改成了第二人称指令（见 js/coach.js#coachUserMessage）
+        const isCoach = userText.includes('请根据上面的情况');
         // 教练：第一次照清单里的数字说（应当通过校验），第二次故意编一个数字（应当退回本地版）。
         // 两个数字都从「给 AI 的事实清单」里现取，确保第一次是真的合格，不是碰巧。
         if (isCoach) {
@@ -281,7 +282,7 @@ async function main() {
   if (!stored.已保存) problems.push('配置没有保存到本机');
   if (stored.模式 !== 'direct') problems.push(`模式不是直连，实际 ${stored.模式}`);
 
-  console.log('\n=== 二·二、留空密钥 = 沿用已保存的那把（她遇到的「密钥没填」） ===');
+  console.log('\n=== 二·二、留空密钥 = 沿用已保存的那把（用户遇到的「密钥没填」） ===');
   // 输入框上写着「已保存：sk-***（留空则不改）」，那就必须真的不改。
   // 以前这里只认「没传 apiKey」，而界面拿到的是空字符串，于是留空保存会报「密钥没填」。
   const beforeBlankChats = hits.chat;
@@ -430,7 +431,7 @@ async function main() {
   const shotCoachAi = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-coach-ai.png'), Buffer.from(shotCoachAi.data, 'base64'));
 
-  // 第二次：模型编了一个清单外的数字（999），必须整段退回本地版，不能给她看
+  // 第二次：模型编了一个清单外的数字（999），必须整段退回本地版，不能给用户看
   await evaluate(`document.querySelector('[data-coach="ai"]')?.click()`);
   await sleep(1500);
   const coachBad = await evaluate(`(() => {

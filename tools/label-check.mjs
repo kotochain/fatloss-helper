@@ -6,7 +6,7 @@
  *
  * 这个脚本验证四件事（全走真实界面，只看用户看得到的东西）：
  *  1) 手动照包装填：千焦自动换算成 83.4 kcal，对账通过，能存成「我的食物」并按克数记上；
- *  2) 拍照读表：用假服务商（零费用）返回读数，字段要自动填好，但她还得点保存；
+ *  2) 拍照读表：用假服务商（零费用）返回读数，字段要自动填好，但用户还得点保存；
  *  3) 模型看不了图时：说人话，不崩，手动填照样能用；
  *  4) 模型读回离谱数字（5000 kcal）时：本地拦下来，绝不允许存进记录。
  *
@@ -22,12 +22,13 @@ import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
 import { findChrome } from './chrome-path.mjs';
 import { portAlive, freePort } from './chrome-launch.mjs';
+import { appVersion } from './app-version.mjs';
 
 armWatchdog('label-check', 240);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, '.audit', 'label');
-/** 每次都用全新的浏览器资料夹：她的存档/设置会污染「新用户」路径 */
+/** 每次都用全新的浏览器资料夹：用户的存档/设置会污染「新用户」路径 */
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-label-profile-'));
 const CHROME = findChrome();
 const STATIC_PORT = 4199;
@@ -169,7 +170,7 @@ async function seed(client) {
     const st = {
       version: 4, schemaVersion: 4,
       profile: { nickname: '', sex: 'female', age: 26, heightCm: 163, weightKg: 58, bodyFatPct: null, activity: 'light', pace: 'standard', goal: 'lose', targetWeightKg: 54 },
-      settings: { onboarded: true, mode: 'ai', trainDays: 3, stepsKey: 'mid' },
+      settings: { onboarded: true, mode: 'ai', trainDays: 3, stepsKey: 'mid', lastSeenVersion: ${JSON.stringify(appVersion())} },
       days: {}, customFoods: [], weights: [],
       achievements: { seen: [], lastWeeklyAt: null, milestones: [] },
     };
@@ -195,7 +196,7 @@ async function openLabelSheet(client) {
   await sleep(300);
 }
 
-/** 拦掉文件选择框，再用 CDP 把测试图片塞进 input（她真点「拍照」时走的是同一条路） */
+/** 拦掉文件选择框，再用 CDP 把测试图片塞进 input（用户真点「拍照」时走的是同一条路） */
 async function injectPhoto(client, fixture) {
   await ev(client, `(() => {
     const orig = HTMLInputElement.prototype.click;
@@ -285,7 +286,7 @@ async function main() {
     await boot(client);
     await openLabelSheet(client);
 
-    /* ── 一、手动照包装填（她那张图上的数字） ── */
+    /* ── 一、手动照包装填（用户那张图上的数字） ── */
     console.log('=== 一、手动照包装填 ===');
     const ui = await ev(client, `({
       有拍照: !!document.querySelector('#labelShot'),
@@ -333,7 +334,7 @@ async function main() {
       else pass('按克数记上：100 克 = 83 kcal');
     }
 
-    /* ── 二、拍照读表（假服务商返回她那张表） ── */
+    /* ── 二、拍照读表（假服务商返回用户那张表） ── */
     console.log('\n=== 二、拍照读表 ===');
     await openLabelSheet(client);
     // 拦截文件选择框，再用 CDP 把真实文件塞进 input
@@ -389,9 +390,9 @@ async function main() {
       && /读出来了/.test(document.getElementById('labelShotHint')?.textContent || '')`), '错位的数字填进表单');
     const shifted = await ev(client, `(document.querySelector('#labelPreview')?.textContent || '').replace(/\s+/g, ' ').trim()`);
     console.log(`   预览：${shifted}`);
-    if (!/重拍/.test(shifted)) fail('数字自己都对不上了，却没劝她重拍');
+    if (!/重拍/.test(shifted)) fail('数字自己都对不上了，却没劝用户重拍');
     else if (!/别直接保存/.test(shifted)) fail('劝重拍时没拦住「直接保存」');
-    else pass('对不上时直接说「重拍一张」，不让她自己找哪个数错了');
+    else pass('对不上时直接说「重拍一张」，不让用户自己找哪个数错了');
 
     // 上一段保存食物会弹「第一次记录」的庆祝层（它是延后出现的），等它出来再关掉，否则截图被挡
     for (let i = 0; i < 6; i++) {
@@ -409,7 +410,7 @@ async function main() {
     fs.mkdirSync(path.join(root, '.selfcheck'), { recursive: true });
     fs.writeFileSync(path.join(root, '.selfcheck', 'shot-label-retake.png'), Buffer.from(shotRetake.data, 'base64'));
 
-    // 她动手改过一个数，就别再念重拍（改完还挂着警告，像在怪她）
+    // 用户动手改过一个数，就别再念重拍（改完还挂着警告，像在怪用户）
     await ev(client, `(() => {
       const el = document.getElementById('labelProtein');
       el.value = '9.2';
@@ -418,7 +419,7 @@ async function main() {
     })()`);
     await sleep(300);
     const afterEdit = await ev(client, `(document.querySelector('#labelPreview')?.textContent || '').replace(/\s+/g, ' ').trim()`);
-    if (/重拍/.test(afterEdit)) fail('她自己改完数字了，界面还挂着「重拍」');
+    if (/重拍/.test(afterEdit)) fail('用户自己改完数字了，界面还挂着「重拍」');
     else pass('手动改过之后不再劝重拍');
     await ev(client, `document.querySelector('#sheetClose')?.click()`);
     await sleep(300);
@@ -447,7 +448,7 @@ async function main() {
     const badHint = await ev(client, `document.getElementById('labelShotHint')?.textContent || ''`);
     console.log(`   提示：${badHint}`);
     if (!/看不了图片|不支持/.test(badHint)) fail(`模型不支持看图时提示不清楚：${badHint}`);
-    if (!/qwen-vl|glm-4v|gpt-4o|手动填/.test(badHint)) fail('没有告诉她换什么模型、或者可以手动填');
+    if (!/qwen-vl|glm-4v|gpt-4o|手动填/.test(badHint)) fail('没有告诉用户换什么模型、或者可以手动填');
     scenario = 'ok';
     // 手动还能用
     await fillManual(client, { energy: 100, unit: 'kcal', protein: 5, fat: 2, carb: 10, name: '出错后手填' });

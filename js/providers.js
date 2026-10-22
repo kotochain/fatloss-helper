@@ -172,7 +172,7 @@ export function normalizeAiConfigInput(input = {}, existing = null) {
   const baseUrl = String(input.baseUrl ?? existing?.baseUrl ?? preset.baseUrl ?? '').trim().replace(/\/+$/, '');
   const model = String(input.model ?? existing?.model ?? preset.model ?? '').trim();
   // 「留空则不改」是输入框上写着的承诺 —— 空串（以及只有空格）和「没传」都是留空。
-  // 以前这里只认 undefined，而界面拿到的是 ''，于是她清空输入框点保存会看到「密钥没填」。
+  // 以前这里只认 undefined，而界面拿到的是 ''，于是用户清空输入框点保存会看到「密钥没填」。
   const askedKey = input.apiKey === undefined || input.apiKey === null
     ? ''
     : String(input.apiKey).trim();

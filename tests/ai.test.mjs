@@ -116,11 +116,11 @@ test('AI 给的条目：按名字在本地库里匹配，热量用本地数据�
   assert.equal(out.items[2].foodId, 'beef_noodle', '牛肉面要用库里那条组合菜');
   for (const it of out.items) {
     assert.equal(it.source, 'ai');
-    assert.equal(it.needsConfirm, false, '匹配上的不需要她再确认');
+    assert.equal(it.needsConfirm, false, '匹配上的不需要用户再确认');
   }
 });
 
-test('AI 认出但本地库里没有的：不记录、但要让她看见（不能静默丢弃）', () => {
+test('AI 认出但本地库里没有的：不记录、但要让用户看见（不能静默丢弃）', () => {
   const out = normalizeAiItems({
     items: [
       { name: '米饭', grams: 200 },
@@ -132,7 +132,7 @@ test('AI 认出但本地库里没有的：不记录、但要让她看见（不�
   assert.equal(out.items.length, 1, '只有能算的那条被记上');
   assert.deepEqual(out.unmatched, ['某网红限定轻食碗', '另一个没听过的菜']);
   assert.equal(out.unmatchedItems.length, 2);
-  assert.deepEqual(out.unmatchedItems[1], { name: '另一个没听过的菜', grams: 150 }, '要带上克数，界面上要告诉她');
+  assert.deepEqual(out.unmatchedItems[1], { name: '另一个没听过的菜', grams: 150 }, '要带上克数，界面上要告诉用户');
   // 关键：不许用 AI 编的热量
   assert.equal(out.items.some((i) => i.source === 'ai-estimate'), false, '不许出现「AI 估算热量」的条目');
 });
@@ -153,7 +153,7 @@ test('AI 说的名字和库里名字不同时，要说明按哪个算的', () =>
   const out = normalizeAiItems({ items: [{ name: '炒河粉', grams: 200 }] });
   assert.equal(out.items.length, 1);
   assert.equal(out.items[0].foodId, 'fried_rice_noodle');
-  assert.ok(out.items[0].note.includes('炒河粉（干炒）'), `要告诉她按哪条算：${out.items[0].note}`);
+  assert.ok(out.items[0].note.includes('炒河粉（干炒）'), `要告诉用户按哪条算：${out.items[0].note}`);
 });
 
 test('密钥读取：环境变量优先，其次是密钥文件；都没有就返回 null', () => {
@@ -231,7 +231,7 @@ test('离线解析：一句话里的多个份量不会被串到一起（issue #3
 
 test('基准用例「半包薯片」这条必须收紧容差（±25% 会把真 bug 盖住）', () => {
   const c = GOLDEN_CASES.find((x) => x.text.includes('半包薯片'));
-  assert.ok(c, '基准用例里必须有这条：她日常真会这么说');
+  assert.ok(c, '基准用例里必须有这条：用户日常真会这么说');
   assert.ok((c.tol ?? 0.25) <= 0.1, `这条的容差要收紧到 10% 以内，现在 ${c.tol}`);
   const got = sumItems(parseDescription(c.text).items).kcal;
   const diff = Math.abs(got - c.kcal) / c.kcal;

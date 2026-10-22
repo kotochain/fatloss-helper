@@ -30,11 +30,11 @@ export const EQUIPMENT = {
   studio: { name: '操房 / 团课', icon: 'studio' },
 };
 
-/** 没勾过器械时默认有的四项（跟她手机上第一版看到的一样，老存档升级后行为不变） */
+/** 没勾过器械时默认有的四项（跟用户手机上第一版看到的一样，老存档升级后行为不变） */
 export const DEFAULT_EQUIPMENT = ['treadmill', 'elliptical', 'bike', 'bodyweight'];
 
 /**
- * 把她勾过的器械整理成能用的列表（存在存档 settings.equipment 里）。
+ * 把用户勾过的器械整理成能用的列表（存在存档 settings.equipment 里）。
  *
  * 为什么要过一道：存档可能被手改坏、可能留着已经删掉的器械 id，
  * 直接拿去筛动作会出现「勾了但界面上没有」或「推荐出根本没有的器械」。
@@ -394,7 +394,7 @@ export function substituteExercises(originalId, availableEquipment, limit = 3) {
         ].filter(Boolean).join('，'),
       };
     })
-    // 排序：先用得上她勾选的器械，再看像不像原动作
+    // 排序：先用得上用户勾选的器械，再看像不像原动作
     .sort((a, b) => {
       const aFit = a.exercise.equipment.some((q) => avail.has(q)) ? 1 : 0;
       const bFit = b.exercise.equipment.some((q) => avail.has(q)) ? 1 : 0;

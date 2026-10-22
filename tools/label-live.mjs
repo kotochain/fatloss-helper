@@ -271,7 +271,7 @@ async function shoot(client, html, id) {
   const png = path.join(outDir, `label-live-${id}.png`);
   const jpg = path.join(outDir, `label-live-${id}.jpg`);
   fs.writeFileSync(png, Buffer.from(shot.data, 'base64'));
-  // 手机拍完先压一次（她相册里的照片本来就有压缩），再交给应用
+  // 手机拍完先压一次（用户相册里的照片本来就有压缩），再交给应用
   execFileSync('sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '58', png, '--out', jpg], { stdio: 'ignore' });
   fs.rmSync(png, { force: true });
   const buf = fs.readFileSync(jpg);

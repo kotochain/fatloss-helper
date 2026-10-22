@@ -143,7 +143,7 @@ test('未来版本的存档会被拒绝读取，而不是「尽力解析」把�
   assert.ok(r.error.includes('更新'), r.error);
 });
 
-test('乱七八糟的内容不会被当成存档（否则会把她的数据覆盖成垃圾）', () => {
+test('乱七八糟的内容不会被当成存档（否则会把用户的数据覆盖成垃圾）', () => {
   for (const junk of [null, undefined, 'abc', 42, [], {}, { foo: 'bar' }, { days: 'not-an-object' }]) {
     assert.equal(looksLikeState(junk), false, `${JSON.stringify(junk)} 不该被当成存档`);
     assert.equal(migrateToCurrent(junk).ok, false);
@@ -193,12 +193,12 @@ test('读取存档：文件坏掉时给出可操作的提示，而不是白屏',
   const r = loadState(st);
   assert.equal(r.ok, false);
   assert.ok(r.error.includes('损坏') || r.error.includes('读不出来'), r.error);
-  assert.ok(r.error.includes('备份') || r.error.includes('快照'), '要告诉她怎么恢复');
+  assert.ok(r.error.includes('备份') || r.error.includes('快照'), '要告诉用户怎么恢复');
 });
 
 test('读不出来的存档：原始内容必须原样留一份（否则点一次按钮就没了）', () => {
   // 真实场景：主存档损坏 / 来自更新版本 → 界面退回「新用户」→
-  // 她点「看一个填好的例子」或走完引导，主键立刻被覆盖。
+  // 用户点「看一个填好的例子」或走完引导，主键立刻被覆盖。
   // 如果不在读失败时另存一份，原来那份就永久消失了。
   const broken = '{这不是 JSON';
   const st = fakeStorage({ [STATE_KEY]: broken });
@@ -210,7 +210,7 @@ test('读不出来的存档：原始内容必须原样留一份（否则点一�
   assert.equal(kept.raw, broken, '留下的必须是原始文本，不能是转述');
   assert.ok(kept.savedAt, '要记下什么时候留的');
 
-  // 模拟她自己点了「看一个填好的例子」：主键被覆盖，留存的那份还在
+  // 模拟用户自己点了「看一个填好的例子」：主键被覆盖，留存的那份还在
   st.setItem(STATE_KEY, JSON.stringify({ ...emptyState(), schemaVersion: SCHEMA_VERSION }));
   assert.equal(readUnreadable(st).raw, broken, '覆盖主存档不能把留存的原始内容也弄丢');
 });
@@ -261,19 +261,19 @@ test('迁移是幂等的：重复迁移同一份数据不会越迁越乱', () =>
 
 test('迁移不吃掉新加的字段（将来加功能时老数据不会被抹）', () => {
   const withExtra = { ...legacyV1(), someFutureFeature: { enabled: true }, days: { ...legacyV1().days } };
-  withExtra.days[todayKey()].someNote = '她自己写的一句话';
+  withExtra.days[todayKey()].someNote = '用户自己写的一句话';
   const r = migrateToCurrent(withExtra);
   assert.equal(r.ok, true);
   assert.deepEqual(r.data.someFutureFeature, { enabled: true }, '不认识的顶层字段要原样保留');
-  assert.equal(r.data.days[todayKey()].someNote, '她自己写的一句话', '不认识的天级字段也要保留');
+  assert.equal(r.data.days[todayKey()].someNote, '用户自己写的一句话', '不认识的天级字段也要保留');
 });
 
 test('真实场景串起来：老版本 → 继续记录 → 再打开，数据都在', () => {
   const st = fakeStorage({ [STATE_KEY]: JSON.stringify(legacyV1()) });
-  const first = loadState(st);                       // 模拟：她打开新版应用
+  const first = loadState(st);                       // 模拟：用户打开新版应用
   assert.equal(first.ok, true);
 
-  // 她在升级后的版本里继续记一天
+  // 用户在升级后的版本里继续记一天
   const state = first.data;
   addFoodEntry(state, todayKey(), 'breakfast', findFood('egg'), 100);
   addWeight(state, todayKey(), 58);

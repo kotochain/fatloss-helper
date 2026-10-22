@@ -348,6 +348,25 @@ async function main() {
     await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
     await sleep(300);
 
+    // 第八步：更新弹窗（v28）—— 造一个「用过、上次看到的是上一版」的存档，重开必须弹「更新了什么」。
+    // 这是「每次更新完告诉用户改了什么」的入口：只弹一次、条目要真的渲染出来。
+    await evaluate(client, `(() => {
+      const raw = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      raw.settings = { ...(raw.settings || {}), onboarded: true, lastSeenVersion: 'v27' };
+      localStorage.setItem('fatloss.state.v2', JSON.stringify(raw));
+      location.reload();
+    })()`);
+    await sleep(1600);
+    const update = await evaluate(client, `(() => ({
+      标题: document.querySelector('#sheetTitle')?.textContent || '',
+      版本: document.querySelector('#sheetBody .update-ver')?.textContent.trim() || '',
+      条目数: document.querySelectorAll('#sheetBody .update-list li').length,
+      有按钮: Boolean(document.querySelector('#updateOk')),
+    }))()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-8-update.png`));
+    await evaluate(client, `document.querySelector('#updateOk')?.click()`);
+    await sleep(300);
+
     // 第五步半：PWA 清单能不能被浏览器正确解析（决定「添加到主屏幕」是否可用）
     const manifest = await evaluate(client, `(async () => {
       const res = await fetch('manifest.webmanifest');
@@ -368,7 +387,7 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, iconAudit, growth, settings, profilePreview, manifest };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, iconAudit, growth, settings, update, profilePreview, manifest };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -411,6 +430,7 @@ function printReport(report) {
     console.log(`  成长弹层：植物插画 ${r.growth.植物} 个｜徽章图标 ${r.growth.徽章图标} 个（最小 ${r.growth.徽章尺寸}px）｜徽章名 ${r.growth.标签数} 个（空 ${r.growth.空标签} 个）｜未解锁 ${r.growth.未解锁} 个 / 锁标 ${r.growth.锁标} 个｜兜底 ${r.growth.兜底} 个`);
     if (r.growth.空标签) console.log(`       ↳ 有 ${r.growth.空标签} 个徽章没有名字（badgeLabel 少传了参数就会这样）`);
     console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜图标 ${r.settings.图标尺寸}px / 图标块 ${r.settings.图标块最小}px（要求 ≥22 / ≥34）｜兜底 ${r.settings.兜底} 个`);
+    console.log(`  更新弹窗：标题「${r.update.标题}」｜${r.update.版本}｜条目 ${r.update.条目数} 条｜按钮 ${r.update.有按钮 ? '有' : '缺'}`);
     console.log(`  资料页预览：${r.profilePreview}`);
     console.log(`  PWA 清单：${r.manifest.name}｜display=${r.manifest.display}｜start_url=${r.manifest.start_url}｜图标 ${r.manifest.icons.join(' ')}`);
     console.log(`  控制台报错：${s.consoleErrors.length ? s.consoleErrors.join(' | ') : '无'}`);
@@ -421,7 +441,8 @@ function printReport(report) {
       || r.growth.徽章图标 > 0 && r.growth.徽章尺寸 < 48
       || r.growth.锁标 !== r.growth.未解锁
       || r.settings.图标 < 5 || r.settings.兜底 > 0
-      || r.settings.图标 > 0 && (r.settings.图标尺寸 < 22 || r.settings.图标块最小 < 34);
+      || r.settings.图标 > 0 && (r.settings.图标尺寸 < 22 || r.settings.图标块最小 < 34)
+      || r.update.标题 !== '更新了什么' || r.update.条目数 < 1 || !r.update.有按钮;
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
       || uiIconBad) problems += 1;

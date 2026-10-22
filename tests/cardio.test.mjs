@@ -2,8 +2,8 @@
  * 有氧推荐与动作替换测试
  *
  * 核心保证（这是需求的原话：「跑步机没了只有椭圆机，要能相应调整」）：
- *  1) 推荐出来的动作，器械必须是她今天真的有的；
- *  2) 替代动作不能要求她用不上的器械（不能推荐需要操房的团课给只有椭圆机的人）；
+ *  1) 推荐出来的动作，器械必须是用户今天真的有的；
+ *  2) 替代动作不能要求用户用不上的器械（不能推荐需要操房的团课给只有椭圆机的人）；
  *  3) 替代动作要练到同一件事（目标重合），强度不能差太远。
  */
 
@@ -27,7 +27,7 @@ test('每个动作的器械、目标都必须是有定义的，METs 在合理范
   assert.deepEqual(problems, [], problems.join('\n'));
 });
 
-test('推荐结果只用她勾选的器械能做到', () => {
+test('推荐结果只用用户勾选的器械能做到', () => {
   const sets = [
     ['elliptical'], ['treadmill'], ['bike'], ['bodyweight'], ['jump_rope'],
     ['elliptical', 'bike'], ['stairs_real'], ['pool'], ['mat'],
@@ -48,7 +48,7 @@ test('只有椭圆机时，首选就是椭圆机（不能推跑步机的动作�
   assert.ok(rec.picks[0].name.includes('椭圆机'), `首选成了「${rec.picks[0].name}」`);
 });
 
-test('替代动作不要求她今天用不上的器械', () => {
+test('替代动作不要求用户今天用不上的器械', () => {
   // 这是实际踩过的坑：只有椭圆机的人，替代方案第一名却是「跳舞/团课」（需要操房）
   const cases = [
     ['treadmill_incline_walk', ['elliptical']],
@@ -64,7 +64,7 @@ test('替代动作不要求她今天用不上的器械', () => {
       // 允许「不需要器械」的动作（例如徒手循环）作为兜底
       const noEquipmentNeeded = s.exercise.equipment.length === 1 && s.exercise.equipment[0] === 'bodyweight';
       assert.ok(fits || noEquipmentNeeded,
-        `${originalId} 的替代方案「${s.exercise.name}」需要 ${s.exercise.equipment.join('/')}，但她只有 ${equipment.join('/')}`);
+        `${originalId} 的替代方案「${s.exercise.name}」需要 ${s.exercise.equipment.join('/')}，但用户只有 ${equipment.join('/')}`);
     }
   }
 });
@@ -124,12 +124,12 @@ test('反向验证：如果允许推荐未勾选的器械，上面的测试会�
     assert.ok(!w.equipment.includes('pool'), `${w.name} 其实不需要泳池，说明这组反例无效`);
   }
   for (const p of rec.picks) {
-    assert.ok(p.equipment.includes('pool'), `推荐了 ${p.name}，但她只有泳池`);
+    assert.ok(p.equipment.includes('pool'), `推荐了 ${p.name}，但用户只有泳池`);
   }
 });
 
 test('器械勾选能存能读；老存档没这个字段时回落默认四项（issue #4）', () => {
-  // 默认就是她没勾过的时候看到的那四项
+  // 默认就是用户没勾过的时候看到的那四项
   assert.deepEqual(normalizeEquipment(undefined), DEFAULT_EQUIPMENT);
   assert.deepEqual(normalizeEquipment(null), DEFAULT_EQUIPMENT);
   assert.deepEqual(normalizeEquipment([]), DEFAULT_EQUIPMENT, '一个都没勾等于没配过，要回默认而不是空');

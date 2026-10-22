@@ -664,7 +664,7 @@ input:focus, select:focus, textarea:focus {
 .entry .name em { font-style: normal; display: block; }
 
 /* 「这个份量我是猜的」：份量不确定的条目在下面挂一条反问 + 档位按钮。
-   用暖橘底跟普通条目区分开，一眼能看出哪几条需要她点一下。 */
+   用暖橘底跟普通条目区分开，一眼能看出哪几条需要用户点一下。 */
 .portion-guess {
   background: var(--coral-soft);
   border-radius: 12px;
@@ -859,6 +859,19 @@ details[open] summary { margin-bottom: 4px; }
   margin-bottom: 10px;
 }
 .set-note b { color: var(--ink); }
+
+/* 更新说明（v28）：一条版本一块，条目用列表，别堆成一大段 */
+.update-entry {
+  background: #FFFCFC;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.update-ver { font-size: 13px; font-weight: 680; color: var(--rose-deep); margin-bottom: 6px; }
+.update-ver span { font-weight: 500; font-size: 11px; color: var(--ink-3); margin-left: 6px; }
+.update-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.update-list li { margin: 2px 0; }
 
 /* 小植物入口卡（今天页） */
 .plant-card {

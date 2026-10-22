@@ -38,6 +38,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
+import { appVersion } from './app-version.mjs';
 import { launchChrome, freePort, portAlive } from './chrome-launch.mjs';
 import { emptyState, demoProfile, demoEntries, addWeight, shiftDate, todayKey } from '../js/store.js';
 import { calcTargets } from '../js/calc.js';
@@ -108,7 +109,7 @@ function snapshotCodeVersions() {
 function buildBaselines() {
   const state = emptyState();
   state.profile = { ...demoProfile(), nickname: '' };
-  state.settings = { trainDays: 3, stepsKey: 'mid', onboarded: true, mode: 'basic', recordTab: 'food' };
+  state.settings = { trainDays: 3, stepsKey: 'mid', onboarded: true, mode: 'basic', recordTab: 'food', lastSeenVersion: appVersion() };
   const targets = calcTargets(state.profile);
   const today = todayKey();
   for (let i = 0; i < 3; i++) demoEntries(state, shiftDate(today, -i), targets);

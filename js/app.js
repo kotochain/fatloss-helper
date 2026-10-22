@@ -37,6 +37,8 @@ import {
 } from './cardio.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
 import { insights, insightHint } from './insights.js';
+import { APP_VERSION, CHANGELOG } from './version.js';
+import { pendingUpdates, isNewerVersion } from './whatsnew.js';
 import {
   SCHEMA_VERSION, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
   readUnreadable,
@@ -64,7 +66,7 @@ let startupNotice = null;
  *
  * 为什么要单独判一次：这个应用的目标数字全靠 profile 里的身高/体重/年龄/性别，
  * 少一项 calcTargets 就会抛错。真出过一次（缺 weightKg 的存档直接崩到今天页），
- * 而**迁移写错字段名时就是这个症状**。宁可把她当「还没填资料」，也不能让她看到崩溃页。
+ * 而**迁移写错字段名时就是这个症状**。宁可把用户当「还没填资料」，也不能让用户看到崩溃页。
  */
 function usableProfile(p) {
   if (!p || typeof p !== 'object') return false;
@@ -76,7 +78,7 @@ function usableProfile(p) {
 }
 
 let state = load();
-// 资料存在但残缺：退回「还没填资料」，但原始资料原样留着，不删她的东西
+// 资料存在但残缺：退回「还没填资料」，但原始资料原样留着，不删用户的东西
 if (state && state.profile && !usableProfile(state.profile)) {
   state.legacyProfile = state.profile;
   state.profile = null;
@@ -100,7 +102,7 @@ let coachView = null;
 /** 有氧推荐的选择（器械勾过就存在 settings 里，刷新/重开都还在） */
 let cardioPick = {
   equipment: normalizeEquipment(state?.settings?.equipment),
-  // 目标和时长也存过就带回来：她固定练 45 分钟、想练低冲击，不该每次重选
+  // 目标和时长也存过就带回来：用户固定练 45 分钟、想练低冲击，不该每次重选
   goal: normalizeCardioGoal(state?.settings?.cardioGoal),
   minutes: normalizeCardioMinutes(state?.settings?.cardioMinutes),
 };
@@ -155,7 +157,7 @@ const app = $('#app');
 function load() {
   const res = loadState(localStorage, { key: STORAGE_KEY });
   if (!res.ok) {
-    // 读不出来或版本太新：绝不用空数据覆盖她的记录
+    // 读不出来或版本太新：绝不用空数据覆盖用户的记录
     startupNotice = { kind: 'error', text: res.error };
     console.warn('存档读取失败：', res.error);
     return null;
@@ -185,7 +187,7 @@ function save() {
 }
 
 /**
- * 她的每日目标 —— **只由公式决定，跟餐单无关**。
+ * 用户的每日目标 —— **只由公式决定，跟餐单无关**。
  *
  * 这里曾经让目标跟着餐单对账（为了让「目标」和「餐单」一致），
  * 但那是错的：同一个人的目标会随「换一套」在 36~69 克脂肪之间跳，
@@ -295,7 +297,7 @@ document.querySelectorAll('.tab').forEach((btn) => {
  * 界面坏了时的兜底页。
  *
  * 设计原则：**绝不让人卡在点不动的页面**。所以这里给三个出口，
- * 而且第一个是最安全的（先让她能用），最后才是清数据（会丢记录，必须她说清才做）。
+ * 而且第一个是最安全的（先让用户能用），最后才是清数据（会丢记录，必须用户说清才做）。
  */
 function renderCrash(err, which) {
   const where = { today: '今天', log: '记录', plan: '计划', progress: '我的' }[which] || which;
@@ -347,7 +349,7 @@ function render() {
     bindCommon();
     return;
   }
-  // 有资料但没走完引导：补一句提示，不硬拦（她可能只是想先看看）
+  // 有资料但没走完引导：补一句提示，不硬拦（用户可能只是想先看看）
   // 引导入口固定放在欢迎页和「我的 → 设置」里，不重复弹窗打扰。
   // 错误边界：任何一个界面抛异常，都不许让应用变成点不动的砖头。
   // 之前没有这层保护 —— renderToday 里任何一处报错都会让页面停在半渲染状态，
@@ -382,7 +384,7 @@ function bindCommon() {
     el.dataset.bound = '1';
     el.addEventListener('click', () => {
       // 点了没反应是最难查的问题（用户只会说「点不动」）。
-      // 所以这里兜住异常：至少弹一句，让她知道发生了什么。
+      // 所以这里兜住异常：至少弹一句，让用户知道发生了什么。
       try {
         handleAction(el.dataset.act, el.dataset);
       } catch (err) {
@@ -462,11 +464,11 @@ function handleAction(act, data) {
 /* ── 新手引导 ───────────────────────────────
    为什么要做：第一次打开的人面对的是一个空界面和一堆没解释的词（目标热量、碳蛋脂、METs）。
    引导要解决三件事，一件都不能少：
-     1) 让她知道「这工具是干嘛的、数据在哪」（信任）
+     1) 让用户知道「这工具是干嘛的、数据在哪」（信任）
      2) 拿到算目标需要的几个数字（不然什么都算不出来）
-     3) **让她选模式**（普通 / AI）—— 这是产品决定：模式在开始就选，
+     3) **让用户选模式**（普通 / AI）—— 这是产品决定：模式在开始就选，
         不要藏在设置的角落里。默认普通模式，因为大多数人不会去配 API。
-   最后一定要让她**记下第一笔**再结束 —— 空着的应用她不会再打开第二次。
+   最后一定要让用户**记下第一笔**再结束 —— 空着的应用用户不会再打开第二次。
    ─────────────────────────────────────────── */
 
 const ONBOARD_STEPS = ['intro', 'profile', 'mode', 'first'];
@@ -475,12 +477,12 @@ const ONBOARD_STEPS = ['intro', 'profile', 'mode', 'first'];
  * 新手引导。
  * @param {{step?:string, targets?:object, review?:boolean}} options
  *   review=true 表示「重看一遍」：走完回设置页，而且**不要**重置已经选好的模式、
- *   也不要把她推到记录页（她只是忘了怎么用，不是新人）。
+ *   也不要把用户推到记录页（用户只是忘了怎么用，不是新人）。
  */
 function onboard({ step, targets: t = null, review = false } = {}) {
   if (step === 'intro') return onboardIntro(review);
   if (step === 'profile') {
-    // 重看时不逼她重填资料：有资料就直接跳到模式那一步
+    // 重看时不逼用户重填资料：有资料就直接跳到模式那一步
     if (review && state.profile) return onboard({ step: 'mode', targets: calcTargets(state.profile), review });
     return openProfileSheet({ firstTime: true, onSaved: (tt) => onboard({ step: 'mode', targets: tt, review }) });
   }
@@ -549,7 +551,7 @@ function onboardMode(t, review = false) {
           state.settings = { ...(state.settings || {}), mode: pick };
           save();
           if (pick === 'ai') {
-            // 选 AI 就直接带她去配密钥，别让她自己找
+            // 选 AI 就直接带用户去配密钥，别让用户自己找
             closeSheet();
             openAiSettingsSheet({ then: () => onboard({ step: 'first', review }) });
           } else {
@@ -595,7 +597,7 @@ function onboardFirst(review = false) {
 
 /** 引导只做一次；记在存档里，换设备要重新走（数据不在，走了才有意义） */
 function finishOnboarding(review = false) {
-  state.settings = { ...(state.settings || {}), onboarded: true };
+  state.settings = { ...(state.settings || {}), onboarded: true, lastSeenVersion: APP_VERSION };
   save();
   closeSheet();
   render();
@@ -618,8 +620,8 @@ function renderWelcome() {
   /*
    * 存档读不出来（损坏 / 来自更新版本）时，欢迎页必须**一直**说这件事。
    * 以前只弹一个 6 秒的浮层，关掉之后页面跟全新用户一模一样 ——
-   * 她既不知道记录出了问题，也不知道再去点「看一个填好的例子」会把原来的内容盖掉。
-   * 原始内容已经在 schema.js 里另存了一份（UNREADABLE_KEY），这里负责让她看见、能导出来。
+   * 用户既不知道记录出了问题，也不知道再去点「看一个填好的例子」会把原来的内容盖掉。
+   * 原始内容已经在 schema.js 里另存了一份（UNREADABLE_KEY），这里负责让用户看见、能导出来。
    */
   const trouble = startupNotice?.kind === 'error'
     ? `
@@ -662,7 +664,8 @@ function renderWelcome() {
 function loadDemo() {
   state = emptyState();
   state.profile = demoProfile();
-  state.settings = { trainDays: 3, stepsKey: 'mid' };
+  // 示例是「新装上的样子」，不是老用户升级 —— 不该弹更新说明
+  state.settings = { trainDays: 3, stepsKey: 'mid', lastSeenVersion: APP_VERSION };
   const t = calcTargets(state.profile);
   demoEntries(state, todayKey(), t);
   addWeight(state, shiftDate(todayKey(), -14), 59.2);
@@ -700,12 +703,12 @@ function renderToday() {
    * 当天可吃的额度就是目标热量，不加任何运动补偿。
    *
    * 这里曾经把消耗的一半加进额度，去掉了，原因是它把同一次运动算了两遍：
-   * 她的活动量在资料里已经算过一次（选「轻度活动」= BMR × 1.375，已包含平时的走动）。
+   * 用户的活动量在资料里已经算过一次（选「轻度活动」= BMR × 1.375，已包含平时的走动）。
    * 再加回来额度就凭空变多 —— 58 kg 的人爬坡走 30 分钟多出 91 kcal，一周 640 kcal，
    * 够把「每周减 0.5%」变成「几乎不减」。而且这是这类 App 最坑人的地方：
    * 练了就奖励自己多吃，缺口全抹平，还觉得自己很努力。
    *
-   * 现在她每天都吃同一个数，最容易执行；动的那天缺口自然更大。
+   * 现在用户每天都吃同一个数，最容易执行；动的那天缺口自然更大。
    */
   const budget = t.targetCalories;
   const remaining = Math.round(budget - totals.kcal);
@@ -877,7 +880,7 @@ function suggestNext(totals, t, remainingKcal) {
  * 为什么不新增底部标签页：底部已经四个了，再加一个会把「今天」推远；
  * 运动本来就是「记录」的一部分，和吃饭记在一起才顺手。
  * 上次停在哪一半存在 settings.recordTab 里（老存档没有这个字段 → 按「吃的」处理）：
- * 减脂的人一天要记好几顿饭，不能每次都让她重新点一下。
+ * 减脂的人一天要记好几顿饭，不能每次都让用户重新点一下。
  */
 function currentRecordTab() {
   return state.settings?.recordTab === 'training' ? 'training' : 'food';
@@ -915,7 +918,7 @@ function renderFoodPane() {
   return `
     <div class="card">
       <div class="card-title">说一句就记上
-        <!-- 这里是「模式」不是「AI 配置」：她每天可能都想换一句谁来听，不该藏在设置里 -->
+        <!-- 这里是「模式」不是「AI 配置」：用户每天可能都想换一句谁来听，不该藏在设置里 -->
         <button class="mode-pill" id="usageModeBtn" title="切换使用模式">
           ${useMode() === 'ai' ? 'AI 模式' : '普通模式'}<span class="mode-pill-go">›</span>
         </button>
@@ -1040,7 +1043,7 @@ function currentTrainingKcal() {
   };
 }
 
-/** 算式直接写在界面上：她可以自己核对，不用信一个来路不明的数字 */
+/** 算式直接写在界面上：用户可以自己核对，不用信一个来路不明的数字 */
 function drawTrainingEstimate() {
   const box = $('#trainEstimate');
   if (!box) return;
@@ -1223,7 +1226,7 @@ function bindTrainingPane() {
       if (stored) toast(`记上了：${saved.name} ${saved.minutes} 分钟，大约 ${saved.kcal} kcal${dateKey === todayKey() ? '' : `（写到${dayLabel(dateKey)}）`}。`);
       render();
     } catch (err) {
-      // 时长没填 / 填了 0：store 会拒绝，这里把原因原样说给她听
+      // 时长没填 / 填了 0：store 会拒绝，这里把原因原样说给用户听
       toast(err.message);
     }
   });
@@ -1286,7 +1289,7 @@ async function runQuickParse(text, mealOverride = null) {
         { meal: res.meal || meal, items: res.items, questions: res.questions },
         meal,
       );
-      // AI 认出来了但本地库里没有的，要原样带出去给她看（以前是直接丢掉，她以为记上了）
+      // AI 认出来了但本地库里没有的，要原样带出去给用户看（以前是直接丢掉，用户以为记上了）
       unmatchedItems = norm.unmatchedItems || [];
       if (norm.items.length) {
         items = norm.items;
@@ -1335,7 +1338,7 @@ function needsPortionPick(it) {
 
 /**
  * 改一条的克数：营养按比例换算，行内热量和下面的合计立刻跟着变。
- * 点档位和她自己在输入框里敲数字都走这里 —— 两条路各写一遍，迟早有一条忘了更新合计。
+ * 点档位和用户自己在输入框里敲数字都走这里 —— 两条路各写一遍，迟早有一条忘了更新合计。
  */
 function applyDraftGrams(box, idx, grams) {
   const it = draft?.items?.[idx];
@@ -1361,7 +1364,7 @@ function drawDraft() {
   const box = $('#draftHost') || $('#quickResult');
   if (!box || !draft) return;
   // 一条都没认出来：不许显示「记上」（记 0 条 = 留一条空记录，之后更乱）。
-  // 而且要分清两种情况：AI 认出来了但库里没有 vs 完全没听懂 —— 给她的建议完全不同。
+  // 而且要分清两种情况：AI 认出来了但库里没有 vs 完全没听懂 —— 给用户的建议完全不同。
   if (!draft.items.length) {
     const missing = draft.unmatchedItems || [];
     box.innerHTML = `
@@ -1436,12 +1439,12 @@ function drawDraft() {
     </div>
     ${needsCheck ? '<p class="tiny muted" style="margin:8px 0 0">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
 
-  // 改份量：点档位和她自己敲数字走同一条路 —— 两处各写一遍，迟早有一处忘了更新合计（这个坑踩过）
+  // 改份量：点档位和用户自己敲数字走同一条路 —— 两处各写一遍，迟早有一处忘了更新合计（这个坑踩过）
   box.querySelectorAll('.draft-grams').forEach((inp) => {
     inp.addEventListener('input', () => {
       if (!(Number(inp.value) > 0)) return;
       applyDraftGrams(box, Number(inp.dataset.grams), Number(inp.value));
-      // 她自己填了克数，这一条就不用再问了
+      // 用户自己填了克数，这一条就不用再问了
       box.querySelector(`[data-guess="${inp.dataset.grams}"]`)?.remove();
     });
   });
@@ -1451,7 +1454,7 @@ function drawDraft() {
       const choice = draft.items[idx]?.portionChoices?.[pick];
       if (!choice) return;
       applyDraftGrams(box, idx, choice.grams);
-      // 她答过了就把追问收起来，别一直挂在那儿再问第二遍
+      // 用户答过了就把追问收起来，别一直挂在那儿再问第二遍
       box.querySelector(`[data-guess="${idx}"]`)?.remove();
     });
   });
@@ -1462,9 +1465,14 @@ function drawDraft() {
     box.querySelectorAll('#draftMeal .chip').forEach((c) => c.classList.toggle('on', c === b));
   });
   $('#draftSave', box)?.addEventListener('click', () => {
+    // 防重入：先把草稿取走再置空。万一事件触发两次（双击、脚本连点、合成事件），
+    // 第二次进来 draft 已经是 null，直接返回 —— 不会把同一份草稿记两遍。
+    if (!draft) return;
+    const items = draft.items;
     const savedMeal = draft.meal;
-    for (const it of draft.items) {
-      addFoodEntry(state, dateKey, draft.meal, {
+    draft = null;
+    for (const it of items) {
+      addFoodEntry(state, dateKey, savedMeal, {
         id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name: it.name,
         category: 'custom',
@@ -1477,8 +1485,7 @@ function drawDraft() {
       }, it.grams);
     }
     const stored = save();
-    const n = draft.items.length;
-    draft = null;
+    const n = items.length;
     closeSheet();
     render();
     // 存不进去时 save() 已经说了实话，这里不许再报喜（否则「存不进去」和「成了」同时出现）
@@ -1592,7 +1599,7 @@ function renderPlan() {
 }
 
 /**
- * 「今天练什么」：先问她今天有什么器械，再据此推荐；推荐里直接给出「没有 X 就做 Y」。
+ * 「今天练什么」：先问用户今天有什么器械，再据此推荐；推荐里直接给出「没有 X 就做 Y」。
  * 这是为了让计划跟着现实走 —— 计划写爬坡走，结果健身房只有椭圆机，计划就废了。
  */
 function renderCardioCard() {
@@ -1868,10 +1875,10 @@ function renderProgress() {
 /**
  * 「加到某一餐」的弹层：两条路。
  *
- * 以前只有「搜食物库」：她已经点了「午餐」，脑子里是「一碗牛肉面加个蛋」，
- * 却得先去库里搜「牛肉面」再挑份量 —— 逆着她的意图走。
+ * 以前只有「搜食物库」：用户已经点了「午餐」，脑子里是「一碗牛肉面加个蛋」，
+ * 却得先去库里搜「牛肉面」再挑份量 —— 逆着用户的意图走。
  * 现在顶部可以切到「说一句」，解析走的是和记录页顶部同一个流程（草稿确认 → 记进这一餐），
- * 差别只是**默认餐次已经定好**，不用她再选。
+ * 差别只是**默认餐次已经定好**，不用用户再选。
  */
 function openFoodSheet(mealKey) {
   const slot = MEAL_SLOTS.find((s) => s.key === mealKey) || MEAL_SLOTS[0];
@@ -1967,7 +1974,7 @@ function openFoodSheet(mealKey) {
         openLabelSheet(mealKey);
       });
 
-      /* 路三：只填热量 —— 她知道这一顿多少大卡，但不想（也没法）描述份量 */
+      /* 路三：只填热量 —— 用户知道这一顿多少大卡，但不想（也没法）描述份量 */
       body.querySelector('#kcalSave').addEventListener('click', () => {
         const r = kcalOnlyFood({
           name: body.querySelector('#kcalName').value,
@@ -2152,10 +2159,10 @@ function fileToCompressedDataUrl(file, maxEdge = 1400, quality = 0.82) {
  *
  * 为什么值得单独做：预包装食品（调理鸡胸肉、酸奶、面包）和食物库里的「生鸡胸肉」不是一回事，
  * 蛋白从 24 g 掉到 13.7 g 很常见（注水/淀粉/调味），借用食材条目会差 40%。
- * 这里让她直接照包装填，记下来的就是包装上的数字。
+ * 这里让用户直接照包装填，记下来的就是包装上的数字。
  *
- * 拍照只是「帮她抄」，不是「帮她算」：AI 读出来的数字会填进同一个表单，
- * 还是由她核对后保存；单位换算和 4/9/4 对账全在本地做（js/label.js）。
+ * 拍照只是「帮用户抄」，不是「帮用户算」：AI 读出来的数字会填进同一个表单，
+ * 还是由用户核对后保存；单位换算和 4/9/4 对账全在本地做（js/label.js）。
  */
 function openLabelSheet(mealKey = null) {
   const canPhoto = aiOn() && ai.mode !== 'relay';
@@ -2196,7 +2203,7 @@ function openLabelSheet(mealKey = null) {
     onMount: (body, foot) => {
       const el = (id) => $(id, body);
       let unit = 'kJ';
-      // 这几个数字是「照片读出来的」还是「她自己敲的」—— 分不清就不知道该劝重拍还是劝改数字
+      // 这几个数字是「照片读出来的」还是「用户自己敲的」—— 分不清就不知道该劝重拍还是劝改数字
       let fromPhoto = false;
       const preview = el('#labelPreview');
 
@@ -2217,14 +2224,14 @@ function openLabelSheet(mealKey = null) {
           return;
         }
         const c = checkConsistency(r.per100);
-        // 照片读出来的数字自己对不上，多半是读串了行 —— 该劝重拍，而不是让她猜哪个数错了
+        // 照片读出来的数字自己对不上，多半是读串了行 —— 该劝重拍，而不是让用户猜哪个数错了
         const retake = fromPhoto ? photoRetakeHint(c) : '';
         preview.className = c.level === 'warn' ? 'warn' : 'warn info';
         preview.innerHTML = `每 100 克：<b>${r.per100.kcal}</b> kcal · 蛋白 ${r.per100.protein} g · 脂肪 ${r.per100.fat} g · 碳水 ${r.per100.carb} g<br>${esc(c.message)}`
           + (retake ? `<br><b>${esc(retake)}</b>` : '');
       };
       body.querySelectorAll('input').forEach((i) => i.addEventListener('input', () => {
-        fromPhoto = false; // 她自己动过手了，这就不是「纯读出来」的数字了
+        fromPhoto = false; // 用户自己动过手了，这就不是「纯读出来」的数字了
         update();
       }));
       el('#labelUnit').addEventListener('click', (ev) => {
@@ -2236,7 +2243,7 @@ function openLabelSheet(mealKey = null) {
       });
       update();
 
-      // 拍照 -> 读数字 -> 填进表单（还是要她核对一遍）
+      // 拍照 -> 读数字 -> 填进表单（还是要用户核对一遍）
       if (canPhoto) {
         const fileInput = el('#labelFile');
         const hint = el('#labelShotHint');
@@ -2298,7 +2305,7 @@ function openLabelSheet(mealKey = null) {
         if (!stored) return;
         toast(`已存成「${name}」，每 100 克 ${r.per100.kcal} kcal`);
         checkNewAchievements();
-        // 存完顺手记这一笔 —— 她的目的就是现在吃的东西
+        // 存完顺手记这一笔 —— 用户的目的就是现在吃的东西
         setTimeout(() => openAmountSheet(food, mealKey || quickMealHint || guessMeal()), 250);
       });
     },
@@ -2393,7 +2400,7 @@ function useMode() {
  * 现在会不会真的去调 AI = 模式是 AI **且** 密钥配好了。
  *
  * 为什么要有这个函数：以前全站只判断 ai.configured，模式只改了几个字 ——
- * 她切到「普通模式」后，只要配过密钥，点解析照样发请求（也照样花钱）。
+ * 用户切到「普通模式」后，只要配过密钥，点解析照样发请求（也照样花钱）。
  * 「普通模式：不联网、不花钱」这句承诺，得由代码兑现，不能只写在文案里。
  */
 function aiOn() {
@@ -2443,7 +2450,7 @@ function openModeSheet() {
       body.querySelectorAll('[data-usage-mode]').forEach((b) => {
         b.addEventListener('click', () => {
           const next = b.dataset.usageMode;
-          // 没配密钥就想去 AI 模式：直接带她去配，别只弹一句「请先配置」
+          // 没配密钥就想去 AI 模式：直接带用户去配，别只弹一句「请先配置」
           if (next === 'ai' && !cfg.configured) {
             closeSheet();
             openAiSettingsSheet({ then: () => openModeSheet() });
@@ -2533,7 +2540,7 @@ function openSettingsSheet() {
       body.querySelectorAll('[data-mode]').forEach((el) => {
         el.addEventListener('click', () => {
           if (el.dataset.mode === 'ai' && !aiCfg.configured) {
-            // 想切到 AI 模式但还没配：直接带她去配，别只弹一句「请先配置」
+            // 想切到 AI 模式但还没配：直接带用户去配，别只弹一句「请先配置」
             closeSheet();
             openAiSettingsSheet();
             return;
@@ -2695,7 +2702,7 @@ function openWipeSheet() {
         state = emptyState();
         save();
         closeSheet();
-        // 清完直接进新手引导 —— 她的目的就是「从头开始」
+        // 清完直接进新手引导 —— 用户的目的就是「从头开始」
         render();
         toast('已经清空，我们从头来一遍。');
         setTimeout(() => onboard({ step: 'intro' }), 400);
@@ -2737,7 +2744,7 @@ function openInsightsSheet() {
 /* ── 弹层：教练 ──────────────────────────
    两条路给同一件事：
      · 本地版：按记录算好「还能吃多少、蛋白差多少、吃哪几样」，不联网、不花钱；
-     · AI 版：把同一份事实交给模型组织语言。她点一下才发请求（不自动消耗额度）。
+     · AI 版：把同一份事实交给模型组织语言。用户点一下才发请求（不自动消耗额度）。
    无论哪条路，数字都来自本地；AI 的话要再过一遍 checkCoachText，编数字就退回本地版。
    ───────────────────────────────────── */
 
@@ -2845,7 +2852,7 @@ function openBackupSheet() {
   /*
    * 「X 天的记录」只算**真的有东西**的日子。
    * 以前直接数 days 的键：今天页一渲染就会顺手建出「今天」这一格，洞察那段更狠，
-   * 会把最近 14 天全建出来 —— 于是她只记了 1 天，这里却写着「14 天的记录」。
+   * 会把最近 14 天全建出来 —— 于是用户只记了 1 天，这里却写着「14 天的记录」。
    */
   const days = Object.keys(state.days || {}).filter((key) => {
     const d = state.days[key];
@@ -2913,15 +2920,6 @@ function openBackupSheet() {
   });
 }
 
-/** 读取当前部署的代码版本（问 sw.js 要 —— 它跟 index.html/js 一起发布，最可靠） */
-async function readAppVersion() {
-  try {
-    const res = await fetch('sw.js', { cache: 'no-store' });
-    const text = await res.text();
-    return (text.match(/APP_VERSION = '([^']+)'/) || [])[1] || '未知';
-  } catch { return '读不到（可能离线）'; }
-}
-
 /** 关于：把「算得准不准」讲清楚 */
 function openAboutSheet() {
   const t = targets();
@@ -2952,22 +2950,129 @@ function openAboutSheet() {
       </div>
       <div class="set-note">
         <b>版本</b><br>
-        界面代码：<b id="appVersion">读取中…</b><br>
+        界面代码：<b>${APP_VERSION}</b><br>
         <span id="swVersionLine" class="tiny muted"></span>
         存档结构：v${SCHEMA_VERSION}<br>
         <span class="tiny muted">截图这一行发我，就能知道你手机上跑的是哪一版 —— 排查问题最有用的一句话。</span>
-      </div>`,
-    onMount: async () => {
-      const v = await readAppVersion();
-      const el = document.getElementById('appVersion');
-      if (el) el.textContent = v;
+      </div>
+      <button class="btn ghost block" id="openWhatsNew">看看每次更新都改了什么</button>`,
+    onMount: () => {
       const line = document.getElementById('swVersionLine');
       if (line) {
         const ctrl = navigator.serviceWorker?.controller;
         line.textContent = ctrl ? '离线缓存已接管（下次打开会自动拿到新版）' : '离线缓存未接管';
       }
+      $('#openWhatsNew')?.addEventListener('click', () => openWhatsNewSheet({ entries: CHANGELOG.slice(0, 3) }));
     },
   });
+}
+
+/* ── 更新提示 ────────────────────────────────
+   两种，别混在一起：
+   1) 「更新了什么」：新版本**已经跑起来**之后，第一次打开告诉用户改了什么（版本变了才弹）；
+   2) 「有新版本了」：手机上跑的这版旧了、服务端已经有新版 —— 提醒用户刷新一下。
+   两者都只在真的有事时出现，不重复打扰；文案说人话，不写版本号以外的术语。
+   ───────────────────────────────────────── */
+
+/** 更新说明的正文：一条版本一块，新的在上面 */
+function whatsNewBody(entries) {
+  return entries.map((e) => `
+    <div class="update-entry">
+      <div class="update-ver">${esc(e.version)} <span>${esc(e.date)}</span></div>
+      <ul class="update-list">${e.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+    </div>`).join('');
+}
+
+/** 打开「更新了什么」。markSeen=true 表示这是自动弹的：关掉/忽略都算看过了 */
+function openWhatsNewSheet({ entries = CHANGELOG, markSeen = false, onDone = null } = {}) {
+  if (markSeen) markVersionSeen();
+  openSheet({
+    title: markSeen ? '更新了什么' : '每次更新都改了什么',
+    body: whatsNewBody(entries),
+    foot: '<button class="btn block" id="updateOk">知道了</button>',
+    onMount: (_body, foot) => {
+      $('#updateOk', foot).addEventListener('click', () => {
+        closeSheet();
+        if (onDone) onDone();
+      });
+    },
+  });
+}
+
+/** 记下「已经看过当前版本」，下次打开不再弹更新说明 */
+function markVersionSeen() {
+  state.settings = { ...(state.settings || {}), lastSeenVersion: APP_VERSION };
+  save();
+}
+
+/** 启动时检查要不要弹「更新了什么」 */
+function maybeShowWhatsNew() {
+  if (!state?.profile) return false;               // 还没填资料的新用户：不弹
+  if (startupNotice?.kind === 'error') return false; // 先让用户处理读不出来的记录，别抢同一个弹层
+  // 已经开着别的弹层（引导、记一笔）时不弹：不盖上去，也不排定时器重试 ——
+  // 延迟重试的定时器会在页面之外继续跑，可能和别的写存档动作撞车（踩过：一次保存记出两条）。
+  // 这次错过就等下次打开再弹，更新说明不是急事。
+  if ($('#sheetRoot') && !$('#sheetRoot').classList.contains('hidden')) return false;
+  const pending = pendingUpdates(state);
+  if (!pending.length) return false;
+  openWhatsNewSheet({ entries: pending, markSeen: true });
+  return true;
+}
+
+/** 问服务端要一下 sw.js 里的版本号（读不到就返回空串：离线、被缓存、格式不对都算读不到） */
+async function deployedVersion() {
+  try {
+    const res = await fetch('sw.js', { cache: 'no-store' });
+    if (!res.ok) return '';
+    const text = await res.text();
+    return (text.match(/APP_VERSION = '([^']+)'/) || [])[1] || '';
+  } catch {
+    return '';
+  }
+}
+
+/** 打开「有新版本了」：一个刷新按钮 + 一个先不刷新 */
+function openRefreshSheet(latest) {
+  // 弹过就算提醒过：右上角 ×、点背景关掉都算（否则同一次会话里过 5 分钟切回来还会再弹）
+  try { sessionStorage.setItem('fatloss.updatePrompted', latest); } catch { /* 存不了就算了 */ }
+  openSheet({
+    title: '有新版本了',
+    body: `
+      <div class="set-note">
+        <b>新版本 ${esc(latest)} 已经准备好了</b><br>
+        刷新一下就能用上。已经记下的记录都在这台手机里，刷新不会丢。
+      </div>
+      <p class="small muted" style="margin:8px 0 0">
+        不刷新也能继续用，只是新功能和修复要等下次打开才生效。
+      </p>`,
+    foot: `<button class="btn block" id="reloadNow">刷新，用上新版</button>
+      <button class="btn ghost block" id="reloadLater" style="margin-top:8px">先不刷新</button>`,
+    onMount: (_body, foot) => {
+      $('#reloadNow', foot).addEventListener('click', () => {
+        // 万一有等待中的 Service Worker，让它立刻接管，再刷新（正常情况下会自动接管）
+        try { navigator.serviceWorker?.controller?.postMessage('skip-waiting'); } catch { /* 忽略 */ }
+        closeSheet();
+        location.reload();
+      });
+      $('#reloadLater', foot).addEventListener('click', () => {
+        closeSheet();
+        toast('好，下次打开会自动用上新版。');
+      });
+    },
+  });
+}
+
+/** 发现服务端版本比手机上跑的新 → 提醒刷新。同一版本次只提醒一次，别一直烦用户 */
+async function checkForUpdate() {
+  const latest = await deployedVersion();
+  if (!latest || !isNewerVersion(latest, APP_VERSION)) return false;
+  try {
+    if (sessionStorage.getItem('fatloss.updatePrompted') === latest) return false;
+  } catch { /* 忽略 */ }
+  // 别的弹层（引导、记一笔）开着的时候不叠上去，等下次机会
+  if ($('#sheetRoot') && !$('#sheetRoot').classList.contains('hidden')) return false;
+  openRefreshSheet(latest);
+  return true;
 }
 
 /* ── 弹层：成长（成就墙 + 小植物 + 周报）───── */
@@ -3235,7 +3340,7 @@ function drawAiSettings(cfg, relay, then = null) {
   renderModeNote();
 
   // 密钥框的占位提示必须说真话：同一个服务商 → 留空就用原来那把；
-  // 换了服务商 → 留空不再沿用（原来那句「留空则不改」会误导她以为换了也能用旧密钥）
+  // 换了服务商 → 留空不再沿用（原来那句「留空则不改」会误导用户以为换了也能用旧密钥）
   const keyPlaceholder = (p) => {
     // 读此刻的真实配置，而不是打开弹层那一刻的快照 ——
     // 这里刚配好、同一个弹层里再点一次保存时，快照还是「没配过」，会又提示「密钥没填」
@@ -3349,7 +3454,7 @@ function drawAiSettings(cfg, relay, then = null) {
       // 也让「留空则不改」这句话在同一个弹层里就变成真的
       $('#aiKey').value = '';
       $('#aiKey').placeholder = keyPlaceholder(findPreset(findPresetId()));
-      // 刚配好密钥就自动进 AI 模式 —— 不然她配完发现「还是没反应」（普通模式本来就不调 AI）
+      // 刚配好密钥就自动进 AI 模式 —— 不然用户配完发现「还是没反应」（普通模式本来就不调 AI）
       if (useMode() !== 'ai') {
         state.settings = { ...(state.settings || {}), mode: 'ai' };
         save();
@@ -3542,6 +3647,10 @@ function openProfileSheet({ firstTime = false, onSaved = null } = {}) {
           const t = calcTargets({ ...f, targetWeightKg: f.targetWeightKg });
           state.profile = { ...f, targetWeightKg: f.targetWeightKg || round(defaultTargetWeight(f), 1) };
           if (!state.weights.some((w) => w.date === todayKey())) addWeight(state, todayKey(), f.weightKg);
+          // 第一次填资料 = 新用户（不是升级），把「已看到当前版本」记下来，别在下次打开时弹更新说明
+          if (!hasProfile && !state.settings?.lastSeenVersion) {
+            state.settings = { ...(state.settings || {}), lastSeenVersion: APP_VERSION };
+          }
           save();
           closeSheet();
           view = 'today';
@@ -3601,7 +3710,7 @@ function exportData() {
 
 /**
  * 导出那份「读不出来」的原始内容。
- * 程序解析不了它，但我可能能救 —— 让她先存下来发我，比让她自己抄现实。
+ * 程序解析不了它，但我可能能救 —— 让用户先存下来发我，比让用户自己抄现实。
  */
 function exportUnreadable() {
   const kept = readUnreadable(localStorage);
@@ -3736,6 +3845,7 @@ if (bootParams.has('__selfcheck')) {
   // ?demo=1：一键进演示（GitHub Pages 上可以直接把链接发人看）
   state = emptyState();
   state.profile = demoProfile();
+  state.settings = { ...(state.settings || {}), lastSeenVersion: APP_VERSION };
   const demoToday = todayKey();
   demoEntries(state, demoToday, calcTargets(state.profile));
   addWeight(state, shiftDate(demoToday, -14), 59.4);
@@ -3755,7 +3865,7 @@ if (bootParams.has('__selfcheck')) {
   renderBootFailure(err);
 }
 
-// 启动时如果发生过数据迁移（或读不出来），第一时间告诉她 —— 这种信息不能藏
+// 启动时如果发生过数据迁移（或读不出来），第一时间告诉用户 —— 这种信息不能藏
 if (startupNotice) {
   setTimeout(() => {
     if (startupNotice.kind === 'error') {
@@ -3765,6 +3875,18 @@ if (startupNotice) {
     }
   }, 600);
 }
+
+// 更新提示要在界面渲染完之后再弹，避免和「数据迁移提示 / 读不出来的记录」抢同一个弹层。
+// 900ms 是等启动 toast 出来之后；4s 后再检查一次服务端有没有更新（离线时读不到就静默跳过）。
+setTimeout(() => { try { maybeShowWhatsNew(); } catch (err) { console.warn('更新说明没弹出来：', err); } }, 900);
+setTimeout(() => { checkForUpdate().catch(() => {}); }, 4000);
+let lastUpdateCheckAt = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (Date.now() - lastUpdateCheckAt < 5 * 60 * 1000) return; // 别每次切回来都问一次
+  lastUpdateCheckAt = Date.now();
+  checkForUpdate().catch(() => {});
+});
 
 // 启动成功的标记：浏览器自检靠它判断「模块有没有炸掉导致白屏」
 /**

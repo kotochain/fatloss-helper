@@ -81,7 +81,7 @@ export function recentStats(state, today, { days = 7, targetKcal = 0 } = {}) {
 
 /**
  * 按「蛋白缺口 + 剩余额度」挑 1~2 样具体食物。
- * 原则：先补蛋白、别超出今天的额度、份量给整数（50/100/150 克这种她能称的量）。
+ * 原则：先补蛋白、别超出今天的额度、份量给整数（50/100/150 克这种用户能称的量）。
  */
 export function suggestFoods({ remainingKcal, proteinGap }) {
   if (!(proteinGap >= 5) || !(remainingKcal >= 60)) return [];
@@ -96,7 +96,7 @@ export function suggestFoods({ remainingKcal, proteinGap }) {
 
   for (const f of cands) {
     if (gap < 8 || budget < 60) break;
-    // 上限按「她自己的一份 × 2」：金枪鱼一罐 120 克，劝她吃 300 克是不现实的
+    // 上限按「用户自己的一份 × 2」：金枪鱼一罐 120 克，劝用户吃 300 克是不现实的
     const serving = f.servings?.[0]?.[1] || 100;
     const cap = Math.max(100, Math.min(300, serving * 2));
     const gramsForGap = Math.ceil((gap / f.protein) * 100 / 10) * 10;
@@ -232,10 +232,10 @@ export function coachUserMessage(brief) {
     lines.push('今天没有合适的加餐建议（额度不够或蛋白已经够了）。');
   }
   lines.push(`最近 ${s.days} 天：记了 ${s.logged} 天，平均 ${s.avgKcal} kcal；超目标 ${s.over} 天，低于目标 ${s.under} 天。`);
-  for (const p of brief.patterns) lines.push(`她自己记录里的规律：${p.title}${p.detail ? ` —— ${p.detail}` : ''}`);
+  for (const p of brief.patterns) lines.push(`你自己记录里的规律：${p.title}${p.detail ? ` —— ${p.detail}` : ''}`);
   for (const n of brief.safetyNotes) lines.push(`安全提醒：${n}`);
   lines.push('');
-  lines.push('请把上面的情况说给她听，并给一个明确的下一步。不要计算任何新数字。');
+  lines.push('请根据上面的情况，用第二人称「你」给出一个明确的下一步。不要计算任何新数字。');
   return lines.join('\n');
 }
 
@@ -266,7 +266,7 @@ export function allowedNumbers(brief) {
 
 /**
  * 校验 AI 说的话：只允许引用清单里的数字，且不许出现「练了可以多吃」这类暗示。
- * 不合格就整段退回本地版 —— 宁可说得朴素，也不能把编的数字给她看。
+ * 不合格就整段退回本地版 —— 宁可说得朴素，也不能把编的数字给用户看。
  */
 export function checkCoachText(text, brief) {
   const t = String(text || '').trim();

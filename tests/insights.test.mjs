@@ -191,7 +191,7 @@ test('「运动的多吃一些」和「没多吃」是两种说法，不能一�
   }
 });
 
-test('洞察里的数字来自她自己的记录，与手算一致', () => {
+test('洞察里的数字来自用户自己的记录，与手算一致', () => {
   const s = base();
   for (let i = 0; i < 5; i++) logFullDay(s, shiftDate(todayKey(), -i), { riceG: 300, chickenG: 0 });
   // 注意：addFoodEntry 会按当日热量目标折算份量，所以实际记进去的克数不等于输入值。

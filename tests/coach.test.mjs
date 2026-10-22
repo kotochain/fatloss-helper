@@ -1,7 +1,7 @@
 /**
  * AI 教练的测试：**数字必须全部来自本地**。
  *
- * 这个功能最容易出的事故是「模型自己算/编数字」——她说「今天还能吃 520 kcal」，
+ * 这个功能最容易出的事故是「模型自己算/编数字」——用户说「今天还能吃 520 kcal」，
  * 结果界面写着 480，信任就没了。所以这里重点盯三件事：
  *  1) 给 AI 的事实清单里的数字，跟 calcTargets / 当天记录一致；
  *  2) 建议的份量和热量不能超出剩余额度；
@@ -85,7 +85,7 @@ test('额度已经吃超时不建议再吃（不能一边超一边劝加餐）',
   assert.ok(text.includes('超出'), `应当说清已超出：${text}`);
   assert.ok(!/再加一份|来一份|补法/.test(text), '已经超了还在劝加餐');
   // 只查上面那几个词不太够：删掉「吃超了」这个分支后，会退回去劝「优先吃蛋白质」，
-  // 上面两条照样过（文本仍是「超出」，也没出现「再加一份」）。这里断言真的在劝她别再补。
+  // 上面两条照样过（文本仍是「超出」，也没出现「再加一份」）。这里断言真的在劝用户别再补。
   assert.ok(text.includes('别再补'), `吃超了要说「别再补了」，实际：${text}`);
   assert.ok(!/优先吃/.test(text), `吃超了不该再推荐吃什么，实际：${text}`);
 });
@@ -121,8 +121,8 @@ test('本地版建议：说人话、给具体份量、不评判', () => {
   const advice = localCoachAdvice(brief);
   const text = advice.lines.join('\n');
   assert.ok(advice.headline.length > 0);
-  assert.ok(text.includes(String(brief.remainingKcal)), '没告诉她还能吃多少');
-  assert.ok(text.includes(String(brief.protein.gap)), '没告诉她蛋白还差多少');
+  assert.ok(text.includes(String(brief.remainingKcal)), '没告诉用户还能吃多少');
+  assert.ok(text.includes(String(brief.protein.gap)), '没告诉用户蛋白还差多少');
   for (const s of brief.suggestions) assert.ok(text.includes(s.name), `建议里没提到 ${s.name}`);
   assert.ok(!/自律|管住嘴|吃太多|奖励|吃回/.test(text), `出现了说教/奖励话术：${text}`);
 });

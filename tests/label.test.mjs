@@ -2,7 +2,7 @@
  * 包装营养成分表：单位换算、对账、AI 读数收敛
  *
  * 背景（真实需求）：包装上写的是「能量 349 千焦」，以前只能填 kcal，
- * 等于让她自己除 4.184；抄错单位还看不出来。这里的测试守三件事：
+ * 等于让用户自己除 4.184；抄错单位还看不出来。这里的测试守三件事：
  *  1) 千焦 → 千卡换算必须对；
  *  2) 「蛋白×4+脂肪×9+碳水×4」对不上时要提醒，不能默默记下；
  *  3) 拍照读表只允许「读数字」，模型返回垃圾/越界值时一律当作没读到。
@@ -15,7 +15,7 @@ import {
 } from '../js/label.js';
 import { buildLabelPrompt, normalizeLabelResult, requestLabelParse } from '../js/ai-core.js';
 
-/* 她拍的那张包装的真实数字（2026-10-20）：能量 349 千焦、蛋白 13.7、脂肪 0.7、碳水 5.3，每 100 克 */
+/* 用户拍的那张包装的真实数字（2026-10-20）：能量 349 千焦、蛋白 13.7、脂肪 0.7、碳水 5.3，每 100 克 */
 const HER_LABEL = { baseGrams: 100, energyValue: 349, energyUnit: 'kJ', protein: 13.7, fat: 0.7, carb: 5.3 };
 
 test('千焦换算成千卡：349 千焦 ≈ 83.4 kcal', () => {
@@ -36,7 +36,7 @@ test('单位认不出 / 数字不合理时返回 null，不猜', () => {
   assert.equal(normalizeUnit('大卡'), 'kcal');
 });
 
-test('照包装填：她的那张表算出来每 100 克 83.4 kcal', () => {
+test('照包装填：用户的那张表算出来每 100 克 83.4 kcal', () => {
   const r = labelToPer100(HER_LABEL);
   assert.equal(r.ok, true, r.error);
   assert.equal(r.per100.kcal, 83.4);
@@ -68,7 +68,7 @@ test('把千焦当千卡抄进来时会拦下来（这是最常见的错）', ()
   const c = checkConsistency(r.per100);
   assert.equal(c.level, 'warn');
   assert.ok(c.message.includes('对不上'), c.message);
-  // 单位没选时也要她选，而不是默认当成 kcal
+  // 单位没选时也要用户选，而不是默认当成 kcal
   const bad = labelToPer100({ ...HER_LABEL, energyUnit: '卡路里😀' });
   assert.equal(bad.ok, false);
   assert.ok(bad.error.includes('单位'), bad.error);
@@ -155,7 +155,7 @@ test('模型不支持看图时，报错要说人话（不能直接把原始报�
     () => requestLabelParse({ imageDataUrl: 'data:image/jpeg;base64,AAAA', config: { baseUrl: 'https://x', model: 'm', apiKey: 'k' }, fetchImpl }),
     (err) => {
       assert.ok(/看不了图片/.test(err.message), err.message);
-      assert.ok(/qwen-vl|glm-4v|gpt-4o/.test(err.message), '要告诉她换成哪种模型');
+      assert.ok(/qwen-vl|glm-4v|gpt-4o/.test(err.message), '要告诉用户换成哪种模型');
       return true;
     },
   );
@@ -197,17 +197,17 @@ test('正文是空的、但模型写了「思考过程」：要说清是模型�
   );
 });
 
-test('照片读出来对不上时，劝她重拍；手动填的、或只差一点点，不多嘴', () => {
+test('照片读出来对不上时，劝用户重拍；手动填的、或只差一点点，不多嘴', () => {
   // 真事：糊照片里模型把「蛋白质」读成能量那行的 NRV%（13），把脂肪读成 9.2 ——
-  // 标称 1078 kJ = 258 kcal，按读到的算却是 323 kcal，差 25%。这种就该让她重拍。
+  // 标称 1078 kJ = 258 kcal，按读到的算却是 323 kcal，差 25%。这种就该让用户重拍。
   const shifted = checkConsistency(labelToPer100({ baseGrams: 100, energyValue: 1078, energyUnit: 'kJ', protein: 13, fat: 9.2, carb: 46.5 }).per100);
   assert.ok(shifted.diffPct > 20, `这条用例要求真的对不上，实际差 ${shifted.diffPct}%`);
   const hint = photoRetakeHint(shifted);
   assert.ok(hint.includes('重拍'), '要明说重拍');
-  assert.ok(hint.includes('拍满'), '要告诉她怎么拍（拍满画面）');
-  assert.ok(hint.includes('别直接保存'), '要拦住她直接保存');
+  assert.ok(hint.includes('拍满'), '要告诉用户怎么拍（拍满画面）');
+  assert.ok(hint.includes('别直接保存'), '要拦住用户直接保存');
 
-  // 读对了的那张不该出现这句话（否则每次拍照都吓她一下）
+  // 读对了的那张不该出现这句话（否则每次拍照都吓用户一下）
   const right = checkConsistency(labelToPer100(HER_LABEL).per100);
   assert.equal(photoRetakeHint(right), '', '对得上时不要多嘴');
   // 差 20% 以内是包装自己的问题（糖醇/膳食纤维），也不劝重拍
