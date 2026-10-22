@@ -492,6 +492,7 @@ function printReport(report) {
       || r.settings.图标 < 5 || r.settings.兜底 > 0
       || r.settings.图标 > 0 && (r.settings.图标尺寸 < 22 || r.settings.图标块最小 < 34)
       || r.update.标题 !== '更新了什么' || r.update.条目数 < 1 || !r.update.有按钮
+      || !String(r.searchWorks.排序[0] || '').includes('熟重')
       || !r.aboutCheck.有按钮 || !/最新版本/.test(r.aboutCheck.提示)
       || r.refresh.标题 !== '有新版本了' || !r.refresh.按钮.includes('刷新，用上新版')
       || !r.refresh.按钮.includes('先不刷新') || !r.refresh.正文.includes(r.refresh.假版本);

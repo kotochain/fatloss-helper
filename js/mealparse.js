@@ -17,7 +17,7 @@
  * 界面会拿 portionChoices 里的档位反问用户一句，而不是默默按默认值记上。
  */
 
-import { FOODS, findFood, parseAmount, matchFoodByName } from './foods.js';
+import { FOODS, ALIASES, findFood, parseAmount, matchFoodByName, detectFoodForm } from './foods.js';
 
 /** 单份默认克数：用户没说份量时按「正常一份」估，而不是统一 100 克 */
 export const FOOD_DEFAULT_GRAMS = {
@@ -33,8 +33,10 @@ export const FOOD_DEFAULT_GRAMS = {
   broccoli: 150, spinach: 150, bokchoy: 150, cabbage: 150, chinese_cabbage: 200,
   eggplant: 150, bell_pepper: 100, mushroom: 100, enoki: 100, seaweed: 100, winter_melon: 200,
   bitter_melon: 150, lettuce: 100, edamame: 100, dried_tofu: 50, tofu_firm: 100, tofu_silken: 100,
-  chicken_breast: 150, chicken_thigh: 100, chicken_wing: 50, pork_lean: 100, beef_lean: 100,
-  shrimp: 100, salmon: 120, white_fish: 150, tuna_can: 120, oats: 40, milk: 250,
+  chicken_breast: 150, chicken_breast_cooked: 150, chicken_thigh: 100, chicken_thigh_cooked: 100, chicken_wing: 50,
+  pork_lean: 100, pork_lean_cooked: 100, beef_lean: 100, beef_lean_cooked: 120,
+  shrimp: 100, shrimp_cooked: 100, salmon: 120, salmon_cooked: 120, white_fish: 150, white_fish_cooked: 150, tuna_can: 120,
+  oats: 40, milk: 250,
 };
 
 /** 组合菜按「个」计时每个多少克（包子 100、饺子 20 之类） */
@@ -249,8 +251,8 @@ export const DISHES = [
 /** 常见配料/加料：识别出来就往上加。vague = 加多少全看用户手，界面要反问一句 */
 const EXTRA_INGREDIENTS = [
   { key: 'egg', aliases: ['加蛋', '加个蛋', '卤蛋', '鸡蛋', '煎蛋', '荷包蛋', '蛋'], foodId: 'egg', defaultGrams: 50 },
-  { key: 'beef_extra', aliases: ['加肉', '加牛肉', '加份肉', '肉多'], foodId: 'beef_lean', defaultGrams: 60, vague: true },
-  { key: 'pork_extra', aliases: ['加猪排', '加大排', '加排骨'], foodId: 'pork_lean', defaultGrams: 80, vague: true },
+  { key: 'beef_extra', aliases: ['加肉', '加牛肉', '加份肉', '肉多'], foodId: 'beef_lean_cooked', defaultGrams: 60, vague: true },
+  { key: 'pork_extra', aliases: ['加猪排', '加大排', '加排骨'], foodId: 'pork_lean_cooked', defaultGrams: 80, vague: true },
   { key: 'tofu_extra', aliases: ['加豆腐', '豆腐'], foodId: 'tofu_firm', defaultGrams: 100, vague: true },
   { key: 'veg_extra', aliases: ['加青菜', '青菜', '加菜', '蔬菜', '小白菜', '生菜'], foodId: 'bokchoy', defaultGrams: 150, vague: true },
   { key: 'rice_extra', aliases: ['加饭', '加米饭', '多饭'], foodId: 'rice_cooked', defaultGrams: 150, vague: true },
@@ -303,8 +305,18 @@ export function buildDictionary() {
     if (!d.aliases.includes(d.name)) dict.push({ text: d.name, kind: 'dish', ref: d });
   }
   for (const f of FOODS) {
-    dict.push({ text: f.name.replace(/[（(].*?[)）]/g, ''), kind: 'food', ref: f });
+    const clean = f.name.replace(/[（(].*?[)）]/g, '');
+    // 带 form 的条目（生重/熟重肉鱼）允许单字名进字典：「虾」这种日常说法不然永远认不出来。
+    // 其余食物仍要求 ≥2 字，避免「米」「面」「蛋」这种单字把别的词抢走。
+    dict.push({ text: clean, kind: 'food', ref: f, allowSingle: Boolean(f.form) });
     if (f.name.length > 2) dict.push({ text: f.name, kind: 'food', ref: f });
+    // 生熟肉/鱼这类拆成两条的食物，把别名也放进解析字典：
+    // 否则「水煮鸡胸」「牛肉」「生牛肉」这些日常说法在离线解析里根本认不出来。
+    if (f.form) {
+      for (const a of (ALIASES[f.id] || [])) {
+        if (a.length >= 2) dict.push({ text: a, kind: 'food', ref: f });
+      }
+    }
   }
   for (const e of EXTRA_INGREDIENTS) {
     for (const a of e.aliases) dict.push({ text: a, kind: 'extra', ref: e });
@@ -324,7 +336,8 @@ function findHits(text) {
   const taken = new Array(text.length).fill(false);
   const hits = [];
   for (const entry of DICTIONARY) {
-    if (!entry.text || entry.text.length < 2) continue;
+    if (!entry.text) continue;
+    if (entry.text.length < 2 && !entry.allowSingle) continue;
     let from = 0;
     for (;;) {
       const idx = text.indexOf(entry.text, from);
@@ -717,6 +730,8 @@ export function parseDescription(raw, defaultMeal = null) {
   if (style) {
     for (const it of items) {
       if (it.source !== 'food') continue;
+      const foodForm = findFood(it.foodId)?.form;
+      if (foodForm === 'cooked') continue; // 熟重数据已经包含做法，不能再按做法乘油量
       it.fat = Math.round(it.fat * style.oilFactor * 10) / 10;
       it.kcal = Math.round(it.protein * 4 + it.fat * 9 + it.carb * 4);
       it.cookingStyle = style.note;
@@ -749,8 +764,10 @@ export function parseDescription(raw, defaultMeal = null) {
  *
  * 匹配不上也不静默丢弃：放进 `unmatched` 让界面明确告诉用户「认出来了，但库里没有」。
  */
-export function normalizeAiItems(aiResult, defaultMeal = null) {
+export function normalizeAiItems(aiResult, defaultMeal = null, { text = '' } = {}) {
   const out = { items: [], meal: aiResult?.meal || defaultMeal, questions: [], unmatched: [], unmatchedItems: [] };
+  // 生熟按「用户原句」判断（AI 通常只会回「鸡胸肉」，但用户可能说的是「生鸡胸肉」）
+  const preferForm = detectFoodForm(text) || null;
   const list = Array.isArray(aiResult?.items) ? aiResult.items : [];
   for (const raw of list) {
     const grams = Number(raw?.grams);
@@ -760,7 +777,7 @@ export function normalizeAiItems(aiResult, defaultMeal = null) {
     let food = raw?.matchedFoodId ? findFood(raw.matchedFoodId) : null;
     let matchedBy = food ? 'AI 给的 id' : null;
     if (!food && raw?.name) {
-      const hit = matchFoodByName(raw.name);
+      const hit = matchFoodByName(raw.name, { preferForm: preferForm || detectFoodForm(raw.name) });
       if (hit) { food = hit.food; matchedBy = hit.reason; }
     }
 

@@ -138,13 +138,28 @@ test('「加饭」「加肉」这种加多少全看用户手的，要问；「�
   assert.equal(rice.confidence, 'low');
   assertChoicesSane(rice, '加饭');
 
-  const meat = item('牛肉面加肉', '加牛');
+  const meat = item('牛肉面加肉', '加瘦'); // 加肉默认按「瘦牛肉（熟重）」算
   assert.equal(meat.confidence, 'low');
   assertChoicesSane(meat, '加肉');
 
   const egg = item('牛肉面加蛋', '鸡蛋');
   assert.equal(egg.confidence, 'high', '一颗蛋是标准大小，不该拿这种问题烦用户');
   assert.deepEqual(egg.portionChoices, []);
+});
+
+test('生熟口径：说「生鸡胸肉」按生重，其余默认熟重（离线解析也一样）', () => {
+  const cooked = item('中午吃了150克鸡胸肉', '鸡胸肉');
+  assert.equal(cooked.foodId, 'chicken_breast_cooked', '默认应当是熟重那条');
+  assert.equal(cooked.grams, 150);
+  assert.equal(cooked.kcal, 236, '150 克 × 157/100');
+
+  const raw = item('中午吃了150克生鸡胸肉', '生鸡胸肉');
+  assert.equal(raw.foodId, 'chicken_breast', '带「生」要落到生重那条');
+  assert.equal(raw.kcal, 177, '150 克 × 118/100');
+
+  const boiled = item('水煮鸡胸100克', '鸡胸');
+  assert.equal(boiled.foodId, 'chicken_breast_cooked');
+  assert.equal(boiled.kcal, 157, '熟重数据已经包含做法，不能再按「水煮」乘油量');
 });
 
 test('口语里不带「一」的份量词也要认（喝了瓶 → 就是「瓶」）', () => {

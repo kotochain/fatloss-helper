@@ -861,7 +861,7 @@ function suggestNext(totals, t, remainingKcal) {
     return '今天的热量额度用完了。如果还饿，吃黄瓜、番茄、无糖酸奶这类几乎不占额度的东西。';
   }
   if (proteinLeft > 30) {
-    return `还差 ${Math.round(proteinLeft)} 克蛋白质，还有 ${remainingKcal} kcal 额度。建议：鸡胸肉 150 克（约 180 kcal）或 3 个鸡蛋（约 215 kcal）或一杯无糖希腊酸奶（135 kcal）。`;
+    return `还差 ${Math.round(proteinLeft)} 克蛋白质，还有 ${remainingKcal} kcal 额度。建议：熟鸡胸肉 150 克（约 236 kcal，按熟重算）或 3 个鸡蛋（约 215 kcal）或一杯无糖希腊酸奶（135 kcal）。`;
   }
   if (proteinLeft > 10) {
     return `蛋白质还差 ${Math.round(proteinLeft)} 克，可以来一杯无糖酸奶或两个鸡蛋，剩下 ${remainingKcal} kcal 留给主食和蔬菜。`;
@@ -1288,6 +1288,7 @@ async function runQuickParse(text, mealOverride = null) {
       const norm = normalizeAiItems(
         { meal: res.meal || meal, items: res.items, questions: res.questions },
         meal,
+        { text },
       );
       // AI 认出来了但本地库里没有的，要原样带出去给用户看（以前是直接丢掉，用户以为记上了）
       unmatchedItems = norm.unmatchedItems || [];
@@ -1897,6 +1898,7 @@ function openFoodSheet(mealKey) {
 
       <div id="paneSearch">
         <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off" style="margin-top:10px">
+        <p class="tiny muted" style="margin:6px 0 0">肉和鱼默认按「熟重」算；如果你称的是生重，选名字里带「生」的那条。</p>
         <div id="foodResults" style="margin-top:6px"></div>
         <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">${icon('clipboard', { size: 16 })} 照包装营养成分表填（更准）</button>
       </div>

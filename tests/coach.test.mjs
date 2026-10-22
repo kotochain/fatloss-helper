@@ -73,6 +73,17 @@ test('建议的搭配不超额度、也不把蛋白补过头', () => {
   });
 });
 
+test('教练建议里的肉/鱼必须是熟重条目（和记录默认口径一致）', () => {
+  // 建议说「生鸡胸肉 80 克」，用户去搜索/记录默认是熟重，同一份能差 25%+。
+  const raw = COACH_FOOD_IDS.filter((id) => findFood(id)?.form === 'raw');
+  assert.deepEqual(raw, [], `教练的食物清单里混进了生重条目：${raw.join('、')}`);
+  for (const gap of [10, 30, 60]) {
+    const list = suggestFoods({ remainingKcal: 800, proteinGap: gap });
+    const bad = list.filter((s) => findFood(s.id || s.foodId)?.form === 'raw');
+    assert.deepEqual(bad.map((x) => x.name), [], `建议里出现生重条目：${bad.map((x) => x.name).join('、')}`);
+  }
+});
+
 test('额度已经吃超时不建议再吃（不能一边超一边劝加餐）', () => {
   const brief = buildCoachBrief({
     state: makeState([]),

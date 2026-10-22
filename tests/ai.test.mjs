@@ -95,6 +95,13 @@ test('收敛上游结果：脏数据被丢掉，形状固定', () => {
   assert.deepEqual(out.questions, ['多大一碗？', 'q2'], '追问最多留 2 个');
 });
 
+test('AI 给的条目：说「生鸡胸肉」时按生重算（默认是熟重）', () => {
+  const out = normalizeAiItems({ meal: 'lunch', items: [{ name: '生鸡胸肉', grams: 100 }] }, null, { text: '中午吃了100克生鸡胸肉' });
+  assert.equal(out.items.length, 1);
+  assert.equal(out.items[0].foodId, 'chicken_breast', '带「生」要落到生重那条');
+  assert.equal(out.items[0].kcal, 118, '100 克生鸡胸 × 118/100');
+});
+
 test('AI 给的条目：按名字在本地库里匹配，热量用本地数据算', () => {
   // 这是修过一个严重 bug 之后的行为：
   // 以前要求 AI 提供 matchedFoodId 或 kcal，但提示词禁止 AI 输出热量、也从没让它给 id
@@ -110,8 +117,10 @@ test('AI 给的条目：按名字在本地库里匹配，热量用本地数据�
     questions: ['面多大一碗？'],
   });
   assert.equal(out.items.length, 3, `三条都该记上，实际只记上 ${out.items.length} 条`);
-  assert.equal(out.items[0].foodId, 'chicken_breast');
-  assert.equal(out.items[0].kcal, 177, '150 克鸡胸 × 118/100');
+  // v30 起「鸡胸肉」默认按**熟重**算（普通人称/估的都是做熟后的重量）；
+  // 说「生鸡胸肉」才会落到生重那条（见下面那条测试）。
+  assert.equal(out.items[0].foodId, 'chicken_breast_cooked');
+  assert.equal(out.items[0].kcal, 236, '150 克熟鸡胸 × 157/100');
   assert.equal(out.items[1].foodId, 'rice_cooked');
   assert.equal(out.items[2].foodId, 'beef_noodle', '牛肉面要用库里那条组合菜');
   for (const it of out.items) {

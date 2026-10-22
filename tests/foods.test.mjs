@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FOODS, FOOD_CATEGORIES, checkFoodData, findFood, parseAmount, ALIASES, kcalOnlyFood } from '../js/foods.js';
+import { FOODS, FOOD_CATEGORIES, checkFoodData, findFood, parseAmount, ALIASES, kcalOnlyFood, matchFoodByName } from '../js/foods.js';
 import { calcEntry } from '../js/calc.js';
 import { searchFoods, normalize } from '../js/foodlog.js';
 
@@ -58,6 +58,33 @@ test('反向验证：源文件里真的存在这些数据条目（不是测试�
   const inFile = (src.match(/\{ id: '/g) || []).length;
   assert.equal(inFile, FOODS.length, `源文件里 ${inFile} 条，导入后有 ${FOODS.length} 条`);
   assert.ok(src.includes("id: 'rice_cooked'"));
+});
+
+test('生熟默认口径：普通叫法按熟重，说「生」才按生重', () => {
+  // v30：肉/鱼/虾拆成「熟重」和「生重」两条。默认熟重 —— 普通人称/估的都是做熟后的重量。
+  assert.equal(findFood('chicken_breast_cooked').kcal, 157);
+  assert.equal(findFood('chicken_breast').kcal, 118, '生重那条保持原值');
+  for (const [q, id] of [
+    ['鸡胸肉', 'chicken_breast_cooked'], ['鸡胸', 'chicken_breast_cooked'],
+    ['水煮鸡胸', 'chicken_breast_cooked'], ['煎鸡胸', 'chicken_breast_cooked'],
+    ['牛肉', 'beef_lean_cooked'], ['猪瘦肉', 'pork_lean_cooked'],
+    ['虾', 'shrimp_cooked'], ['三文鱼', 'salmon_cooked'],
+  ]) {
+    assert.equal(matchFoodByName(q)?.food.id, id, `「${q}」应当匹配熟重那条`);
+  }
+  for (const [q, id] of [
+    ['生鸡胸肉', 'chicken_breast'], ['生鸡胸', 'chicken_breast'],
+    ['生牛肉', 'beef_lean'], ['生虾', 'shrimp'], ['生三文鱼', 'salmon'],
+  ]) {
+    assert.equal(matchFoodByName(q)?.food.id, id, `「${q}」应当匹配生重那条`);
+  }
+});
+
+test('搜索：鸡胸同时能找到生/熟两条，熟的排前面（默认选项）', () => {
+  const ids = searchFoods('鸡胸').map((f) => f.id);
+  assert.ok(ids.includes('chicken_breast_cooked'), '要有熟重那条');
+  assert.ok(ids.includes('chicken_breast'), '也要有生重那条');
+  assert.ok(ids.indexOf('chicken_breast_cooked') < ids.indexOf('chicken_breast'), '熟重应当排在前面');
 });
 
 test('每条数据的 id 唯一', () => {

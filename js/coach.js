@@ -22,7 +22,7 @@ const MIN_DAY_KCAL = 400;
  * 用 id 引用食物库，克数和热量全部从库里现算，不在文案里写死。
  */
 export const COACH_FOOD_IDS = [
-  'chicken_breast', 'tuna_can', 'shrimp', 'white_fish', 'beef_lean',
+  'chicken_breast_cooked', 'tuna_can', 'shrimp_cooked', 'white_fish_cooked', 'beef_lean_cooked',
   'greek_yogurt', 'tofu_firm', 'edamame', 'egg',
 ];
 

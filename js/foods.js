@@ -6,7 +6,11 @@
  *    全脂牛奶按中国市售包装标签（65 kcal/100ml，比成分表的 54 更接近日常喝的）；
  *    鸡胸肉、红薯、西兰花、三文鱼按 USDA FoodData Central（更接近去皮去骨/养殖的实际值）。
  *    两张表的口径差异可达 ±20%，所以本表只当估算。
- *  - 生熟状态差别很大，本表对主食明确区分「生」和「熟」（米饭、面条按熟重计）。
+ *  - 生熟状态差别很大。主食明确区分生熟（米饭、面条按熟重计）；
+ *    肉/鱼/虾 v30 起也拆成「熟重」和「生重」两条：默认匹配「鸡胸肉」「虾」会落到**熟重**那条
+ *    （大多数人估份量、称重都是做熟之后的重量），说「生鸡胸肉」「生重」才落到生重那条。
+ *    熟重不是另抄一套成分数据，而是按烹饪失水折算：**肉类约 ×0.75（失水约 25%）**；
+ *    鱼虾按各自实际（三文鱼熟重≈生重、虾约 +6%），不是统一乘 0.75。
  *  - 品牌、做法、放油量都会让真实值上下浮动 10%~30%，尤其是炒菜和外卖。
  *  - 包装食品别借用相近的食材条目（预制调理鸡胸 vs 生鸡胸能差 40%）：
  *    用「记录 → 找不到？自己加 → 照包装营养成分表填」，数字就是包装上的。
@@ -45,22 +49,31 @@ export const FOODS = [
   { id: 'dumpling_pork', name: '猪肉水饺', category: 'staple', kcal: 240, protein: 9.0, fat: 9.0, carb: 30.0, servings: [['一个', 20], ['10 个', 200]] },
 
   // ── 肉蛋豆 ────────────────────────────────────────────
-  { id: 'chicken_breast', name: '鸡胸肉（去皮生）', category: 'protein', kcal: 118, protein: 24.0, fat: 1.9, carb: 0.6, servings: [['一块', 150]] },
-  { id: 'chicken_thigh', name: '鸡腿肉（去皮）', category: 'protein', kcal: 145, protein: 19.0, fat: 7.0, carb: 0, servings: [['一个', 100]] },
+  // 生熟拆分（v30）：默认「鸡胸肉」= 熟重（做熟后的重量，普通人称/估的都是这个）；
+  // 说「生鸡胸肉」「生重」才按生重算。熟重 = 生重按烹饪失水约 25% 折算，营养按同等可食部计。
+  { id: 'chicken_breast_cooked', name: '鸡胸肉（熟重）', form: 'cooked', category: 'protein', kcal: 157, protein: 31.0, fat: 2.6, carb: 0.6, servings: [['一块', 150]] },
+  { id: 'chicken_breast', name: '生鸡胸肉（去皮）', form: 'raw', category: 'protein', kcal: 118, protein: 24.0, fat: 1.9, carb: 0.6, servings: [['一块', 150]] },
+  { id: 'chicken_thigh_cooked', name: '鸡腿肉（去皮，熟重）', form: 'cooked', category: 'protein', kcal: 193, protein: 25.0, fat: 9.0, carb: 0, servings: [['一个', 100]] },
+  { id: 'chicken_thigh', name: '生鸡腿肉（去皮）', form: 'raw', category: 'protein', kcal: 145, protein: 19.0, fat: 7.0, carb: 0, servings: [['一个', 100]] },
   { id: 'chicken_wing', name: '鸡翅', category: 'protein', kcal: 194, protein: 17.4, fat: 11.8, carb: 4.6, servings: [['一个', 50]] },
   { id: 'chicken_skin', name: '炸鸡（带皮）', category: 'dish', kcal: 279, protein: 20.0, fat: 17.0, carb: 10.0, servings: [['一块', 100]] },
-  { id: 'pork_lean', name: '猪瘦肉（生）', category: 'protein', kcal: 143, protein: 20.3, fat: 6.2, carb: 1.5, servings: [['一小份', 100]] },
+  { id: 'pork_lean_cooked', name: '猪瘦肉（熟重）', form: 'cooked', category: 'protein', kcal: 190, protein: 27.0, fat: 8.0, carb: 2.0, servings: [['一小份', 100]] },
+  { id: 'pork_lean', name: '生猪瘦肉', form: 'raw', category: 'protein', kcal: 143, protein: 20.3, fat: 6.2, carb: 1.5, servings: [['一小份', 100]] },
   { id: 'pork_belly', name: '五花肉（生）', category: 'protein', kcal: 508, protein: 9.0, fat: 53.0, carb: 0, servings: [['一小份', 80]] },
   { id: 'pork_rib', name: '排骨（生）', category: 'protein', kcal: 278, protein: 18.0, fat: 23.0, carb: 1.0, servings: [['一根', 80]] },
-  { id: 'beef_lean', name: '牛里脊/瘦牛肉（生）', category: 'protein', kcal: 125, protein: 20.2, fat: 4.2, carb: 1.2, servings: [['一小份', 120]] },
+  { id: 'beef_lean_cooked', name: '瘦牛肉（熟重）', form: 'cooked', category: 'protein', kcal: 167, protein: 27.0, fat: 5.6, carb: 1.6, servings: [['一小份', 120]] },
+  { id: 'beef_lean', name: '生瘦牛肉', form: 'raw', category: 'protein', kcal: 125, protein: 20.2, fat: 4.2, carb: 1.2, servings: [['一小份', 120]] },
   { id: 'beef_fatty', name: '肥牛/雪花牛肉', category: 'protein', kcal: 300, protein: 16.0, fat: 26.0, carb: 0, servings: [['一份', 100]] },
   { id: 'lamb', name: '羊肉（瘦）', category: 'protein', kcal: 118, protein: 20.5, fat: 3.9, carb: 0.2, servings: [['一份', 100]] },
-  { id: 'shrimp', name: '虾（鲜）', category: 'protein', kcal: 93, protein: 18.6, fat: 0.8, carb: 2.8, servings: [['一只', 15], ['10 只', 150]] },
+  { id: 'shrimp_cooked', name: '虾（熟重）', form: 'cooked', category: 'protein', kcal: 99, protein: 20.0, fat: 1.0, carb: 3.0, servings: [['一只', 15], ['10 只', 150]] },
+  { id: 'shrimp', name: '生虾', form: 'raw', category: 'protein', kcal: 93, protein: 18.6, fat: 0.8, carb: 2.8, servings: [['一只', 15], ['10 只', 150]] },
   // 按养殖大西洋鲑（USDA FoodData Central 175167）：208/20.4/13.4。
   // 之前误用了《中国食物成分表》「鲑鱼（大马哈鱼）」的 139/17.2/7.8（野生太平洋鲑），每 100 克少算约 70 kcal
-  { id: 'salmon', name: '三文鱼（养殖生）', category: 'protein', kcal: 208, protein: 20.4, fat: 13.4, carb: 0.0, servings: [['一份', 120]] },
+  { id: 'salmon_cooked', name: '三文鱼（熟重）', form: 'cooked', category: 'protein', kcal: 210, protein: 22.0, fat: 13.0, carb: 0.0, servings: [['一份', 120]] },
+  { id: 'salmon', name: '生三文鱼（养殖）', form: 'raw', category: 'protein', kcal: 208, protein: 20.4, fat: 13.4, carb: 0.0, servings: [['一份', 120]] },
   { id: 'salmon_wild', name: '大马哈鱼（野生）', category: 'protein', kcal: 139, protein: 17.2, fat: 7.8, carb: 0.0, servings: [['一份', 120]] },
-  { id: 'white_fish', name: '巴沙鱼/龙利鱼', category: 'protein', kcal: 90, protein: 17.0, fat: 2.0, carb: 0, servings: [['一份', 150]] },
+  { id: 'white_fish_cooked', name: '巴沙鱼/龙利鱼（熟重）', form: 'cooked', category: 'protein', kcal: 100, protein: 19.0, fat: 2.0, carb: 0, servings: [['一份', 150]] },
+  { id: 'white_fish', name: '生巴沙鱼/龙利鱼', form: 'raw', category: 'protein', kcal: 90, protein: 17.0, fat: 2.0, carb: 0, servings: [['一份', 150]] },
   { id: 'tuna_can', name: '水浸金枪鱼罐头', category: 'protein', kcal: 100, protein: 22.0, fat: 1.0, carb: 0, servings: [['一罐', 120]] },
   { id: 'egg', name: '鸡蛋', category: 'protein', kcal: 143, protein: 13.3, fat: 8.8, carb: 2.8, servings: [['一个', 50], ['两个', 100], ['蛋白（一个）', 33], ['蛋黄（一个）', 17]] },
   { id: 'duck_egg', name: '鸭蛋', category: 'protein', kcal: 180, protein: 12.6, fat: 13.0, carb: 3.1, servings: [['一个', 70]] },
@@ -187,10 +200,16 @@ export const ALIASES = {
   baozi_pork: ['包子', '肉包', '大包子'],
   noodle_cooked: ['面', '汤面', '捞面'],
   noodle_raw: ['面', '面条'],
-  chicken_breast: ['鸡胸', '鸡脯肉', '鸡肉'],
-  chicken_thigh: ['鸡腿', '鸡肉'],
-  pork_lean: ['猪肉', '瘦肉', '里脊'],
-  beef_lean: ['牛肉', '牛排', '瘦牛肉'],
+  // 注意：别名里不要放「水煮鸡胸」「煎鸡胸」这种带做法词的 —— 解析时会把做法词一起吞掉，
+  // 导致「水煮」这种用油量提示失效（v30 踩过）。带做法的说法靠名字包含匹配 + 做法词识别。
+  chicken_breast_cooked: ['鸡胸肉', '鸡胸', '鸡脯肉', '鸡肉', '熟鸡胸'],
+  chicken_breast: ['生鸡胸', '生鸡胸肉', '生鸡脯肉', '生重鸡胸'],
+  chicken_thigh_cooked: ['鸡腿', '鸡腿肉', '鸡肉', '卤鸡腿', '烤鸡腿'],
+  chicken_thigh: ['生鸡腿', '生鸡腿肉'],
+  pork_lean_cooked: ['猪瘦肉', '瘦猪肉', '猪肉', '瘦肉', '里脊'],
+  pork_lean: ['生猪瘦肉', '生猪瘦肉', '生瘦肉', '生猪肉'],
+  beef_lean_cooked: ['瘦牛肉', '牛肉', '牛排', '牛柳'],
+  beef_lean: ['生牛肉', '生瘦牛肉', '生牛排'],
   egg: ['白煮蛋', '水煮蛋', '煎蛋', '荷包蛋', '蛋'],
   milk_whole: ['牛奶', '纯牛奶'],
   milk_skim: ['低脂奶', '脱脂奶'],
@@ -221,9 +240,12 @@ export const ALIASES = {
   corn: ['苞米', '棒子'],
   oats: ['燕麦'],
   tofu_firm: ['豆腐'],
-  shrimp: ['虾仁', '基围虾'],
-  salmon: ['鲑鱼'],
-  white_fish: ['龙利鱼', '巴沙鱼', '鱼片'],
+  shrimp_cooked: ['虾', '虾仁', '大虾', '基围虾', '熟虾'],
+  shrimp: ['生虾', '生虾仁', '鲜虾'],
+  salmon_cooked: ['三文鱼', '鲑鱼', '熟三文鱼'],
+  salmon: ['生三文鱼', '生鲑鱼'],
+  white_fish_cooked: ['龙利鱼', '巴沙鱼', '鱼片', '熟鱼片', '清蒸龙利鱼'],
+  white_fish: ['生龙利鱼', '生巴沙鱼'],
   seaweed: ['海带丝'],
   mushroom: ['冬菇', '菌菇'],
   cola: ['汽水', '可乐'],
@@ -279,6 +301,22 @@ export function findFood(id) {
   return FOODS.find((f) => f.id === id) || null;
 }
 
+/**
+ * 从一句话里判断「生重还是熟重」。
+ *
+ * 为什么重要：100 克生鸡胸 118 kcal，做熟后 100 克约 157 kcal —— 同样说「100 克鸡胸肉」，
+ * 按生重算会少近 25%。普通人称/估份量时基本都是**做熟之后的重量**，所以：
+ *  - 说了「生 / 生重」→ 生重；
+ *  - 说了做法（水煮/煎/炒/烤/蒸/卤/红烧/熟重…）→ 熟重；
+ *  - 什么都没说 → 默认熟重（下面匹配时 default 就是 cooked）。
+ */
+export function detectFoodForm(text) {
+  const s = String(text || '');
+  if (/生重|生(?:的)?(?:[\u4e00-\u9fa5]{0,2})(鸡|鸡脯|鸡腿|牛|猪|羊|鱼|虾|肉)/.test(s)) return 'raw';
+  if (/熟重|熟(的)?(鸡|牛|猪|鱼|虾|肉)|水煮|白灼|清蒸|煎|烤|炒|卤|炖|红烧|空气炸|蒸熟|煮熟/.test(s)) return 'cooked';
+  return null;
+}
+
 /** 名称归一化：去掉括号补充、空格、标点，方便比较 */
 function normName(text) {
   return String(text || '')
@@ -297,16 +335,23 @@ function normName(text) {
  * 返回 `{food, score, reason}` 或 null。宁可返回 null，也不要给一个错的食物：
  * 匹配错了比没匹配上更糟（用户看到"炒河粉 116 kcal"会以为准，其实差了一倍）。
  *
+ * 生熟口径：默认找「熟重」那条（见 detectFoodForm）；同一个食物有生/熟两条时，
+ * 名字里带「生…」或句子里说「生重」才会落到生重那条。
+ *
  * @param {string} name
- * @param {{ minScore?: number }} options
+ * @param {{ minScore?: number, preferForm?: 'raw'|'cooked'|null }} options
  */
-export function matchFoodByName(name, { minScore = 70 } = {}) {
+export function matchFoodByName(name, { minScore = 70, preferForm = null } = {}) {
   const q = normName(name);
   if (!q) return null;
+  const wantForm = preferForm || detectFoodForm(name) || 'cooked';
 
   let best = null;
   const consider = (food, score, reason) => {
-    if (!best || score > best.score) best = { food, score, reason };
+    // 生熟两条都匹配上时，按「想要的那条」加减 8 分来决定（不是按数组顺序，测试可抓）
+    const formBonus = food.form ? (food.form === wantForm ? 8 : -8) : 0;
+    const total = score + formBonus;
+    if (!best || total > best.score) best = { food, score: total, reason };
   };
 
   for (const food of FOODS) {

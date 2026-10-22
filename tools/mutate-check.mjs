@@ -72,7 +72,7 @@ const MUTATIONS = [
   { file: 'js/recommend.js', from: 'if (fatRatio < 0.85) {', to: 'if (false) {', why: '脂肪不足时说明里必须点出来' },
   // ── 第六轮：本地周洞察 ──
   // ── 第七轮：AI 解析后按名字匹配本地食物（修的是一个「AI 模式从来没工作过」的 bug）──
-  { file: 'js/mealparse.js', from: 'const hit = matchFoodByName(raw.name);', to: 'const hit = null;', why: 'AI 认出的食物必须能在本地库里匹配上（否则一条都记不上）' },
+  { file: 'js/mealparse.js', from: 'const hit = matchFoodByName(raw.name, { preferForm: preferForm || detectFoodForm(raw.name) });', to: 'const hit = null;', why: 'AI 认出的食物必须能在本地库里匹配上（否则一条都记不上）' },
   { file: 'js/mealparse.js', from: 'if (out.items.length) {', to: 'if (true) {', why: '一条都没记上时不该再追问（答不上来）' },
   { file: 'js/mealparse.js', from: "out.unmatchedItems.push({ name: String(raw?.name || '?').trim(), grams: Math.round(grams) });", to: "out.unmatchedItems.push({ name: '?', grams: 0 });", why: '没匹配上的食物要原样告诉用户（名字和克数）' },
   { file: 'js/foods.js', from: 'if (!best || best.score < minScore) return null;', to: 'if (!best) return null;', why: '匹配分数太低宁可不算（等价变异：现有食物库/查询里没有「有匹配但低分」的样本，实测输出一致）', sensitivity: 'equivalent' },
@@ -125,6 +125,12 @@ const MUTATIONS = [
   { file: 'js/whatsnew.js', from: '  return Number.isFinite(x) && Number.isFinite(y) && x > y;', to: '  return Number.isFinite(x) && Number.isFinite(y) && x < y;', why: '「服务端比本地新」的方向不能反（反了就会说「有新版本」其实没有）' },
   { file: 'js/whatsnew.js', from: "  if (!lastSeen) return changelog.slice(0, 1);", to: '  if (!lastSeen) return [];', why: '老用户升级到带更新说明的版本时，至少要看一次最新一版的更新' },
   { file: 'js/app.js', from: "const STORAGE_KEY = 'fatloss.state.v2';", to: "const STORAGE_KEY = 'fatloss.state.v2'; // \u5979", why: '文案护栏：源码/文档里不许再出现第三人称（使用者是自己用的，只能叫「你」）' },
+  // ── 第十五轮：生重/熟重口径（v30）──
+  { file: 'js/foods.js', from: "  const wantForm = preferForm || detectFoodForm(name) || 'cooked';", to: "  const wantForm = preferForm || detectFoodForm(name) || 'raw';", why: '没说生熟时默认按熟重（普通人称/估的是做熟后的重量；默认生重会少算 20%+）' },
+  { file: 'js/foods.js', from: '    const formBonus = food.form ? (food.form === wantForm ? 8 : -8) : 0;', to: '    const formBonus = food.form ? (food.form === wantForm ? -8 : 8) : 0;', why: '生熟加分的正负不能反（反了「生鸡胸肉」会匹配成熟重）' },
+  { file: 'js/foods.js', from: "  if (/生重|生(?:的)?(?:[\\u4e00-\\u9fa5]{0,2})(鸡|鸡脯|鸡腿|牛|猪|羊|鱼|虾|肉)/.test(s)) return 'raw';", to: "  if (false) return 'raw';", why: '句子里说「生」必须识别为生重（否则 100 克生鸡胸会按熟的算，多算 25%）' },
+  { file: 'js/mealparse.js', from: '      if (foodForm === \'cooked\') continue; // 熟重数据已经包含做法，不能再按做法乘油量', to: '      if (false) continue;', why: '熟重条目不能再按做法乘油量（水煮鸡胸会变成 145 kcal）' },
+  { file: 'js/recommend.js', from: "{ name: '鸡胸肉 + 米饭 + 西兰花', protein: ['chicken_breast_cooked'], ratio: [1], carb: 'rice_cooked', veg: 'broccoli', side: null },", to: "{ name: '鸡胸肉 + 米饭 + 西兰花', protein: ['chicken_breast'], ratio: [1], carb: 'rice_cooked', veg: 'broccoli', side: null },", why: '餐单的肉/鱼必须是熟重条目（用户照餐单克数去记录时默认也是熟重，两边口径要一致）' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

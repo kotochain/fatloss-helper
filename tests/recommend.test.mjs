@@ -407,6 +407,22 @@ test('每个 METs 值都在合理区间（1.5~16）', () => {
   assert.equal(listExercises().length, Object.keys(EXERCISES).length);
 });
 
+test('餐单里的肉/鱼必须是熟重条目（v30 起默认熟重，别悄悄改回生重）', () => {
+  // 只靠「食物库里有这个 id」是抓不到的：把模板改回 chicken_breast 也会绿。
+  // 用户照着餐单的克数去记录时默认也是熟重，两边口径必须一致。
+  const bad = [];
+  for (const meal of MEAL_TEMPLATES) {
+    for (const dish of meal.dishes) {
+      for (const id of dish.protein) {
+        const food = findFood(id);
+        if (!food) { bad.push(`${dish.name}: 食物库里没有 ${id}`); continue; }
+        if (food.form === 'raw') bad.push(`${dish.name}: 用了生重条目 ${id}（${food.name}）`);
+      }
+    }
+  }
+  assert.deepEqual(bad, [], bad.join('\n'));
+});
+
 test('食物库里没有其它地方引用的 id 被误删（防回归）', () => {
   const ids = new Set(FOODS.map((f) => f.id));
   for (const required of ['rice_cooked', 'egg', 'chicken_breast', 'tofu_firm', 'broccoli', 'greek_yogurt']) {

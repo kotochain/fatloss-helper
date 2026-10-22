@@ -86,10 +86,10 @@ export const MEAL_TEMPLATES = [
     calorieShare: 0.33,
     proteinShare: 0.38,
     dishes: [
-      { name: '鸡胸肉 + 米饭 + 西兰花', protein: ['chicken_breast'], ratio: [1], carb: 'rice_cooked', veg: 'broccoli', side: null },
-      { name: '牛里脊 + 米饭 + 炒青菜', protein: ['beef_lean'], ratio: [1], carb: 'rice_cooked', veg: 'stirfry_greens', side: null },
-      { name: '虾 + 红薯 + 西兰花', protein: ['shrimp'], ratio: [1], carb: 'sweet_potato', veg: 'broccoli', side: null },
-      { name: '巴沙鱼 + 米饭 + 番茄', protein: ['white_fish'], ratio: [1], carb: 'rice_cooked', veg: 'tomato', side: null },
+      { name: '鸡胸肉 + 米饭 + 西兰花', protein: ['chicken_breast_cooked'], ratio: [1], carb: 'rice_cooked', veg: 'broccoli', side: null },
+      { name: '牛里脊 + 米饭 + 炒青菜', protein: ['beef_lean_cooked'], ratio: [1], carb: 'rice_cooked', veg: 'stirfry_greens', side: null },
+      { name: '虾 + 红薯 + 西兰花', protein: ['shrimp_cooked'], ratio: [1], carb: 'sweet_potato', veg: 'broccoli', side: null },
+      { name: '巴沙鱼 + 米饭 + 番茄', protein: ['white_fish_cooked'], ratio: [1], carb: 'rice_cooked', veg: 'tomato', side: null },
     ],
   },
   {
@@ -98,10 +98,10 @@ export const MEAL_TEMPLATES = [
     calorieShare: 0.30,
     proteinShare: 0.28,
     dishes: [
-      { name: '鸡胸肉 + 北豆腐 + 米饭 + 小白菜', protein: ['chicken_breast', 'tofu_firm'], ratio: [0.55, 0.45], carb: 'rice_cooked', veg: 'bokchoy', side: null },
-      { name: '三文鱼 + 藜麦 + 黄瓜生菜', protein: ['salmon'], ratio: [1], carb: 'quinoa_cooked', veg: 'cucumber', side: null },
-      { name: '鸡腿肉（去皮）+ 土豆 + 香菇', protein: ['chicken_thigh'], ratio: [1], carb: 'potato', veg: 'mushroom', side: null },
-      { name: '牛肉 + 米粉 + 大白菜', protein: ['beef_lean'], ratio: [1], carb: 'rice_noodle', veg: 'chinese_cabbage', side: null },
+      { name: '鸡胸肉 + 北豆腐 + 米饭 + 小白菜', protein: ['chicken_breast_cooked', 'tofu_firm'], ratio: [0.55, 0.45], carb: 'rice_cooked', veg: 'bokchoy', side: null },
+      { name: '三文鱼 + 藜麦 + 黄瓜生菜', protein: ['salmon_cooked'], ratio: [1], carb: 'quinoa_cooked', veg: 'cucumber', side: null },
+      { name: '鸡腿肉（去皮）+ 土豆 + 香菇', protein: ['chicken_thigh_cooked'], ratio: [1], carb: 'potato', veg: 'mushroom', side: null },
+      { name: '牛肉 + 米粉 + 大白菜', protein: ['beef_lean_cooked'], ratio: [1], carb: 'rice_noodle', veg: 'chinese_cabbage', side: null },
     ],
   },
   {
