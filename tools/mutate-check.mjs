@@ -120,7 +120,8 @@ const MUTATIONS = [
   { file: 'js/app.js', from: 'badgeLabel(state, x)', to: 'badgeLabel(x)', why: '徽章名要带存档参数，否则徽章墙 16 个名字全部为空（v26 真踩过）' },
   { file: 'js/icons.js', from: "  database: '<ellipse cx=\"12\" cy=\"6.4\" rx=\"7\" ry=\"2.7\"/><path d=\"M5 6.4v11.2c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7V6.4\"/><path d=\"M5 12c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7\"/>',", to: '', why: '设置页「数据与备份」的数据图标不能丢' },
   // ── 第十四轮：更新弹窗 + 称呼清理（v28）──
-  { file: 'js/version.js', from: "export const APP_VERSION = 'v28';", to: "export const APP_VERSION = 'v27';", why: '版本号必须和 CHANGELOG 最新一条、sw.js 一致（不一致手机上看版本会对不上）' },
+  // 不写死版本号：改成往版本号里插一个非法前缀（'v0v29'），下个版本不用改这条
+  { file: 'js/version.js', from: "export const APP_VERSION = '", to: "export const APP_VERSION = 'v0", why: '版本号必须合法且和 CHANGELOG 最新一条、sw.js 一致（不一致手机上看版本会对不上）' },
   { file: 'js/whatsnew.js', from: '  return Number.isFinite(x) && Number.isFinite(y) && x > y;', to: '  return Number.isFinite(x) && Number.isFinite(y) && x < y;', why: '「服务端比本地新」的方向不能反（反了就会说「有新版本」其实没有）' },
   { file: 'js/whatsnew.js', from: "  if (!lastSeen) return changelog.slice(0, 1);", to: '  if (!lastSeen) return [];', why: '老用户升级到带更新说明的版本时，至少要看一次最新一版的更新' },
   { file: 'js/app.js', from: "const STORAGE_KEY = 'fatloss.state.v2';", to: "const STORAGE_KEY = 'fatloss.state.v2'; // \u5979", why: '文案护栏：源码/文档里不许再出现第三人称（使用者是自己用的，只能叫「你」）' },

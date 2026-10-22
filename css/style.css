@@ -646,6 +646,8 @@ input:focus, select:focus, textarea:focus {
 .sheet-head .icon-btn { min-width: 40px; min-height: 40px; }
 .sheet-body { padding: 14px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 .sheet-foot { padding: 10px 14px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+/* 没有按钮的弹层不显示空白底栏（以前「我的成长」底部会多一条 25px 白边） */
+.sheet-foot:empty { display: none; border-top: 0; padding: 0; }
 
 .search-hit {
   display: flex;
@@ -869,7 +871,7 @@ details[open] summary { margin-bottom: 4px; }
   margin-bottom: 10px;
 }
 .update-ver { font-size: 13px; font-weight: 680; color: var(--rose-deep); margin-bottom: 6px; }
-.update-ver span { font-weight: 500; font-size: 11px; color: var(--ink-3); margin-left: 6px; }
+.update-ver span { font-weight: 500; font-size: 11px; color: var(--ink-2); margin-left: 6px; }
 .update-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
 .update-list li { margin: 2px 0; }
 
@@ -961,7 +963,7 @@ details[open] summary { margin-bottom: 4px; }
   place-items: center;
   background: #FFFDFC;
   border: 1px solid var(--line);
-  color: var(--ink-3);
+  color: var(--ink-2); /* 原来是 --ink-3（2.66:1，太淡），小锁要看得清 */
   box-shadow: 0 1px 3px rgba(120, 70, 85, .12);
 }
 .ach-name { font-size: 11.5px; color: var(--ink-2); text-align: center; line-height: 1.3; }

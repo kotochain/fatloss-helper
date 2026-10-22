@@ -2955,7 +2955,10 @@ function openAboutSheet() {
         存档结构：v${SCHEMA_VERSION}<br>
         <span class="tiny muted">截图这一行发我，就能知道你手机上跑的是哪一版 —— 排查问题最有用的一句话。</span>
       </div>
-      <button class="btn ghost block" id="openWhatsNew">看看每次更新都改了什么</button>`,
+      <div class="btn-row" style="margin-top:2px">
+        <button class="btn ghost grow" id="openWhatsNew">更新说明</button>
+        <button class="btn ghost grow" id="checkUpdate">检查更新</button>
+      </div>`,
     onMount: () => {
       const line = document.getElementById('swVersionLine');
       if (line) {
@@ -2963,6 +2966,7 @@ function openAboutSheet() {
         line.textContent = ctrl ? '离线缓存已接管（下次打开会自动拿到新版）' : '离线缓存未接管';
       }
       $('#openWhatsNew')?.addEventListener('click', () => openWhatsNewSheet({ entries: CHANGELOG.slice(0, 3) }));
+      $('#checkUpdate')?.addEventListener('click', manualCheckForUpdate);
     },
   });
 }
@@ -3060,6 +3064,26 @@ function openRefreshSheet(latest) {
       });
     },
   });
+}
+
+/** 「检查更新」按钮：手动问一次（不用等启动/切前台时的自动检查） */
+async function manualCheckForUpdate() {
+  toast('正在检查更新…');
+  // 顺便让浏览器去问一次 Service Worker 有没有新版（它自己也会定时问，这里只是手动催一下）
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration?.();
+    if (reg?.update) await reg.update();
+  } catch { /* 离线 / 不支持：下面的版本检查会说清楚 */ }
+  const latest = await deployedVersion();
+  if (!latest) {
+    toast('现在连不上（可能离线）。下次打开应用时我会自动再检查。');
+    return;
+  }
+  if (!isNewerVersion(latest, APP_VERSION)) {
+    toast(`已经是最新版本（${APP_VERSION}）。`);
+    return;
+  }
+  openRefreshSheet(latest);
 }
 
 /** 发现服务端版本比手机上跑的新 → 提醒刷新。同一版本次只提醒一次，别一直烦用户 */

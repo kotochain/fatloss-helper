@@ -54,18 +54,24 @@ test('更新说明：每条都完整，且最上面那条必须就是当前版�
   }
 });
 
-test('「上次看到哪个版本」→ 该给\u5979看哪几条更新', () => {
-  assert.deepEqual(updatesAfter('v27').map((e) => e.version), ['v28'], 'v27 升上来只看 v28');
-  assert.deepEqual(updatesAfter('v26').map((e) => e.version), ['v28', 'v27'], '跨两个版本要把漏掉的都补上');
-  assert.deepEqual(updatesAfter('v28'), [], '已经是最新：不弹');
-  // 没记录过（老用户第一次用上带更新的版本）：只看最新一版，不翻旧账
-  assert.deepEqual(updatesAfter('').map((e) => e.version), ['v28']);
+test('「上次看到哪个版本」→ 该给用户看哪几条更新', () => {
+  // 不写死版本号：以后每发一版都会在 CHANGELOG 前面加一条，写死的话这个测试每周都要改。
+  const latest = CHANGELOG[0].version;
+  const prev = CHANGELOG[1].version;
+  const oldest = CHANGELOG[CHANGELOG.length - 1].version;
+
+  assert.deepEqual(updatesAfter(prev).map((e) => e.version), [latest], '上一版升上来只看最新一版的说明');
+  assert.deepEqual(updatesAfter(latest), [], '已经是最新：不弹');
+  // 没记录过（老用户第一次用上带更新说明的版本）：只看最新一版，不翻旧账
+  assert.deepEqual(updatesAfter('').map((e) => e.version), [latest]);
   // 认不出的历史值：也给最新一版，宁可少给不要给错
-  assert.deepEqual(updatesAfter('v1').map((e) => e.version), ['v28']);
+  assert.deepEqual(updatesAfter('v1').map((e) => e.version), [latest]);
+  // 跨多个版本：要把「上次之后」的都补上（从新到旧；上次之前的不翻旧账）
+  assert.deepEqual(updatesAfter(oldest).map((e) => e.version), CHANGELOG.slice(0, -1).map((e) => e.version));
   // 存档结构里的字段名
-  assert.deepEqual(pendingUpdates({ settings: { lastSeenVersion: 'v27' } }).map((e) => e.version), ['v28']);
-  assert.deepEqual(pendingUpdates({}).map((e) => e.version), ['v28'], '没有 settings 时按「没记录过」处理');
-  assert.deepEqual(pendingUpdates({ settings: { lastSeenVersion: 'v28' } }), []);
+  assert.deepEqual(pendingUpdates({ settings: { lastSeenVersion: prev } }).map((e) => e.version), [latest]);
+  assert.deepEqual(pendingUpdates({}).map((e) => e.version), [latest], '没有 settings 时按「没记录过」处理');
+  assert.deepEqual(pendingUpdates({ settings: { lastSeenVersion: latest } }), []);
 });
 
 test('判断「服务端版本是不是比手机上跑的新」', () => {

@@ -345,6 +345,18 @@ async function main() {
       };
     })()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-7-settings.png`));
+
+    // 第七步半：设置 → 关于 →「检查更新」（v29）——没新版时应明确说「已经是最新版本」，
+    // 不能点了没反应（用户手动点的按钮必须给反馈）。
+    await evaluate(client, `document.querySelector('#sheetBody [data-set="about"]')?.click()`);
+    await sleep(400);
+    await evaluate(client, `document.querySelector('#checkUpdate')?.click()`);
+    await sleep(1100);
+    const aboutCheck = await evaluate(client, `(() => ({
+      有按钮: Boolean(document.querySelector('#checkUpdate')),
+      版本行: (document.querySelector('#sheetBody')?.innerText || '').match(/界面代码：\\s*(v\\d+)/)?.[1] || '',
+      提示: [...document.querySelectorAll('.toast')].map((t) => t.textContent.trim()).join(' | '),
+    }))()`);
     await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
     await sleep(300);
 
@@ -367,6 +379,41 @@ async function main() {
     await evaluate(client, `document.querySelector('#updateOk')?.click()`);
     await sleep(300);
 
+    // 第九步：刷新提醒弹窗 —— 用 CDP 拦截页面里的 sw.js 请求，返回一个「服务端版本更高」的副本，
+    // 模拟「线上已经有新版」。这是 v28 之前唯一没有自动化 UI 断言的出口（真机靠人看），现在补上。
+    const realSw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+    const curVer = (realSw.match(/const APP_VERSION = '([^']+)'/) || [])[1] || 'v1';
+    const fakeVer = `v${Number(String(curVer).replace(/^v/, '')) + 1}`;
+    const fakeSw = realSw.replace(/const APP_VERSION = '[^']+';/, `const APP_VERSION = '${fakeVer}';`);
+    await client.send('Fetch.enable', { patterns: [{ urlPattern: '*sw.js*', requestStage: 'Request' }] });
+    client.on('Fetch.requestPaused', (p) => {
+      const isPageFetch = p.resourceType === 'Fetch' || p.resourceType === 'XHR';
+      if (isPageFetch && p.request.url.includes('sw.js')) {
+        client.send('Fetch.fulfillRequest', {
+          requestId: p.requestId,
+          responseCode: 200,
+          responseHeaders: [{ name: 'Content-Type', value: 'text/javascript' }, { name: 'Cache-Control', value: 'no-store' }],
+          body: Buffer.from(fakeSw).toString('base64'),
+        }).catch(() => { /* 请求可能已经结束 */ });
+      } else {
+        client.send('Fetch.continueRequest', { requestId: p.requestId }).catch(() => { /* 同上 */ });
+      }
+    });
+    await evaluate(client, 'location.reload()');
+    await sleep(7000); // 启动 900ms + 更新检查 4s + 网络余量
+    const refresh = await evaluate(client, `(() => ({
+      标题: document.querySelector('#sheetTitle')?.textContent || '',
+      正文: (document.querySelector('#sheetBody')?.innerText || '').replace(/\\s+/g, ' ').slice(0, 160),
+      按钮: [...document.querySelectorAll('#sheetFoot .btn')].map((b) => b.textContent.trim()),
+      假版本: ${JSON.stringify(fakeVer)},
+    }))()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-9-refresh.png`));
+    await evaluate(client, `document.querySelector('#reloadLater')?.click()`);
+    await sleep(300);
+    await client.send('Fetch.disable').catch(() => { /* 已经关了 */ });
+    await evaluate(client, 'location.reload()');
+    await sleep(1500);
+
     // 第五步半：PWA 清单能不能被浏览器正确解析（决定「添加到主屏幕」是否可用）
     const manifest = await evaluate(client, `(async () => {
       const res = await fetch('manifest.webmanifest');
@@ -387,7 +434,7 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, iconAudit, growth, settings, update, profilePreview, manifest };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -430,7 +477,9 @@ function printReport(report) {
     console.log(`  成长弹层：植物插画 ${r.growth.植物} 个｜徽章图标 ${r.growth.徽章图标} 个（最小 ${r.growth.徽章尺寸}px）｜徽章名 ${r.growth.标签数} 个（空 ${r.growth.空标签} 个）｜未解锁 ${r.growth.未解锁} 个 / 锁标 ${r.growth.锁标} 个｜兜底 ${r.growth.兜底} 个`);
     if (r.growth.空标签) console.log(`       ↳ 有 ${r.growth.空标签} 个徽章没有名字（badgeLabel 少传了参数就会这样）`);
     console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜图标 ${r.settings.图标尺寸}px / 图标块 ${r.settings.图标块最小}px（要求 ≥22 / ≥34）｜兜底 ${r.settings.兜底} 个`);
+    console.log(`  关于页检查更新：按钮 ${r.aboutCheck.有按钮 ? '有' : '缺'}｜版本行 ${r.aboutCheck.版本行 || '（空）'}｜提示「${r.aboutCheck.提示}」`);
     console.log(`  更新弹窗：标题「${r.update.标题}」｜${r.update.版本}｜条目 ${r.update.条目数} 条｜按钮 ${r.update.有按钮 ? '有' : '缺'}`);
+    console.log(`  刷新弹窗：标题「${r.refresh.标题}」｜假版本 ${r.refresh.假版本}｜按钮 ${JSON.stringify(r.refresh.按钮)}`);
     console.log(`  资料页预览：${r.profilePreview}`);
     console.log(`  PWA 清单：${r.manifest.name}｜display=${r.manifest.display}｜start_url=${r.manifest.start_url}｜图标 ${r.manifest.icons.join(' ')}`);
     console.log(`  控制台报错：${s.consoleErrors.length ? s.consoleErrors.join(' | ') : '无'}`);
@@ -442,7 +491,10 @@ function printReport(report) {
       || r.growth.锁标 !== r.growth.未解锁
       || r.settings.图标 < 5 || r.settings.兜底 > 0
       || r.settings.图标 > 0 && (r.settings.图标尺寸 < 22 || r.settings.图标块最小 < 34)
-      || r.update.标题 !== '更新了什么' || r.update.条目数 < 1 || !r.update.有按钮;
+      || r.update.标题 !== '更新了什么' || r.update.条目数 < 1 || !r.update.有按钮
+      || !r.aboutCheck.有按钮 || !/最新版本/.test(r.aboutCheck.提示)
+      || r.refresh.标题 !== '有新版本了' || !r.refresh.按钮.includes('刷新，用上新版')
+      || !r.refresh.按钮.includes('先不刷新') || !r.refresh.正文.includes(r.refresh.假版本);
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
       || uiIconBad) problems += 1;
