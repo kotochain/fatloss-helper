@@ -148,11 +148,25 @@ async function boot(client, { expectReady = true } = {}) {
   // 以前写的是 #bootFail:not(.hidden)：但兜底块用的是 hidden **属性**，不是 class，
   // 选择器会永远命中 —— 线上网络慢时脚本在模块加载完成前就继续，读到空的 #app，
   // 误判「欢迎页没有入口」。这个假红真踩到过一次。
-  await waitFor(() => evaluate(client, `(() => {
-    if (window.__appReady === true) return true;
-    const box = document.querySelector('#bootFail');
-    return !!box && !box.hidden && box.getBoundingClientRect().height > 0;
-  })()`), { what: '页面启动（或启动失败兜底出现）' });
+  /*
+   * 冷启动要按顺序下载全部模块（v36 是 32 个 js 文件）。实测在慢网/代理下要 14 秒，
+   * 而 waitFor 默认 12 秒 —— 会误判成「欢迎页没有入口」（v36 发布验证时踩到，重跑必现）。
+   * 现在的语义：
+   *  1) 先老实等 `__appReady`（最多 40 秒，慢网也够）；
+   *  2) 等到超时还不行，但「没能打开」的兜底卡已经显示 → 继续往下跑，让审计如实报启动失败；
+   *  3) 既没启动、也没显示兜底 → 直接报「首屏没启动」，别在后面用 null.click 崩掉。
+   * 注意：不能像以前那样「兜底卡一出现就继续」—— 慢网下兜底卡会先于应用出现，会造成假红。
+   */
+  const started = await waitFor(() => evaluate(client, `window.__appReady === true`), {
+    what: '页面启动完成', timeoutMs: 40000,
+  }).then(() => true).catch(() => false);
+  if (!started) {
+    const failedVisible = await evaluate(client, `(() => {
+      const box = document.querySelector('#bootFail');
+      return !!box && !box.hidden && box.getBoundingClientRect().height > 0;
+    })()`);
+    if (!failedVisible) throw new Error('线上首屏 40 秒内既没启动、也没显示「没能打开」（网络太慢或部署有问题）');
+  }
   await sleep(400);
 }
 

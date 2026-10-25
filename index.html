@@ -24,19 +24,36 @@
 -->
 <script>
   window.__appReady = false;
+  /*
+   * 用捕获阶段监听：模块加载失败（404/被拦截/网络断）只会在 <script> 上触发 error，
+   * 而且**不冒泡** —— 以前没有 capture，所以模块根本没加载时它抓不到，只能等超时。
+   * 只认「脚本加载失败」和真正的 JS 异常，不因为图标/图片失败就误报。
+   */
   window.addEventListener('error', function (e) {
     if (window.__appReady) return;            // 已经正常启动，交给应用自己处理
+    var target = e && e.target;
+    var scriptFailed = target && target.tagName === 'SCRIPT';
+    var runtimeError = e && (e.message || e.error);
+    if (!scriptFailed && !runtimeError) return;
+    var loading = document.getElementById('bootLoading');
+    if (loading) loading.hidden = true;
     var box = document.getElementById('bootFail');
     if (!box) return;
     box.hidden = false;
     var detail = document.getElementById('bootFailDetail');
-    if (detail) detail.textContent = String((e && (e.message || e.error)) || '未知错误');
-  });
+    if (detail) detail.textContent = String((e && (e.message || e.error)) || '页面脚本没能加载');
+  }, true);
+  /*
+   * 8~20 秒都没跑起来才提示「没能打开」。
+   * 以前是 4 秒 —— 手机第一次打开、或者在慢网/代理下要按顺序下 30 多个模块，
+   * 实测冷启动 14 秒，于是用户会先看到一张「没能打开」的错误卡，过几秒又自己好了。
+   * 正常加载中由下面的「正在打开…」负责；真正的错误由上面的 error 监听立刻显示。
+   */
   setTimeout(function () {
     if (window.__appReady) return;
     var box = document.getElementById('bootFail');
     if (box) box.hidden = false;
-  }, 4000);
+  }, 20000);
 </script>
 
 <!-- 图标：内联 SVG，避免依赖外部图标库，也保证离线可用 -->
@@ -95,6 +112,14 @@
     </div>
     <div id="sheetBody" class="sheet-body"></div>
     <div id="sheetFoot" class="sheet-foot"></div>
+  </div>
+</div>
+
+<!-- 正在打开：慢网下先给一句人话，别让用户对着白屏（出现即用，不依赖任何外部资源） -->
+<div id="bootLoading" style="max-width:440px;margin:28px auto;padding:0 16px">
+  <div class="card" style="padding:18px 16px">
+    <div class="card-title" style="margin:0 0 6px">正在打开…</div>
+    <p class="tiny muted" style="margin:0">第一次打开、或者网络慢的时候会多等一会儿；记录都在本机，不会丢。</p>
   </div>
 </div>
 

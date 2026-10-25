@@ -4137,5 +4137,13 @@ function syncTestState() {
   };
 }
 
+/*
+ * 应用真的起来了：把「正在打开…」和慢网下可能已经弹出来的「没能打开」收回去。
+ * （index.html 的兜底脚本只负责显示，不负责隐藏；不在这里收，用户会一直看到错误卡。）
+ */
+for (const id of ['bootLoading', 'bootFail']) {
+  const el = document.getElementById(id);
+  if (el) el.hidden = true;
+}
 window.__appReady = true;
 
