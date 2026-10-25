@@ -339,3 +339,34 @@ test('只有备注/只有运动的日子也算记过（别把这类记录当空�
   addExercise(s2, d, 'walk', 30);
   assert.deepEqual(recordedDays(s2), [d]);
 });
+
+
+/*
+ * v34：AI 估的菜存成「我的食物」时，来源/原句要留住（以后能说清这数字哪来的），
+ * 同名再存只更新数字、不重复堆。
+ */
+
+test('v34：「我的食物」存来源和原句，同名再存只更新不重复', () => {
+  const s = emptyState();
+  const first = addCustomFood(s, {
+    name: '某网红限定轻食碗', kcal: 120, protein: 8, fat: 3, carb: 15,
+    source: 'ai-estimate', note: 'AI 估的营养（本地已按 4/9/4 核对）', originalText: '中午吃了某网红限定轻食碗 300 克',
+  });
+  assert.equal(s.customFoods.length, 1);
+  assert.equal(first.source, 'ai-estimate');
+  assert.ok(first.originalText.includes('轻食碗'), '原句要留着，方便日后核对');
+  assert.ok(first.createdAt);
+
+  // 同名（多了空格）再存：更新数字，不新增
+  const second = addCustomFood(s, {
+    name: ' 某网红限定轻食碗 ', kcal: 150, protein: 10, fat: 4, carb: 18, source: 'ai-estimate',
+  });
+  assert.equal(s.customFoods.length, 1, '同名不该堆出第二条（匹配永远只取第一条，后面改了也没用）');
+  assert.equal(second.id, first.id);
+  assert.equal(second.kcal, 150);
+  assert.ok(second.updatedAt);
+
+  // 手动加的不带 source 时按 manual 记
+  const manual = addCustomFood(s, { name: '某牌蛋白棒', kcal: 380, protein: 30, fat: 12, carb: 35, baseGrams: 40 });
+  assert.equal(manual.source, 'manual');
+});

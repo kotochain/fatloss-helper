@@ -214,18 +214,41 @@ export function frequentFoods(state, limit = 8) {
   return [...counter.values()].sort((a, b) => b.count - a.count).slice(0, limit);
 }
 
+/**
+ * 把一样「我的食物」存进本机（每 100 克营养）。
+ *
+ * 来源有两种：
+ *  - `manual`：照包装/手动新增；
+ *  - `ai-estimate`（v34）：AI 估的营养，过完本地校验后由「说一句」的保存流程自动存进来。
+ *    下次再说同一个名字会优先命中它（不用再让 AI 估一遍，数字也稳定）。
+ *
+ * 同名（忽略空格/大小写）已经存过就更新数字，不再追加 —— 否则反复说同一道菜会把列表撑爆，
+ * 而匹配永远只取第一条，后面的改了也没用。
+ */
 export function addCustomFood(state, food) {
-  const id = newId('c');
-  const item = {
-    id,
-    name: food.name,
-    category: 'custom',
-    kcal: food.kcal,
-    protein: food.protein,
-    fat: food.fat,
-    carb: food.carb,
+  const name = String(food?.name || '').trim().slice(0, 40);
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : 0);
+  const now = new Date().toISOString();
+  const numbers = {
+    kcal: num(food.kcal),
+    protein: num(food.protein),
+    fat: num(food.fat),
+    carb: num(food.carb),
     servings: food.servings && food.servings.length ? food.servings : [['一份', food.baseGrams || 100]],
   };
+  const meta = {
+    source: food.source === 'ai-estimate' ? 'ai-estimate' : 'manual',
+    note: food.note ? String(food.note).slice(0, 120) : '',
+  };
+  const key = name.toLowerCase().replace(/\s+/g, '');
+  const exists = state.customFoods.find((f) => String(f.name || '').toLowerCase().replace(/\s+/g, '') === key);
+  if (exists) {
+    Object.assign(exists, numbers, meta, { updatedAt: now });
+    if (food.originalText) exists.originalText = String(food.originalText).slice(0, 200);
+    return exists;
+  }
+  const item = { id: newId('c'), name, category: 'custom', ...numbers, ...meta, createdAt: now };
+  if (food.originalText) item.originalText = String(food.originalText).slice(0, 200);
   state.customFoods.push(item);
   return item;
 }

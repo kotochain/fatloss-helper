@@ -18,7 +18,7 @@ import {
 } from './exercise.js';
 import {
   parseDescription, normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
-  gramsFromText, portionGrams,
+  gramsFromText, portionGrams, cachedOnlyMatch, findPortion, gramsForPortion,
 } from './mealparse.js';
 import {
   askAi, aiStatus, currentAiConfig, saveAiConfigLocal, clearAiConfig,
@@ -1424,18 +1424,45 @@ async function runQuickParse(text, mealOverride = null) {
   let aiNote = null;
   let unmatchedItems = [];
   let normEstimated = [];
+  let normAiEstimated = [];
 
   if (aiOn()) {
-    const res = await askAi(text, { meal });
-    if (res.ok && res.items.length) {
+    /*
+     * v34：这句话如果只涉及「你之前存过的菜」（上次 AI 估过、已经存成我的食物），
+     * 本地就能说清，不再花一次 AI 请求 —— 这是「下次同名直接命中」的兑现方式。
+     * 判定很保守：除了名字只剩份量/餐次/口语词才走这里；有别的吃的就照常问 AI（见 cachedOnlyMatch）。
+     */
+    const cached = cachedOnlyMatch(text, state.customFoods);
+    if (cached) {
+      const food = cached.food;
+      const portion = findPortion(text);
+      let grams = (portion && gramsForPortion(food, portion)) || food.servings?.[0]?.[1] || 100;
+      grams = Math.max(1, Math.min(Math.round(grams), 3000));
+      const nut = calcEntry(food, grams);
+      items = [{
+        name: food.name,
+        grams,
+        kcal: nut.kcal, protein: nut.protein, fat: nut.fat, carb: nut.carb,
+        confidence: 'high',
+        needsConfirm: false,
+        source: 'my-food',
+        foodId: food.id,
+        note: '按你之前存的算的（这次没花 AI 请求）',
+      }];
+      source = 'cache';
+    } else {
+      const res = await askAi(text, { meal });
+      if (res.ok && res.items.length) {
       const norm = normalizeAiItems(
         { meal: res.meal || meal, items: res.items, questions: res.questions },
         meal,
-        { text },
+        // 「我的食物」也参与匹配：自己存过的优先，数字不靠 AI 每次发挥（v34）
+        { text, customFoods: state.customFoods },
       );
       // AI 认出来了但本地库里没有的，要原样带出去给用户看（以前是直接丢掉，用户以为记上了）
       unmatchedItems = norm.unmatchedItems || [];
       normEstimated = norm.estimated || [];
+      normAiEstimated = norm.aiEstimated || [];
       if (norm.items.length) {
         items = norm.items;
         questions = norm.questions;
@@ -1445,8 +1472,9 @@ async function runQuickParse(text, mealOverride = null) {
         source = 'ai';
         if (res.note) aiNote = res.note;
       }
-    } else {
-      aiError = res.error || 'AI 没解析出内容';
+      } else {
+        aiError = res.error || 'AI 没解析出内容';
+      }
     }
   }
 
@@ -1473,6 +1501,8 @@ async function runQuickParse(text, mealOverride = null) {
     note: aiNote,
     unmatchedItems,
     estimated: (normEstimated || []),
+    // v34：AI 直接估了营养的条目（本地已核对），记上后会存进「我的食物」
+    aiEstimated: (normAiEstimated || []),
   };
   openDraftSheet();
 }
@@ -1563,7 +1593,9 @@ function drawDraft() {
   const needsCheck = draft.items.some((it) => it.needsConfirm);
   box.innerHTML = `
     <div class="warn ${draft.source === 'ai' ? 'info' : ''}" style="margin-top:10px">
-      这次是：${draft.source === 'ai' ? 'AI 认出来的' : '离线认出来的（常见说法）'}
+      这次是：${draft.source === 'ai'
+        ? 'AI 认出来的'
+        : (draft.source === 'cache' ? '用的是你之前存过的食物（没花 AI 请求）' : '离线认出来的（常见说法）')}
       ${draft.aiError
         ? (draft.source === 'ai'
           ? `｜AI 这次没成功：${esc(draft.aiError)}`
@@ -1571,6 +1603,11 @@ function drawDraft() {
         : ''}
       ${draft.note ? `<br>${esc(draft.note)}` : ''}
     </div>
+    ${(draft.aiEstimated || []).length ? `<div class="warn" style="margin-bottom:6px">
+      有 ${draft.aiEstimated.length} 样食物库里没有，这份营养是 <b>AI 估的</b>（本地按 4/9/4 核对过）：
+      <b>${draft.aiEstimated.map((x) => esc(x)).join('、')}</b>。记上后会存进「我的食物」，下次直接认得；
+      不准就点右边的 × 删掉，或者直接改克数。
+    </div>` : ''}
     ${(draft.estimated || []).length ? `<div class="warn" style="margin-bottom:6px">
       有 ${draft.estimated.length} 样食物库里没有，先按<b>同类食物的平均值</b>估了（标签「估算」）：
       <b>${draft.estimated.map((x) => esc(x)).join('、')}</b>。不准就点右边的 × 删掉，或者直接改克数。
@@ -1582,7 +1619,7 @@ function drawDraft() {
           <div class="draft-line">
             <span class="name">${esc(it.name)}
               ${it.needsConfirm ? '<span class="tag amber">待确认</span>' : ''}
-              ${it.estimated ? '<span class="tag amber">估算</span>' : ''}
+              ${it.source === 'my-food' ? '<span class="tag">我的食物</span>' : (it.source === 'ai-estimate' ? '<span class="tag amber">AI 估的</span>' : (it.estimated ? '<span class="tag amber">估算</span>' : ''))}
               ${!it.estimated && needsPortionPick(it) ? '<span class="tag amber">份量是猜的</span>' : ''}
             </span>
             <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams" style="width:80px;padding:4px 6px;font-size:14px">
@@ -1663,19 +1700,41 @@ function drawDraft() {
     if (!draft) return;
     const items = draft.items;
     const savedMeal = draft.meal;
+    const savedText = draft.text;
     draft = null;
+    let cachedCount = 0;
     for (const it of items) {
+      // 每 100 克的数字：记录本身和「我的食物」都用它
+      const per100 = it.grams > 0
+        ? {
+          kcal: Math.round((it.kcal / it.grams) * 1000) / 10,
+          protein: Math.round((it.protein / it.grams) * 1000) / 10,
+          fat: Math.round((it.fat / it.grams) * 1000) / 10,
+          carb: Math.round((it.carb / it.grams) * 1000) / 10,
+        }
+        : null;
       addFoodEntry(state, dateKey, savedMeal, {
         id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name: it.name,
         category: 'custom',
-        kcal: it.grams > 0 ? Math.round((it.kcal / it.grams) * 1000) / 10 : it.kcal,
-        protein: it.grams > 0 ? Math.round((it.protein / it.grams) * 1000) / 10 : it.protein,
-        fat: it.grams > 0 ? Math.round((it.fat / it.grams) * 1000) / 10 : it.fat,
-        carb: it.grams > 0 ? Math.round((it.carb / it.grams) * 1000) / 10 : it.carb,
+        ...(per100 || { kcal: it.kcal, protein: it.protein, fat: it.fat, carb: it.carb }),
         servings: [['一份', it.grams]],
         fromDescription: true,
       }, it.grams);
+      /*
+       * AI 估的条目存成「我的食物」（v34）：下次同一个名字优先命中本机，
+       * 不用再让 AI 估一遍，数字也稳定。只存过了本地校验的（source 是 ai-estimate）。
+       */
+      if (it.source === 'ai-estimate' && per100) {
+        addCustomFood(state, {
+          name: it.name,
+          ...per100,
+          source: 'ai-estimate',
+          note: 'AI 估的营养（本地已按 4/9/4 核对）',
+          originalText: savedText,
+        });
+        cachedCount += 1;
+      }
     }
     const stored = save();
     const n = items.length;
@@ -1686,8 +1745,10 @@ function drawDraft() {
     // 先给一句落在「记录」这件事上的反馈，再检查有没有解锁新徽章
     const t = targets();
     const msg = afterLogMessage(state, savedMeal, t?.proteinG || 60);
+    // 存了「我的食物」时要说清：不然用户不知道下次为什么不用再等 AI
+    const extra = cachedCount ? `（${cachedCount} 样 AI 估的营养已存进「我的食物」，下次直接认得）` : '';
     // 补记昨天时，保存反馈要写清「记到昨天了」——不然用户不知道这一笔落在哪一天
-    toast(dateKey === todayKey() ? msg.text : `${msg.text}（记到${dayLabel(dateKey)}）`, msg.icon);
+    toast(dateKey === todayKey() ? `${msg.text}${extra}` : `${msg.text}（记到${dayLabel(dateKey)}）${extra}`, msg.icon);
     checkNewAchievements();
   });
   $('#draftCancel', box)?.addEventListener('click', () => {

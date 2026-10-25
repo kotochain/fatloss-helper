@@ -11,7 +11,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  KJ_PER_KCAL, normalizeUnit, energyToKcal, macroKcal, labelToPer100, checkConsistency, photoRetakeHint,
+  KJ_PER_KCAL,
+  normalizeUnit,
+  energyToKcal,
+  macroKcal,
+  labelToPer100,
+  checkConsistency,
+  photoRetakeHint,
+  validateNutritionEstimate,
 } from '../js/label.js';
 import { buildLabelPrompt, normalizeLabelResult, requestLabelParse } from '../js/ai-core.js';
 
@@ -215,4 +222,43 @@ test('照片读出来对不上时，劝用户重拍；手动填的、或只差�
   // 没填热量时没法对账，更不该说话
   assert.equal(photoRetakeHint(checkConsistency({ kcal: null, protein: 10, fat: 5, carb: 20 })), '');
   assert.equal(photoRetakeHint(null), '');
+});
+
+
+/*
+ * v34：AI 估的营养必须过本地校验。
+ * 这是「AI  bisa 估」和「AI 爱怎么编就怎么编」之间的那道门。
+ */
+
+test('v34：AI 营养估算 —— 正常的放过，每 100 克换算正确', () => {
+  const r = validateNutritionEstimate({ grams: 150, nutrition: { kcal: 450, protein: 20, fat: 38, carb: 6 } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.per100, { kcal: 300, protein: 13.3, fat: 25.3, carb: 4 });
+  assert.equal(r.recalced, false);
+  assert.ok(r.diffPct <= 30);
+});
+
+test('v34：AI 营养估算 —— 数字离谱/不全/自相矛盾要挡下来', () => {
+  assert.equal(validateNutritionEstimate({ grams: 0, nutrition: { kcal: 100, protein: 1, fat: 1, carb: 1 } }).ok, false, '份量必须大于 0');
+  assert.equal(validateNutritionEstimate({ grams: 100, nutrition: null }).ok, false, '没有营养数字');
+  assert.equal(validateNutritionEstimate({ grams: 100, nutrition: { kcal: 100 } }).ok, false, '字段不全');
+  // 每 100 克 2500 kcal：不可能
+  assert.equal(validateNutritionEstimate({ grams: 100, nutrition: { kcal: 2500, protein: 10, fat: 10, carb: 10 } }).ok, false);
+  // 每 100 克蛋白 150 克：不可能
+  assert.equal(validateNutritionEstimate({ grams: 100, nutrition: { kcal: 700, protein: 150, fat: 10, carb: 10 } }).ok, false);
+  // 只有热量、三大营养素全 0：合计会被带偏
+  assert.equal(validateNutritionEstimate({ grams: 100, nutrition: { kcal: 300, protein: 0, fat: 0, carb: 0 } }).ok, false);
+  // 热量和 4/9/4 差超过 50%：自相矛盾
+  const bad = validateNutritionEstimate({ grams: 100, nutrition: { kcal: 500, protein: 5, fat: 5, carb: 5 } });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.reason.includes('对不上'), `要说清原因：${bad.reason}`);
+});
+
+test('v34：AI 营养估算 —— 差 30%~50% 时热量按 4/9/4 重算，并标记重算过', () => {
+  // 4/9/4 = 10*4 + 5*9 + 25*4 = 185；AI 说 300（差 38%）
+  const r = validateNutritionEstimate({ grams: 100, nutrition: { kcal: 300, protein: 10, fat: 5, carb: 25 } });
+  assert.equal(r.ok, true);
+  assert.equal(r.recalced, true);
+  assert.equal(r.per100.kcal, 185);
+  assert.ok(r.diffPct > 30);
 });

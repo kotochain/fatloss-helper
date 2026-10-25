@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readApiKey, aiConfig, aiConfigStatus, buildSystemPrompt, callUpstream, normalizeResult } from '../tools/ai-proxy.mjs';
-import { parseDescription, normalizeAiItems, selfTestParser, GOLDEN_CASES, sumItems } from '../js/mealparse.js';
+import { parseDescription, normalizeAiItems, selfTestParser, GOLDEN_CASES, sumItems, cachedOnlyMatch } from '../js/mealparse.js';
 
 const CONFIG = { baseUrl: 'https://example.invalid', model: 'test-model', key: 'sk-fake-for-test' /* secret-scan:allow 假密钥 */ };
 
@@ -31,7 +31,7 @@ function fakeFetch(response, capture = {}) {
   };
 }
 
-test('上游请求带上了密钥和模型，且提示词里明确禁止模型自己编热量', async () => {
+test('上游请求带上了密钥和模型，提示词要求「给营养估算 + 本地会校验」', async () => {
   const capture = {};
   const result = await callUpstream({
     text: '食堂吃了碗牛肉面',
@@ -43,7 +43,9 @@ test('上游请求带上了密钥和模型，且提示词里明确禁止模型�
   assert.equal(capture.headers.Authorization, 'Bearer sk-fake-for-test');
   assert.equal(capture.body.model, 'test-model');
   const system = capture.body.messages[0].content;
-  assert.ok(system.includes('不要输出热量'), '提示词必须禁止模型自己编热量');
+  // v34：AI 不再只当查表员 —— 本地没有的菜要它直接估营养，数字由本地校验（见 js/label.js）
+  assert.ok(system.includes('protein') && system.includes('kcal'), '提示词必须要求模型给出营养估算');
+  assert.ok(system.includes('本地'), '要告诉模型数字会被本地核对，别乱给');
   assert.ok(capture.body.messages[1].content.includes('食堂吃了碗牛肉面'));
   assert.equal(result.items[0].name, '牛肉面');
   assert.equal(result.items[0].grams, 600);
@@ -152,7 +154,8 @@ test('AI 认出但本地库里没有的：按同类均值记上、并标明是�
     assert.ok(it.estimateId.startsWith('generic_'), '数字必须来自本地同类均值表');
     assert.equal(it.foodId, null);
   }
-  // 关键：数字只能来自本地表，不许出现「AI 编的热量」
+  // 老格式（只有 name + grams）没有营养可校验：继续按本地同类均值兜底，不许凭空出现「AI 估的」
+  // v34：这条断言不再是空转 —— 新格式确实会产生 source === 'ai-estimate'（见下面那条测试）
   assert.equal(out.items.some((i) => i.source === 'ai-estimate'), false);
   assert.equal(est[0].kcal, 450, '300 克 × 家常菜均值 150/100');
 });
@@ -311,9 +314,111 @@ test('v31 整条链路：AI 返回组合菜 + 库里没有的菜，本地都要�
   assert.ok(est.every((i) => i.estimateId.startsWith('generic_')));
 });
 
-test('v31：提示词里不许掺「AI 编热量」的口子，但允许它说库里没有的菜名', () => {
+test('v34：提示词要求给营养估算（本地没有的菜也要估），不再禁止模型给数字', () => {
   const p = buildSystemPrompt();
-  assert.ok(p.includes('不要输出热量'));
-  assert.ok(!/可以估算热量/.test(p));
-  assert.ok(p.includes('照用户的叫法写名字'));
+  // 旧的「绝对不要输出热量」红线在 v34 被推翻了：AI 现在要估营养，否则又变成查表员。
+  assert.ok(!p.includes('绝对不要输出热量'), '旧红线要删掉，否则模型不会给估算');
+  assert.ok(p.includes('必须照样估营养'), '本地没有的菜要模型估，不能只给名字');
+  assert.ok(p.includes('kcal') && p.includes('protein') && p.includes('fat') && p.includes('carb'));
+  assert.ok(p.includes('4') && p.includes('9'), '要告诉模型 4/9/4 对账关系（否则热量和营养素对不上）');
+  assert.ok(p.includes('照用户的叫法写名字'), '库里没有的菜要照实说名字，别换成别的食物');
+});
+
+
+/*
+ * v34：AI 归位 —— 本地没有的菜，AI 直接给营养估算（本地校验），
+ * 记上后存成「我的食物」，下次同名优先命中本机。这几条守的就是「AI 不再只是查表员」。
+ */
+
+test('v34：本地库命中优先，AI 估的营养不覆盖本地固定数字', () => {
+  const out = normalizeAiItems({
+    items: [
+      // 故意给一个和本地不一致的营养估算：本地命中时必须以本地为准
+      { name: '米饭', grams: 200, nutrition: { kcal: 999, protein: 1, fat: 1, carb: 1 } },
+    ],
+  });
+  assert.equal(out.items[0].source, 'ai', '本地命中还是本地算，不标成 AI 估的');
+  assert.equal(out.items[0].foodId, 'rice_cooked');
+  assert.ok(out.items[0].kcal < 400, `要用本地米饭数字，实际 ${out.items[0].kcal}`);
+  assert.deepEqual(out.aiEstimated, []);
+});
+
+test('v34：库里没有的菜，用 AI 估的营养记上（并标出是 AI 估的）', () => {
+  const out = normalizeAiItems({
+    items: [{ name: '我妈做的梅菜扣肉', grams: 150, nutrition: { kcal: 450, protein: 20, fat: 38, carb: 6 } }],
+  });
+  assert.equal(out.items.length, 1, '必须记上，不许丢');
+  const it = out.items[0];
+  assert.equal(it.source, 'ai-estimate');
+  assert.equal(it.estimated, true);
+  assert.equal(it.foodId, null);
+  assert.equal(it.kcal, 450, '这一份 150 克的总热量');
+  assert.equal(it.protein, 20);
+  // 每 100 克要存下来：保存时用它落成「我的食物」
+  assert.equal(it.per100.kcal, 300, '450 / 150 × 100');
+  assert.equal(it.per100.fat, 25.3, '38 / 150 × 100（保留 1 位）');
+  assert.deepEqual(out.aiEstimated, ['我妈做的梅菜扣肉']);
+  assert.deepEqual(out.estimated, [], '不该再走同类均值兜底');
+  assert.ok(it.note.includes('AI 估的'), `要说清来源：${it.note}`);
+});
+
+test('v34：AI 的营养数字过不了本地校验时，退回同类均值（并说清为什么）', () => {
+  const out = normalizeAiItems({
+    items: [
+      // 每 100 克 2500 kcal：离谱
+      { name: '宇宙能量块', grams: 100, nutrition: { kcal: 2500, protein: 10, fat: 10, carb: 10 } },
+      // 热量和营养素差太远（500 kcal 但 4/9/4 只有 145 kcal）
+      { name: '矛盾菜', grams: 100, nutrition: { kcal: 500, protein: 5, fat: 5, carb: 5 } },
+    ],
+  });
+  assert.equal(out.items.length, 2, '校验不过也要记上（走同类均值），不能让用户白说');
+  for (const it of out.items) {
+    assert.equal(it.source, 'estimate');
+    assert.ok(it.estimateId.startsWith('generic_'));
+    assert.ok(it.note.includes('本地校验'), `要说明 AI 的数字没通过本地校验：${it.note}`);
+  }
+  assert.deepEqual(out.aiEstimated, []);
+});
+
+test('v34：AI 热量和营养素差 30%~50% 时，热量按 4/9/4 重算并标注', () => {
+  // 4/9/4 = 10*4 + 5*9 + 25*4 = 185 kcal，AI 说 250（差 26%…这里取更明显的一组）
+  const out = normalizeAiItems({
+    items: [{ name: '某家自制便当', grams: 100, nutrition: { kcal: 300, protein: 10, fat: 5, carb: 25 } }],
+  });
+  const it = out.items[0];
+  assert.equal(it.source, 'ai-estimate');
+  assert.equal(it.kcal, 185, '热量按营养素重算');
+  assert.ok(it.warning && it.warning.includes('重算'), `要提示重算过：${it.warning}`);
+});
+
+test('v34：「我的食物」优先匹配，并说明是按自己存的算的', () => {
+  const customFoods = [{ id: 'c1', name: '某网红限定轻食碗', kcal: 120, protein: 8, fat: 3, carb: 15, servings: [['一份', 100]] }];
+  const out = normalizeAiItems(
+    { items: [{ name: '某网红限定轻食碗', grams: 200, nutrition: { kcal: 900, protein: 1, fat: 1, carb: 1 } }] },
+    null,
+    { customFoods },
+  );
+  const it = out.items[0];
+  assert.equal(it.matchedCustom, true);
+  assert.equal(it.foodId, 'c1');
+  assert.equal(it.kcal, 240, '用自己存的 120 kcal/100g × 200 克');
+  assert.ok((it.note || '').includes('你之前存的'), `要说明是按自己存的算的：${it.note}`);
+});
+
+
+test('v34：只用「我的食物」就能说清的句子，识别为「不用再问 AI」', () => {
+  const customFoods = [{
+    id: 'c1', name: '某网红限定轻食碗', source: 'ai-estimate',
+    kcal: 140, protein: 7.3, fat: 4, carb: 17.3, servings: [['一份', 300]],
+  }];
+  assert.equal(cachedOnlyMatch('下午又吃了某网红限定轻食碗200克', customFoods)?.food?.name, '某网红限定轻食碗');
+  assert.equal(cachedOnlyMatch('昨天中午吃了某网红限定轻食碗', customFoods)?.food?.name, '某网红限定轻食碗');
+  // 保守：只要还有别的食物/没认出来的词，就必须照常调 AI（宁可多一次请求，也不能悄悄漏记）
+  assert.equal(cachedOnlyMatch('吃了某网红限定轻食碗和一个苹果', customFoods), null, '「和一个苹果」不能被省掉');
+  assert.equal(cachedOnlyMatch('吃了某网红限定轻食碗和同事点的外卖', customFoods), null);
+  // 一句话里两样自己存的食物：份量归属说不清，交给 AI
+  const two = [...customFoods, { id: 'c2', name: '某牌蛋白棒', kcal: 380, protein: 30, fat: 12, carb: 35 }];
+  assert.equal(cachedOnlyMatch('吃了某网红限定轻食碗和某牌蛋白棒', two), null);
+  assert.equal(cachedOnlyMatch('随便吃了点', customFoods), null, '没有食物名就正常走 AI');
+  assert.equal(cachedOnlyMatch('吃了某网红限定轻食碗', []), null, '没有「我的食物」不省请求');
 });

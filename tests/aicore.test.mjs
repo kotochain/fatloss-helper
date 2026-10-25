@@ -143,7 +143,7 @@ test('给界面看的配置不含密钥，只含掩码', () => {
 
 /* ── AI 核心：请求与错误处理 ───────────────── */
 
-test('请求里带上密钥与模型，且 system 提示词禁止模型编热量', async () => {
+test('请求里带上密钥与模型，且提示词要求 AI 给营养估算（本地会校验）', async () => {
   let captured = null;
   const fetchImpl = async (url, init) => {
     captured = { url, body: JSON.parse(init.body), auth: init.headers.Authorization };
@@ -156,7 +156,10 @@ test('请求里带上密钥与模型，且 system 提示词禁止模型编热量
   });
   assert.equal(captured.url, 'https://api.example.com/v1/chat/completions', '末尾斜杠不该拼出双斜杠');
   assert.equal(captured.auth, 'Bearer sk-test');
-  assert.ok(captured.body.messages[0].content.includes('不要输出热量'));
+  const system = captured.body.messages[0].content;
+  // v34 推翻了旧红线：AI 要给营养估算，但必须说明本地会校验（数字不是随便编了就落库）
+  assert.ok(system.includes('kcal') && system.includes('protein'), '提示词要要求给营养估算');
+  assert.ok(!system.includes('绝对不要输出热量'), '旧红线要删掉，否则模型不敢估');
   assert.equal(r.items[0].name, '面');
   assert.equal(r.meal, null, '模型没给合法餐次时应当是 null');
   void buildSystemPrompt;
@@ -263,9 +266,9 @@ test('v31：克数容错 —— 数字、字符串、斤两、带单位都能认
   assert.equal(coerceGrams(-5), null);
 });
 
-test('v31：提示词必须要求「至少回一条」，并给出常见口语的例子', () => {
+test('v34：提示词必须要求「至少回一条」，并给出常见口语的例子', () => {
   const p = buildSystemPrompt();
-  assert.ok(p.includes('不要输出热量'), '红线不能丢：不许模型编营养数字');
+  assert.ok(p.includes('必须照样估营养'), '库里没有的菜要模型估，不能只给名字');
   assert.ok(p.includes('至少要有 1 条'), '要让模型知道「提到吃的就必须给条目」，否则用户看到的就是没听懂');
   assert.ok(p.includes('鸡蛋灌饼') && p.includes('梅菜扣肉'), '要给出用户真会说的例子');
   assert.ok(p.includes('照用户的叫法写名字'), '库里没有的菜要照实说名字，别换成别的食物');
@@ -344,4 +347,34 @@ test('v31：模型返回空 items 时会再要一次（真的什么都没有才�
   ]);
   const empty = await requestParse({ text: 'x', config: CFG, fetchImpl: emptyFetch });
   assert.deepEqual(empty.items, []);
+});
+
+
+/*
+ * v34：AI 直接给营养估算 —— 收敛层要认得这些数字，并且挡住离谱/不全的。
+ * 这是「AI 归位」的地基：认不出来就等于又退回只给名字。
+ */
+
+test('v34：normalizeResult 认得营养估算（字符串 / 嵌套 / 中文键都行）', () => {
+  const r = normalizeResult({
+    items: [
+      { name: 'A', grams: 100, kcal: '约 200', protein: '10', fat: '5', carb: '25' },
+      { name: 'B', grams: 150, nutrition: { kcal: 300, protein: 20, fat: 12, carb: 30 } },
+      { name: 'C', grams: 100, kcal: 6000, protein: 1, fat: 1, carb: 1 },
+      { name: 'D', grams: 100, kcal: 100 },
+      { name: 'E', grams: 100, 热量: 150, 蛋白质: 5, 脂肪: 5, 碳水: 20 },
+    ],
+  });
+  assert.deepEqual(r.items[0].nutrition, { kcal: 200, protein: 10, fat: 5, carb: 25 });
+  assert.deepEqual(r.items[1].nutrition, { kcal: 300, protein: 20, fat: 12, carb: 30 });
+  assert.equal(r.items[2].nutrition, null, '离谱数字不许进计算');
+  assert.equal(r.items[3].nutrition, null, '缺字段就不认（宁可不认，也不要 0 把合计带偏）');
+  assert.deepEqual(r.items[4].nutrition, { kcal: 150, protein: 5, fat: 5, carb: 20 }, '中文键也要认');
+});
+
+test('v34：只有份量说法、没有克数时，营养不留（没法换算成每 100 克）', () => {
+  const r = normalizeResult({ items: [{ name: '一碗面', portion: '一碗', kcal: 600, protein: 20, fat: 10, carb: 80 }] });
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].grams, null);
+  assert.equal(r.items[0].nutrition, null);
 });

@@ -1,9 +1,9 @@
 /* 离线缓存：装到手机主屏幕后，没有网络也能打开。
  * 改动文件后把 CACHE 的版本号加一，手机上刷新一次就会拿到新版本。 */
 
-const CACHE = 'fatloss-v33';
+const CACHE = 'fatloss-v34';
 // 版本号同时给页面用（排查「用户手机上到底是哪一版」时，一眼就能看到）
-const APP_VERSION = 'v33';
+const APP_VERSION = 'v34';
 const ASSETS = [
   './',
   './index.html',

@@ -469,13 +469,14 @@ function normName(text) {
 }
 
 /**
- * 按「名字」找本地食物 —— AI 只给名字和克数，热量必须由本地库算。
+ * 按「名字」找本地食物。
  *
- * 为什么要单独做这个：AI 返回的是 `{name, grams}`，没有数据库 id。
- * 以前这里要求 AI 提供 id 或热量（`matchedFoodId` / `kcal`），
- * 但提示词明确禁止 AI 输出热量 —— 结果**每一条都被丢掉**，AI 模式等于没工作。
+ * 为什么要单独做这个：AI 返回的是名字，没有数据库 id。以前这里要求 AI 提供 id 或热量，
+ * 但提示词又禁止 AI 输出热量 —— 结果**每一条都被丢掉**，AI 模式等于没工作。
+ * v34 起 AI 会给营养估算，但**本地命中仍然优先**：常见食物用库里的固定数字更稳；
+ * 「我的食物」（customFoods）也参与匹配，使用者自己存过的优先级最高。
  *
- * 返回 `{food, score, reason}` 或 null。宁可返回 null，也不要给一个错的食物：
+ * 返回 `{food, score, reason, custom}` 或 null。宁可返回 null，也不要给一个错的食物：
  * 匹配错了比没匹配上更糟（用户看到"炒河粉 116 kcal"会以为准，其实差了一倍）。
  *
  * 生熟口径：默认找「熟重」那条（见 detectFoodForm）；同一个食物有生/熟两条时，
@@ -484,35 +485,43 @@ function normName(text) {
  * @param {string} name
  * @param {{ minScore?: number, preferForm?: 'raw'|'cooked'|null }} options
  */
-export function matchFoodByName(name, { minScore = 70, preferForm = null } = {}) {
+export function matchFoodByName(name, { minScore = 70, preferForm = null, customFoods = [] } = {}) {
   const q = normName(name);
   if (!q) return null;
   const wantForm = preferForm || detectFoodForm(name) || 'cooked';
 
   let best = null;
-  const consider = (food, score, reason) => {
+  const consider = (food, score, reason, custom = false) => {
     // 生熟两条都匹配上时，按「想要的那条」加减 8 分来决定（不是按数组顺序，测试可抓）
     const formBonus = food.form ? (food.form === wantForm ? 8 : -8) : 0;
-    const total = score + formBonus;
-    if (!best || total > best.score) best = { food, score: total, reason };
+    // 「我的食物」优先：同名时用使用者自己存的那条，而不是库里一条名字相近的。
+    // +12 要大于生熟 +8，否则「鸡胸肉」这种熟重条目会把同名的自定义食物压过去。
+    const total = score + formBonus + (custom ? 12 : 0);
+    if (!best || total > best.score) best = { food, score: total, reason, custom };
   };
 
-  for (const food of CATALOG_FOODS) {
+  // 先看「我的食物」，再看固定食物库：使用者自己存过的优先级最高（v34）
+  const pool = [
+    ...customFoods.filter((f) => f && f.id && f.name).map((f) => ({ food: f, custom: true })),
+    ...CATALOG_FOODS.map((f) => ({ food: f, custom: false })),
+  ];
+
+  for (const { food, custom } of pool) {
     const n = normName(food.name);
     // 1) 名字完全一致（去掉括号说明后）
-    if (n === q) { consider(food, 100, '名字一致'); continue; }
+    if (n === q) { consider(food, 100, '名字一致', custom); continue; }
     // 2) 别名完全一致
     const aliases = aliasList(food);
     let aliasHit = null;
     for (const a of aliases) {
       if (normName(a) === q) { aliasHit = a; break; }
     }
-    if (aliasHit) { consider(food, 95, `别名「${aliasHit}」`); continue; }
+    if (aliasHit) { consider(food, 95, `别名「${aliasHit}」`, custom); continue; }
     // 3) 一方包含另一方，且重叠部分够长（避免「河粉」匹配到「粉蒸肉」这种）
     const short = n.length <= q.length ? n : q;
     const long = n.length <= q.length ? q : n;
     if (short.length >= 2 && long.includes(short) && short.length / long.length >= 0.5) {
-      consider(food, 70 + Math.round((short.length / long.length) * 20), '名字包含');
+      consider(food, 70 + Math.round((short.length / long.length) * 20), '名字包含', custom);
       continue;
     }
     // 4) 别名包含：AI 说「炒河粉」，库里「米粉/河粉（熟）」的别名有「河粉」
@@ -520,7 +529,7 @@ export function matchFoodByName(name, { minScore = 70, preferForm = null } = {})
       const na = normName(a);
       if (na.length < 2) continue;
       if (q.includes(na) && na.length / q.length >= 0.5) {
-        consider(food, 65 + Math.round((na.length / q.length) * 15), `别名包含「${a}」`);
+        consider(food, 65 + Math.round((na.length / q.length) * 15), `别名包含「${a}」`, custom);
       }
     }
   }

@@ -19,25 +19,27 @@ export const REQUEST_TIMEOUT_MS = 25000;
  */
 export function buildSystemPrompt() {
   return [
-    '你是一个帮中国用户记录饮食的解析器。用户会用大白话描述吃了什么，你只负责听懂和估份量。',
-    '**绝对不要输出热量、蛋白质、脂肪、碳水等营养数字**，那些由本地数据库计算。',
+    '你是一个帮中国用户记录饮食的助手：听懂用户吃了什么、估份量、估营养成分。',
     '',
     '要求：',
-    '1. 把描述拆成若干条食物，每条给出：name（中文名，用最常见的叫法，尽量具体）、grams（估算克数，整数）。',
-    '2. 只要这句话提到了吃或喝的东西（哪怕只说了一样、或者很不确定），items 里就**至少要有 1 条**。',
+    '1. 把描述拆成若干条食物，每条给出：name（中文名，用最常见的叫法，尽量具体）、grams（估算克数，整数）、',
+    '   以及这一份（grams 克）的营养：kcal（千卡）、protein（蛋白质克）、fat（脂肪克）、carb（碳水克）。',
+    '2. 本地食物库里有的常见菜，按常识估一版就行（数字会以本地库为准）；本地库里没有的菜',
+    '   （家里做的、地方小吃、新品牌）**必须照样估营养**，不要拒绝、也不要只给名字。',
+    '3. 热量要和三大营养素大致对得上（蛋白质 4、脂肪 9、碳水 4 kcal/克，误差别超过 30%）；',
+    '   拿不准就给最接近的合理值，不要留空、不要写 0 了事。',
+    '4. 只要这句话提到了吃或喝的东西（哪怕只说了一样、或者很不确定），items 里就**至少要有 1 条**。',
     '   不要返回空 items，也不要说自己看不懂 —— 按最接近的常见食物估一条，把握不大就写进 questions。',
-    '3. 常见份量参考：一小碗米饭 130 克、一碗米饭 180 克、一碗面 600 克（含汤和浇头）、一碗粥 250 克、',
+    '5. 常见份量参考：一小碗米饭 130 克、一碗米饭 180 克、一碗面 600 克（含汤和浇头）、一碗粥 250 克、',
     '   一个鸡蛋 50 克、一个包子 100 克、一个苹果 200 克、一杯牛奶 250 克、中杯奶茶 500 克、',
     '   一份盖饭 500 克、一份麻辣烫 500 克、一杯酸奶 150 克、一片吐司 35 克、一根香蕉 120 克。',
-    '4. 如果份量含糊（例如只说"吃了碗面"），按上面参考值估一个，并在 questions 里提一个最关键的追问，',
+    '6. 如果份量含糊（例如只说"吃了碗面"），按上面参考值估一个，并在 questions 里提一个最关键的追问，',
     '   例如"面大概多大一碗？（小碗/普通碗/大碗）"。最多问 2 个问题，别问不重要的。',
-    '5. 组合菜（牛肉面、盖饭、麻辣烫、火锅）算成一条，不要拆成原料再加一遍。',
-    '   但用户明确说"配了一碗饭""加了个蛋""加了肉""喝了瓶啤酒"这类**额外加的**，单独列一条。',
-    '6. 用户提到"加了蛋""加了肉""加了麻酱""喝了一瓶啤酒"这类加料，单独列一条。',
-    '7. 识别餐次放进 meal："breakfast" | "lunch" | "dinner" | "snack"；用户没说就根据上下文和当前时间判断。',
-    '8. 本地库里没有的菜（家里做的、地方小吃、新品牌）也**照用户的叫法写名字**，不要换成别的食物；',
-    '   本地会用同类均值先估，写对了才能对上。',
-    '9. 只输出 JSON，不要任何解释文字。',
+    '7. 组合菜（牛肉面、盖饭、麻辣烫、火锅）算成一条，不要拆成原料再加一遍；',
+    '   但用户明确说"配了一碗饭""加了个蛋""加肉""喝了瓶啤酒"这类**额外加的**，单独列一条。',
+    '8. 识别餐次放进 meal："breakfast" | "lunch" | "dinner" | "snack"；用户没说就根据上下文和当前时间判断。',
+    '9. 本地库里没有的菜也**照用户的叫法写名字**，不要换成别的食物；营养按你估的给，别留空。',
+    '10. 只输出 JSON，不要任何解释文字。',
     '',
     '用户可能会这样说（都按正常食物处理，不要回"看不懂"）：',
     '- "早上喝了杯豆浆，吃了个鸡蛋灌饼" → 两条',
@@ -46,8 +48,8 @@ export function buildSystemPrompt() {
     '- "喝了杯三分糖奶茶" → 奶茶 500',
     '- "就随便吃了点" → 按最常见的 1 条估，并在 questions 里问吃了什么',
     '',
-    '输出格式：',
-    '{"meal":"lunch","items":[{"name":"牛肉面","grams":600}],"questions":["面大概多大一碗？"]}',
+    '输出格式（营养是这一份的总量，不是每 100 克）：',
+    '{"meal":"lunch","items":[{"name":"牛肉面","grams":600,"kcal":630,"protein":28,"fat":18,"carb":78}],"questions":["面大概多大一碗？"]}',
   ].join('\n');
 }
 
@@ -82,6 +84,48 @@ export function coerceGrams(value) {
 }
 
 /**
+ * 模型给的数字可能是 12 / "12" / "约 12 克" —— 取第一个数；取不到返回 null。
+ * 营养数字宁可不认，也不要把「约」「克」这种文字塞进计算里。
+ */
+function coerceNum(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string') return null;
+  const m = value.match(/-?\d+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 从一条 AI 结果里取「这一份的营养」。
+ *
+ * v34 起允许模型直接给营养估算（本地库里没有的菜也能记上）。字段名放宽：
+ * kcal/calories/energy、protein/protein_g、fat、carb/carbs/carbohydrate 都认，
+ * 也认嵌套一层 nutrition 对象。四个都给全了才算数 —— 缺一个就不认，退回本地同类均值，
+ * 免得「只有热量、营养全是 0」那种假数据把合计带偏。
+ *
+ * @returns {{kcal:number,protein:number,fat:number,carb:number}|null}
+ */
+export function coerceNutrition(item) {
+  const nest = item && typeof item.nutrition === 'object' && item.nutrition ? item.nutrition : {};
+  const pickNum = (...keys) => {
+    for (const k of keys) {
+      const v = coerceNum(item?.[k] ?? nest[k]);
+      if (v !== null) return v;
+    }
+    return null;
+  };
+  const kcal = pickNum('kcal', 'calories', 'energy', 'energy_kcal', '热量');
+  const protein = pickNum('protein', 'protein_g', '蛋白质');
+  const fat = pickNum('fat', 'fat_g', '脂肪');
+  const carb = pickNum('carb', 'carbs', 'carbohydrate', 'carb_g', '碳水', '碳水化合物');
+  if ([kcal, protein, fat, carb].some((v) => v === null)) return null;
+  if (kcal < 0 || kcal > 5000) return null;
+  if ([protein, fat, carb].some((v) => v < 0 || v > 1000)) return null;
+  return { kcal, protein, fat, carb };
+}
+
+/**
  * 把上游结果收敛成固定形状，挡住乱七八糟的输出。
  *
  * v31 放宽了三处（都是为了「AI 听懂了、却还是记不上」）：
@@ -109,11 +153,14 @@ export function normalizeResult(raw) {
     const portion = portionRaw && PORTION_HINT.test(portionRaw) ? portionRaw.trim().slice(0, 20) : null;
     if (!(grams > 0) && !portion) continue;
     if (grams > 5000) continue;
+    const rounded = grams > 0 ? Math.round(grams) : null;
     items.push({
       name,
-      grams: grams > 0 ? Math.round(grams) : null,
+      grams: rounded,
       portion: portion || null,
       note: typeof it.note === 'string' ? it.note.slice(0, 60) : null,
+      // 营养是「这一份」的总量，所以必须知道这一份多少克，否则没法换算出每 100 克
+      nutrition: rounded ? coerceNutrition(it) : null,
     });
   }
 
@@ -232,7 +279,7 @@ export async function requestParse({ text, meal, hour, config, fetchImpl = fetch
     const retry = await send([
       ...baseMessages,
       { role: 'assistant', content: String(attempt.content).slice(0, 500) },
-      { role: 'user', content: '上面这段不是合法 JSON。请只输出 JSON 对象，格式：{"meal":"lunch","items":[{"name":"食物名","grams":150}],"questions":[]}' },
+      { role: 'user', content: '上面这段不是合法 JSON。请只输出 JSON 对象，格式：{"meal":"lunch","items":[{"name":"食物名","grams":150,"kcal":200,"protein":10,"fat":5,"carb":25}],"questions":[]}' },
     ], false);
     if (!retry.ok) throw new Error(humanizeHttpError(retry.status, retry.body, { model: config.model }));
     try {
@@ -249,7 +296,7 @@ export async function requestParse({ text, meal, hour, config, fetchImpl = fetch
       const retry = await send([
         ...baseMessages,
         { role: 'assistant', content: String(attempt.content).slice(0, 300) },
-        { role: 'user', content: '上一轮 items 是空的。但用户确实描述了吃了或喝了什么，请至少给出 1 条最可能的食物（name + grams），不确定的写进 questions，不要回空 items。' },
+        { role: 'user', content: '上一轮 items 是空的。但用户确实描述了吃了或喝了什么，请至少给出 1 条最可能的食物（name + grams + kcal/protein/fat/carb），不确定的写进 questions，不要回空 items。' },
       ], false);
       if (retry.ok) {
         const second = normalizeResult(extractJson(retry.content));

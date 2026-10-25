@@ -121,6 +121,61 @@ export function checkConsistency(per100) {
 }
 
 /**
+ * AI 估的营养数字：本地校验（v34）。
+ *
+ * 为什么要这一步：AI 现在可以直接估「本地库里没有的菜」的营养（以前只让它给名字，
+ * 结果最会用的大模型被当成查表员）。但估出来的数字必须能核对、能复算，否则又回到
+ * 「AI 编数字没人管」的老问题。所以先过这里：
+ *   1) 份量、上下限：每 100 克热量 ≤ 900、任一营养素 ≤ 100 克（和读标签共用同一组上限）；
+ *   2) 4/9/4 对账：蛋白×4 + 脂肪×9 + 碳水×4 与 AI 给的热量差得太远，就按营养素重算热量
+ *      （差 30%~50% 重算并标注；差超过 50% 认为数字自相矛盾，整条退回本地同类均值）。
+ *
+ * @param {{grams:number, nutrition:{kcal:number,protein:number,fat:number,carb:number}}} input
+ * @returns {{ok:true, per100:{kcal,protein,fat,carb}, recalced:boolean, diffPct:number}|{ok:false, reason:string}}
+ */
+export function validateNutritionEstimate({ grams, nutrition } = {}) {
+  const g = Number(grams);
+  if (!Number.isFinite(g) || g <= 0 || g > 3000) return { ok: false, reason: '份量不合理' };
+  if (!nutrition || typeof nutrition !== 'object') return { ok: false, reason: '没有营养数字' };
+  const pick = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const kcal = pick(nutrition.kcal);
+  const protein = pick(nutrition.protein);
+  const fat = pick(nutrition.fat);
+  const carb = pick(nutrition.carb);
+  if ([kcal, protein, fat, carb].some((v) => v === null)) return { ok: false, reason: '营养数字不全' };
+  if (kcal > 5000) return { ok: false, reason: '热量超出常识' };
+  const scale = 100 / g;
+  const per100 = {
+    kcal: round1(kcal * scale),
+    protein: round1(protein * scale),
+    fat: round1(fat * scale),
+    carb: round1(carb * scale),
+  };
+  if (per100.kcal > MAX_KCAL_PER_100) return { ok: false, reason: `每 100 克 ${per100.kcal} kcal 太高了` };
+  if ([per100.protein, per100.fat, per100.carb].some((v) => v > MAX_MACRO_PER_100)) {
+    return { ok: false, reason: '每 100 克营养素超过 100 克' };
+  }
+  if ([per100.protein, per100.fat, per100.carb].every((v) => v === 0) && per100.kcal > 5) {
+    return { ok: false, reason: '只有热量、没有营养素' };
+  }
+  const computed = round1(macroKcal(per100));
+  const diffPct = per100.kcal > 0 ? Math.abs(computed - per100.kcal) / per100.kcal * 100 : 100;
+  if (diffPct > 50) return { ok: false, reason: '热量和营养素对不上（差超过 50%）' };
+  let recalced = false;
+  if (diffPct > 30) {
+    // 数字自相矛盾时，热量按 4/9/4 重算 —— 营养素是模型给的原始信息，热量可以由它决定
+    per100.kcal = computed;
+    recalced = true;
+  }
+  if (!(per100.kcal > 0)) return { ok: false, reason: '重算后热量为 0' };
+  return { ok: true, per100, recalced, diffPct: round1(diffPct) };
+}
+
+/**
  * 照片读出来的数字自己对不上时，额外要告诉用户「怎么办」。
  *
  * 为什么需要单独一句：这些数字用户没敲过，是「读出来的」，所以看到「对不上」也不知道该改哪个 ——

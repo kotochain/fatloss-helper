@@ -4,8 +4,9 @@
  * 这里做两件事：
  *  1) 离线解析（parseDescription）：靠关键词匹配 + 份量推断，把用户说的东西拆成几项。
  *     解析不了的会标成「需要确认」，界面负责反问用户。
- *  2) 整理 AI 返回的结果（normalizeAiItems）：AI 负责听懂，但热量一律由本地数据算，
- *     不让模型自己编数字 —— 那样就没法核对，也没法离线复算。
+ *  2) 整理 AI 返回的结果（normalizeAiItems）：本地库/「我的食物」命中时用本地数字；
+ *     本地没有的菜，AI 现在可以直接给营养估算，但必须过本地校验（4/9/4 对账 + 上下限），
+ *     过不了就退回同类均值 —— 数字始终能核对、能离线复算。
  *
  * 统一的中间结果叫「条目（item）」：
  *   { name, grams, kcal, protein, fat, carb, confidence, confidenceReason,
@@ -19,6 +20,7 @@
 
 import { FOODS, ALIASES, findFood, findMatchableFood, parseAmount, matchFoodByName, detectFoodForm, genericEstimateFor } from './foods.js';
 import { DISHES } from './dishes.js';
+import { validateNutritionEstimate } from './label.js';
 
 // 老代码/测试从 mealparse 里取 DISHES，这里继续转出去，避免调用方改动
 export { DISHES };
@@ -761,19 +763,23 @@ export function parseDescription(raw, defaultMeal = null) {
 }
 
 /**
- * 整理 AI 返回的条目：热量一律用本地数据算，AI 只负责听懂和给份量。
+ * 整理 AI 返回的条目。
  *
- * AI 返回格式（约定）：{ meal, items: [{ name, grams, note? }], questions: [string] }
+ * 优先级（v34，用户明确要求「AI 要像助手，不是查表员」）：
+ *  1) 本地食物库 / 「我的食物」命中 → 用本地固定数字（稳定、可离线复算）；
+ *  2) 本地没有、但 AI 给了这一份的营养 → 过本地校验（4/9/4 + 上下限）后直接用；
+ *  3) 都没有（或 AI 的数字不可信）→ 按同类均值兜底，标明估算（v31 的行为）。
  *
- * **重要修正**：这里以前要求 AI 提供 `matchedFoodId`（数据库 id）或 `kcal`，
- * 但系统提示词明确禁止 AI 输出热量，也从没让它给 id —— 结果**每一条都被丢掉**，
- * AI 模式实际上从来没工作过（只是白花一次调用，然后悄悄退回离线解析）。
- * 现在改成：拿到 AI 给的名字，**由本地自己匹配食物**（matchFoodByName）。
+ * AI 返回格式（v34）：{ meal, items: [{ name, grams, nutrition? }], questions: [] }
  *
- * 匹配不上也不静默丢弃：放进 `unmatched` 让界面明确告诉用户「认出来了，但库里没有」。
+ * **老格式（只有 name + grams）必须继续能记上** —— 换模型/换服务商时它们不一定按新提示词回，
+ * 那时退回第 3 步，而不是「一条都记不上」。
  */
-export function normalizeAiItems(aiResult, defaultMeal = null, { text = '' } = {}) {
-  const out = { items: [], meal: aiResult?.meal || defaultMeal, questions: [], unmatched: [], unmatchedItems: [], estimated: [] };
+export function normalizeAiItems(aiResult, defaultMeal = null, { text = '', customFoods = [] } = {}) {
+  const out = {
+    items: [], meal: aiResult?.meal || defaultMeal, questions: [],
+    unmatched: [], unmatchedItems: [], estimated: [], aiEstimated: [],
+  };
   // 生熟按「用户原句」判断（AI 通常只会回「鸡胸肉」，但用户可能说的是「生鸡胸肉」）
   const preferForm = detectFoodForm(text) || null;
   const list = Array.isArray(aiResult?.items) ? aiResult.items : [];
@@ -787,15 +793,17 @@ export function normalizeAiItems(aiResult, defaultMeal = null, { text = '' } = {
     let grams = Number(raw?.grams);
     if (!(grams > 0) || grams > 5000) grams = null;
 
-    // 先看 AI 有没有直接给 id（一般没有），没有就按名字在本地库里找
+    // 先看 AI 有没有直接给 id（一般没有），没有就按名字在本地库 + 「我的食物」里找
     let food = raw?.matchedFoodId ? findMatchableFood(raw.matchedFoodId) : null;
     let matchedBy = food ? 'AI 给的 id' : null;
+    let matchedCustom = false;
     if (!food) {
-      const hit = matchFoodByName(name, { preferForm: preferForm || detectFoodForm(name) });
-      if (hit) { food = hit.food; matchedBy = hit.reason; }
+      const hit = matchFoodByName(name, { preferForm: preferForm || detectFoodForm(name), customFoods });
+      if (hit) { food = hit.food; matchedBy = hit.reason; matchedCustom = Boolean(hit.custom); }
     }
 
     if (food) {
+      // 1) 本地命中：数字以本地为准（AI 估的营养只用于本地没有的条目）
       if (!(grams > 0)) grams = (portion && gramsForPortion(food, portion)) || food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || 100;
       grams = Math.min(Math.round(grams), 3000);
       const nut = scaleNutrition({ kcal: food.kcal, protein: food.protein, fat: food.fat, carb: food.carb }, grams, 100);
@@ -809,35 +817,71 @@ export function normalizeAiItems(aiResult, defaultMeal = null, { text = '' } = {
         source: 'ai',
         foodId: food.id,
         foodName: food.name,
+        matchedCustom,
         // AI 说的名字和库里名字不一样时告诉用户对应到哪一个，避免用户以为记错了
-        note: nameDiffers ? `按「${food.name}」算的（${matchedBy}）` : (raw.note || null),
+        // 命中「我的食物」时永远标出来：数字是你自己存的（也是上次 AI 估的），不是这次又估的
+        note: matchedCustom
+          ? `按你之前存的「${food.name}」算的`
+          : (nameDiffers ? `按「${food.name}」算的（${matchedBy}）` : (raw.note || null)),
       });
-    } else {
-      // **v31：认出来了但本地库没有 —— 不再让用户白说一句。**
-      // 按名字归到「肉菜 / 主食 / 甜点 / 饮料…」里给一个同类均值先记上，界面上写明是估算、可以删。
-      // 数字来自本地写死的表（见 foods.js 的 GENERIC_ESTIMATES），不是模型编的。
-      const generic = genericEstimateFor(name);
-      if (!(grams > 0)) grams = (portion && portion.grams) || generic.servings?.[0]?.[1] || 200;
-      grams = Math.min(Math.round(grams), 3000);
-      const nut = scaleNutrition(generic, grams, 100);
+      continue;
+    }
+
+    // 2) 本地没有：AI 给了这一份的营养，本地先校验（v34）
+    const checked = grams > 0 && raw?.nutrition
+      ? validateNutritionEstimate({ grams, nutrition: raw.nutrition })
+      : null;
+    if (checked?.ok) {
+      const p100 = checked.per100;
+      const nut = scaleNutrition(p100, grams, 100);
       out.items.push({
         name,
-        grams,
+        grams: Math.round(grams),
         ...nut,
-        confidence: 'low',
-        confidenceReason: '食物库里没有这样东西，先按平均值估的',
-        portionChoices: buildPortionChoices(generic, grams),
+        // 存成「我的食物」要用每 100 克的数字（下次按克数直接算）
+        per100: p100,
+        confidence: 'medium',
+        confidenceReason: '食物库里没有这样东西，这份营养是 AI 估的（本地已核对）',
         needsConfirm: false,
-        source: 'estimate',
-        foodId: null,
+        source: 'ai-estimate',
         estimated: true,
-        estimateId: generic.id,
-        note: `食物库里没有「${name}」，先按「${generic.name.replace(/（.*?）/g, '')}」的平均值估的；不准就删掉或改克数`,
+        estimateSource: 'ai',
+        foodId: null,
+        note: checked.recalced
+          ? `热量和营养素对不上，已按 4/9/4 重算（原差 ${checked.diffPct}%）；记上后会存进「我的食物」`
+          : '这份营养是 AI 估的（本地已核对）；记上后会存进「我的食物」，下次直接认得',
+        ...(checked.recalced ? { warning: `AI 给的热量和营养素差 ${checked.diffPct}%，热量按蛋白/脂肪/碳水重算过` } : {}),
       });
-      out.unmatched.push(name);
-      out.unmatchedItems.push({ name, grams, estimateId: generic.id });
-      out.estimated.push(name);
+      out.aiEstimated.push(name);
+      continue;
     }
+
+    // 3) 连 AI 也没给可信数字 → 同类均值兜底（v31 起的行为，绝不让用户白说一句）
+    // 数字来自本地写死的表（见 foods.js 的 GENERIC_ESTIMATES），不是模型编的。
+    const generic = genericEstimateFor(name);
+    if (!(grams > 0)) grams = (portion && portion.grams) || generic.servings?.[0]?.[1] || 200;
+    grams = Math.min(Math.round(grams), 3000);
+    const nut = scaleNutrition(generic, grams, 100);
+    const why = checked && !checked.ok && checked.reason ? `：${checked.reason}` : '';
+    out.items.push({
+      name,
+      grams,
+      ...nut,
+      confidence: 'low',
+      confidenceReason: '食物库里没有这样东西，先按平均值估的',
+      portionChoices: buildPortionChoices(generic, grams),
+      needsConfirm: false,
+      source: 'estimate',
+      foodId: null,
+      estimated: true,
+      estimateId: generic.id,
+      note: checked && !checked.ok
+        ? `食物库里没有「${name}」，AI 估的数字没通过本地校验（${checked.reason}），先按「${generic.name.replace(/（.*?）/g, '')}」的平均值估的；不准就删掉或改克数`
+        : `食物库里没有「${name}」，先按「${generic.name.replace(/（.*?）/g, '')}」的平均值估的；不准就删掉或改克数`,
+    });
+    out.unmatched.push(name);
+    out.unmatchedItems.push({ name, grams, estimateId: generic.id });
+    out.estimated.push(name);
   }
 
   // 有问题要问，但**只有真有条目时才问** ——
@@ -849,6 +893,47 @@ export function normalizeAiItems(aiResult, defaultMeal = null, { text = '' } = {
   }
   return out;
 }
+
+/**
+ * 「这句话是不是只用你之前存过的某样食物就能说清」—— 能说清就不花 AI 请求（v34）。
+ *
+ * 场景：使用者上次用 AI 估了一道本地库里没有的菜（比如「某网红限定轻食碗」），
+ * 保存时它被存进「我的食物」；下次再说「下午又吃了某网红限定轻食碗 200 克」，
+ * 其实不需要再问模型 —— 名字和份量本地都认得。
+ *
+ * 判定必须**保守**：名字之外的文字只允许剩下份量/餐次/口语词（去掉后少于 2 个字），
+ * 一旦还有没覆盖的词（「……和一碗饭」），就照常调用 AI ——
+ * 宁可多花一次请求，也绝不允许因为省请求而悄悄漏记东西。
+ *
+ * @returns {{food:object, leftover:string}|null}
+ */
+export function cachedOnlyMatch(rawText, customFoods = []) {
+  const text = String(rawText || '').trim();
+  if (!text) return null;
+  // 自己存的食物都算（照包装手动加的、AI 估的）：名字够长才参与，避免「饭」这种单字误伤
+  const candidates = (customFoods || []).filter((f) => f && String(f.name || '').length >= 2);
+  if (!candidates.length) return null;
+  let rest = text;
+  let hit = null;
+  for (const f of candidates) {
+    const name = String(f.name);
+    if (!rest.includes(name)) continue;
+    // 一句话里出现两样「我的食物」：份量归属说不清（哪个词配哪样），交给 AI
+    if (hit) return null;
+    hit = f;
+    rest = rest.split(name).join(' ');
+  }
+  if (!hit) return null;
+  const leftover = rest
+    .replace(/[0-9０-９]+(\.[0-9]+)?/g, ' ')
+    .replace(CACHED_ONLY_NOISE, ' ')
+    .replace(/[\s，,。.、！!?？:：;；()（）【】]/g, '');
+  if (leftover.length >= 2) return null;
+  return { food: hit, leftover };
+}
+
+/** cachedOnlyMatch 允许出现的「非食物」文字：餐次、吃/喝、份量、口语 */
+const CACHED_ONLY_NOISE = /(今天|昨天|前天|早上|上午|中午|下午|晚上|夜宵|早餐|午饭|晚饭|加餐|吃了|喝的|吃的|喝完|吃|喝|又|还|再|大概|大约|左右|差不多|一份|一碗|一个|一杯|半|几|些|点|了|的|克|g|ml|毫升|斤|两|个|碗|份|杯|瓶|盘|盒|袋|包|块|片|根|只|颗|粒|把|勺)/g;
 
 /** 比较名字用的宽松归一化 */
 function normLoose(text) {

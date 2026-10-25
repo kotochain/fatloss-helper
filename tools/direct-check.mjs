@@ -101,15 +101,31 @@ function startFakeProvider() {
           res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ choices: [{ message: { content: coachText } }] }));
         }
+        // v34：这一句故意让假上游按「新格式」回营养估算（本地库里没有的菜）
+        const isEstimateCase = userText.includes('某网红限定轻食碗');
+        const estimateGrams = userText.includes('200') ? 200 : 300;
+        const per100 = { kcal: 140, protein: 7.3, fat: 4, carb: 17.3 };
+        const at = (v) => Math.round((v * estimateGrams) / 100 * 10) / 10;
         const content = isPing
           ? '可以'
-          : JSON.stringify({
-            meal: 'dinner',
-            // 故意用离线解析认不出来的说法：如果 AI 的结果被丢掉、退回离线解析，
-            // 这三条一条都记不上（以前就是这样，界面还显示「AI 识别」，骗过了所有自检）。
-            items: [{ name: '炒河粉', grams: 200 }, { name: '小肉丸', grams: 60 }, { name: '骨肉相连', grams: 80 }],
-            questions: ['炒河粉的碗大概多大？'],
-          });
+          : isEstimateCase
+            ? JSON.stringify({
+              meal: 'lunch',
+              items: [{
+                name: '某网红限定轻食碗',
+                grams: estimateGrams,
+                kcal: at(per100.kcal), protein: at(per100.protein), fat: at(per100.fat), carb: at(per100.carb),
+              }],
+              questions: [],
+            })
+            : JSON.stringify({
+              meal: 'dinner',
+              // 故意用离线解析认不出来的说法：如果 AI 的结果被丢掉、退回离线解析，
+              // 这三条一条都记不上（以前就是这样，界面还显示「AI 识别」，骗过了所有自检）。
+              // v34 起这三条不带营养（老格式）→ 必须继续按同类均值兜底，不能一条都记不上。
+              items: [{ name: '炒河粉', grams: 200 }, { name: '小肉丸', grams: 60 }, { name: '骨肉相连', grams: 80 }],
+              questions: ['炒河粉的碗大概多大？'],
+            });
         res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ choices: [{ message: { content } }] }));
       });
@@ -358,6 +374,90 @@ async function main() {
 
   const shot = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-direct-ai.png'), Buffer.from(shot.data, 'base64'));
+
+  console.log('\n=== 三·三、AI 直接估营养（本地库里没有的菜）+ 存成「我的食物」 ===');
+  // v34 的核心：AI 不再只当查表员。这一条走真实界面：
+  // 假上游按新格式回「某网红限定轻食碗 300g + 营养估算」→ 本地校验 → 存成「我的食物」→ 下次命中。
+  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
+  await sleep(400);
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '中午吃了某网红限定轻食碗 300 克';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#quickParse').click();
+  })()`);
+  await sleep(2500);
+  const estimateUi = await evaluate(`(() => {
+    const row = document.querySelector('#draftHost .draft-entry');
+    return {
+      行数: document.querySelectorAll('#draftHost .draft-entry').length,
+      标签: row?.querySelector('.tag.amber')?.textContent.trim() || '',
+      热量: row?.querySelector('[data-kcal]')?.textContent || '',
+      说明: row?.querySelector('.draft-note')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+      顶部提示: [...document.querySelectorAll('#draftHost .warn')].map((w) => w.textContent.replace(/\\s+/g, ' ').trim()).join(' ｜ ').slice(0, 200),
+    };
+  })()`);
+  console.log(`   AI 估营养 → ${estimateUi.行数} 行｜标签「${estimateUi.标签}」｜${estimateUi.热量}｜说明「${estimateUi.说明}」`);
+  console.log(`   顶部提示：${estimateUi.顶部提示}`);
+  if (estimateUi.行数 !== 1) problems.push(`AI 估营养这条应当 1 行，实际 ${estimateUi.行数} 行`);
+  if (estimateUi.标签 !== 'AI 估的') problems.push(`库里没有的菜要标「AI 估的」，实际「${estimateUi.标签}」`);
+  if (!/420/.test(estimateUi.热量)) problems.push(`应当显示 AI 估的 420 kcal，实际「${estimateUi.热量}」`);
+  if (!estimateUi.说明.includes('AI 估的')) problems.push(`说明里要写清是 AI 估的：${estimateUi.说明}`);
+  if (!estimateUi.顶部提示.includes('AI 估的')) problems.push('顶部提示没有说明哪几样是 AI 估的');
+
+  await evaluate(`document.querySelector('#draftSave').click()`);
+  await sleep(700);
+  const savedEstimate = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    const cf = (st.customFoods || []).find((f) => f.name.includes('轻食碗'));
+    const entry = Object.values(st.days[Object.keys(st.days)[0]].meals).flat().find((e) => e.food.name.includes('轻食碗'));
+    return {
+      存进我的食物: Boolean(cf),
+      来源: cf?.source || null,
+      每百克: cf ? Math.round(cf.kcal) : null,
+      原句: cf?.originalText || '',
+      记录热量: entry ? Math.round((entry.food.kcal / 100) * entry.grams) : null,
+      反馈: [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' | '),
+    };
+  })()`);
+  console.log('   保存后 →', JSON.stringify(savedEstimate));
+  if (!savedEstimate.存进我的食物) problems.push('AI 估的条目保存后没有存进「我的食物」（下次还得再问 AI）');
+  if (savedEstimate.来源 !== 'ai-estimate') problems.push(`「我的食物」没记录来源，实际 ${savedEstimate.来源}`);
+  if (!(Math.abs((savedEstimate.每百克 || 0) - 140) <= 1)) problems.push(`每 100 克应当是 140 kcal 左右，实际 ${savedEstimate.每百克}`);
+  if (!savedEstimate.原句.includes('轻食碗')) problems.push(`没有留住原始句子：${savedEstimate.原句}`);
+  if (!savedEstimate.反馈.includes('我的食物')) problems.push('保存反馈没有告诉用户「已存进我的食物」');
+
+  // 再说一次同样的菜：必须命中「我的食物」，数字用自己存的，并说明是按之前存的算的；
+  // 而且这次**不许再发 AI 请求**（v34：只涉及之前存过的菜，本地就能说清）
+  const chatsBeforeCached = hits.chat;
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '下午又吃了某网红限定轻食碗 200 克';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#quickParse').click();
+  })()`);
+  await sleep(2200);
+  const cached = await evaluate(`(() => {
+    const row = document.querySelector('#draftHost .draft-entry');
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    return {
+      标签: row?.querySelector('.tag.amber')?.textContent.trim() || '',
+      热量: row?.querySelector('[data-kcal]')?.textContent || '',
+      说明: row?.querySelector('.draft-note')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+      来源: document.querySelector('#draftHost .warn')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 40) || '',
+      我的食物条数: (st.customFoods || []).length,
+    };
+  })()`);
+  console.log(`   再说一次 → 标签「${cached.标签}」｜${cached.热量}｜说明「${cached.说明}」｜我的食物 ${cached.我的食物条数} 条`);
+  if (!(Math.abs(Number((cached.热量 || '').replace(/[^0-9.]/g, '')) - 280) <= 2)) problems.push(`命中「我的食物」后应当 140×2=280 kcal，实际「${cached.热量}」`);
+  if (!cached.说明.includes('你之前存的')) problems.push(`命中自己存的食物时要说明，实际「${cached.说明}」`);
+  if (!cached.来源.includes('之前存过的食物')) problems.push(`来源要写清「用的是你之前存过的食物」，实际「${cached.来源}」`);
+  if (cached.我的食物条数 !== 1) problems.push(`同名不该重复存，实际 ${cached.我的食物条数} 条`);
+  const cachedChats = hits.chat - chatsBeforeCached;
+  console.log(`   这次新增 AI 请求：${cachedChats} 次`);
+  if (cachedChats !== 0) problems.push(`只涉及之前存过的菜，却又发了 ${cachedChats} 次 AI 请求（说好的省请求呢）`);
+  await evaluate(`document.querySelector('#draftCancel')?.click(); true`);
+  await sleep(300);
 
   console.log('\n=== 三·二、切到普通模式后，真的不再发请求（「不花钱」得由代码兑现）===');
   // 这条守的是真事故级问题：模式以前只改文案，配过密钥后切到普通模式照样调 AI。
@@ -618,7 +718,7 @@ async function main() {
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill(), () => fake.close(), () => staticServer.close()]);
 }
 
-armWatchdog('direct-check.mjs', 300);
+armWatchdog('direct-check.mjs', 330);
 
 // 失败路径也必须收尾：只设 exitCode 的话进程会一直挂着（被看门狗杀掉 → 退出码又变了）
 main().catch((err, cleanup) => {
