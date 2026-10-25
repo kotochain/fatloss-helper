@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDescription, buildPortionChoices, portionKindOf } from '../js/mealparse.js';
+import { parseDescription, buildPortionChoices, portionKindOf, normalizeAiItems } from '../js/mealparse.js';
 import { findFood } from '../js/foods.js';
 
 /** 取一条 item，找不到就直接失败（比 `?.` 静默通过好：静默通过会让测试变成摆设） */
@@ -246,4 +246,74 @@ test('组合菜「一碗」= 一份，不是通用碗重 350 克', () => {
   const b = item('中午吃了碗牛肉面', '牛肉面');
   assert.equal(a.grams, b.grams, `两种说法必须一致：${a.grams} 克 vs ${b.grams} 克`);
   assert.ok(a.grams >= 500, `一碗牛肉面至少 500 克，实际 ${a.grams}`);
+});
+
+test('v31：食物别名进了离线词典（以前只有搜索和 AI 能用，离线看不见）', () => {
+  // 这些说法以前离线整句认不出来：AI 没开 / AI 没接上时，用户只能重说
+  const cases = [
+    ['一杯酸奶', '无糖酸奶', 150],
+    ['半斤牛奶', '全脂牛奶', 250],
+    ['一块蛋糕', '奶油蛋糕', 100],
+    ['两碗粥', '白粥', 500],
+    ['一根香蕉', '香蕉', 120],
+    ['一小把杏仁', '巴旦木/杏仁', 25],
+    ['吃了一颗糖', '白砂糖', 8],
+    ['两片吐司', '白吐司', 70],
+  ];
+  for (const [text, name, grams] of cases) {
+    const r = parseDescription(text);
+    const it = r.items.find((x) => x.name === name);
+    assert.ok(it, `「${text}」里没解析出「${name}」，实际：${r.items.map((x) => x.name).join('/')}`);
+    assert.equal(it.grams, grams, `「${text}」的克数不对`);
+  }
+});
+
+test('v31：一句话里几样东西都要记上（不能再只记第一样）', () => {
+  const r = parseDescription('早上喝了杯豆浆，吃了个鸡蛋灌饼');
+  assert.deepEqual(r.items.map((x) => x.name), ['无糖豆浆', '鸡蛋灌饼']);
+  assert.equal(r.items[0].grams, 300);
+  assert.equal(r.items[1].grams, 200);
+
+  const r2 = parseDescription('喝了杯橙汁，吃了块鸡排');
+  assert.equal(r2.items.length, 2);
+});
+
+test('v31：单字词只在水词是「买的东西」时才算食物（晚饭≠一碗饭）', () => {
+  // 「晚饭吃了一碗米饭」以前会记出两条米饭（晚饭的「饭」+ 米饭），热量凭空多一倍
+  const r = parseDescription('晚饭吃了一碗米饭，一份宫保鸡丁，一杯酸奶');
+  const rice = r.items.filter((x) => x.name === '米饭（熟）');
+  assert.equal(rice.length, 1, `米饭被记了 ${rice.length} 次：${r.items.map((x) => x.name)}`);
+  assert.equal(rice[0].grams, 180);
+});
+
+test('v31：食堂打饭 + 三样具体菜时，不能一顿算成两顿', () => {
+  const r = parseDescription('食堂打了三个菜：土豆丝、青椒肉丝、炒青菜');
+  assert.ok(!r.items.some((x) => x.name.includes('食堂打饭')), '有具体菜时不该再用泛称套餐兜底');
+  for (const name of ['炒土豆丝', '青椒肉丝', '炒青菜（家常油量）']) {
+    assert.ok(r.items.some((x) => x.name === name), `少了「${name}」：${r.items.map((x) => x.name)}`);
+  }
+});
+
+test('v31：AI 说组合菜的名字也要能对上本地库', () => {
+  const r = normalizeAiItems({
+    items: [
+      { name: '黄焖鸡米饭', grams: 550 },
+      { name: '馄饨', grams: 300 },
+      { name: '盖饭', grams: 500 },
+      { name: '烧烤', grams: 400 },
+    ],
+  });
+  assert.deepEqual(r.items.map((x) => x.foodId), ['huangmenji', 'wonton_meal', 'set_rice', 'bbq_meal']);
+  assert.equal(r.items[0].kcal, 780, '黄焖鸡米饭 550 克 = 780 kcal');
+});
+
+test('v31：AI 只给「一碗」这种说法、或者干脆没给份量，也不能丢', () => {
+  const r = normalizeAiItems({
+    items: [
+      { name: '馄饨', portion: '一碗' },
+      { name: '酸菜鱼', portion: '一碗' },
+      { name: '寿司' },
+    ],
+  });
+  assert.deepEqual(r.items.map((x) => x.grams), [300, 500, 25], '一碗馄饨=一份 300，一碗酸菜鱼=500，寿司默认一贯 25');
 });

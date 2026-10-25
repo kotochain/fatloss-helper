@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FOODS, FOOD_CATEGORIES, checkFoodData, findFood, parseAmount, ALIASES, kcalOnlyFood, matchFoodByName } from '../js/foods.js';
+import { FOODS, FOOD_CATEGORIES, checkFoodData, findFood, parseAmount, ALIASES, kcalOnlyFood, matchFoodByName, CATALOG_FOODS, genericEstimateFor } from '../js/foods.js';
 import { calcEntry } from '../js/calc.js';
 import { searchFoods, normalize } from '../js/foodlog.js';
 
@@ -55,7 +55,12 @@ test('反向验证：把一条数据改坏，自检必须报错', () => {
 
 test('反向验证：源文件里真的存在这些数据条目（不是测试里另造一份）', () => {
   const src = fs.readFileSync(path.join(root, 'js', 'foods.js'), 'utf8');
-  const inFile = (src.match(/\{ id: '/g) || []).length;
+  // 只数 FOODS 数组里那段：文件里还有 GENERIC_ESTIMATES（同类均值兜底）等带 id 的对象，
+  // 数整份文件会把它们算进来（v31 就因此误报过一次）。
+  const start = src.indexOf('export const FOODS = [');
+  const end = src.indexOf('\n];', start);
+  assert.ok(start > 0 && end > start, 'foods.js 里找不到 FOODS 数组');
+  const inFile = (src.slice(start, end).match(/\{ id: '/g) || []).length;
   assert.equal(inFile, FOODS.length, `源文件里 ${inFile} 条，导入后有 ${FOODS.length} 条`);
   assert.ok(src.includes("id: 'rice_cooked'"));
 });
@@ -208,4 +213,64 @@ test('只填热量：离谱数字要挡住，不能悄悄记进去', () => {
   // 边界值应当通过
   assert.equal(kcalOnlyFood({ kcal: 5000 }).ok, true);
   assert.equal(kcalOnlyFood({ kcal: 50, protein: 12 }).ok, true, '50 kcal / 12 克蛋白（48 kcal）是合理的边缘');
+});
+
+test('v31 补的常见菜真的在库里，而且 4/9/4 对得上', () => {
+  // 起因：AI 听懂了「黄焖鸡米饭」「馄饨」「酸菜鱼」，本地库里没有 → 一条都记不上。
+  for (const [name, kcal] of [
+    ['酸菜鱼', 110], ['肉夹馍', 290], ['小笼包', 230], ['烤冷面', 210],
+    ['皮蛋瘦肉粥', 60], ['薯条', 312], ['混合坚果', 600],
+  ]) {
+    const f = FOODS.find((x) => x.name === name);
+    assert.ok(f, `食物库里没有「${name}」`);
+    assert.equal(f.kcal, kcal, `${name} 热量应为 ${kcal}`);
+    assert.ok(f.servings.length > 0, `${name} 没给份量`);
+  }
+  assert.ok(FOODS.length >= 160, `食物条数 ${FOODS.length}，低于预期`);
+});
+
+test('组合菜（一整顿）也能被名字匹配到，不再只认食材表', () => {
+  // 以前这些只在 mealparse 的组合菜表里：AI 说出名字 → matchFoodByName 找不到 → 记不上
+  for (const [q, id] of [
+    ['黄焖鸡米饭', 'huangmenji'], ['馄饨', 'wonton_meal'], ['烧烤', 'bbq_meal'],
+    ['盖饭', 'set_rice'], ['三明治', 'sandwich'], ['食堂打饭', 'canteen_rice'],
+  ]) {
+    assert.equal(matchFoodByName(q)?.food.id, id, `「${q}」应当匹配到组合菜 ${id}`);
+  }
+  // 组合菜要算进「可匹配目录」，不然刚修好的又白修
+  assert.ok(CATALOG_FOODS.some((f) => f.id === 'huangmenji'));
+  assert.ok(CATALOG_FOODS.some((f) => f.id === 'chicken_breast_cooked'), '食材也要在');
+});
+
+test('常见菜的口语别名：番茄炒蛋、宫爆鸡丁、泡面这些说法也要认', () => {
+  assert.equal(matchFoodByName('番茄炒蛋')?.food.id, 'tomato_egg');
+  assert.equal(matchFoodByName('西红柿炒蛋')?.food.id, 'tomato_egg');
+  assert.equal(matchFoodByName('宫爆鸡丁')?.food.id, 'gongbao');
+  assert.equal(matchFoodByName('薯条')?.food.id, 'fries', '薯条不能被认成薯片（热量差一倍）');
+  assert.equal(matchFoodByName('杏仁')?.food.id, 'almond');
+  assert.equal(matchFoodByName('坚果')?.food.id, 'mixed_nuts');
+  assert.equal(matchFoodByName('豆浆')?.food.id, 'soy_milk');
+  assert.equal(matchFoodByName('糖')?.food.id, 'sugar');
+});
+
+test('搜食物也能搜到组合菜（以前「馄饨」搜不出来）', () => {
+  assert.ok(searchFoods('馄饨').some((f) => f.id === 'wonton_meal'));
+  assert.ok(searchFoods('黄焖鸡').some((f) => f.id === 'huangmenji'));
+  assert.ok(searchFoods('酸菜鱼').some((f) => f.id === 'suancaiyu'));
+});
+
+test('库里真没有的名字：按同类均值兜底，类别不能归错', () => {
+  assert.equal(genericEstimateFor('外婆家秘制扣肉').id, 'generic_meat');
+  assert.equal(genericEstimateFor('提拉米苏').id, 'generic_dessert');
+  assert.equal(genericEstimateFor('椰子水').id, 'generic_drink');
+  assert.equal(genericEstimateFor('混合坚果').id, 'generic_snack');
+  assert.equal(genericEstimateFor('皮蛋瘦肉粥').id, 'generic_staple', '粥是主食，不能被「肉」抢走');
+  assert.equal(genericEstimateFor('完全不认识的啥').id, 'generic_dish');
+  // 数值本身要过 4/9/4 折算自检
+  for (const g of ['generic_meat', 'generic_staple', 'generic_dessert', 'generic_drink']) {
+    const f = genericEstimateFor({ generic_meat: '肉', generic_staple: '饭', generic_dessert: '蛋糕', generic_drink: '茶' }[g]);
+    assert.equal(f.id, g);
+    const drift = Math.abs((f.protein * 4 + f.fat * 9 + f.carb * 4) - f.kcal) / f.kcal;
+    assert.ok(drift < 0.1, `${g} 的 4/9/4 折算差 ${Math.round(drift * 100)}%`);
+  }
 });

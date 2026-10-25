@@ -129,7 +129,9 @@ test('AI 给的条目：按名字在本地库里匹配，热量用本地数据�
   }
 });
 
-test('AI 认出但本地库里没有的：不记录、但要让用户看见（不能静默丢弃）', () => {
+test('AI 认出但本地库里没有的：按同类均值记上、并标明是估算（v31 起不再一条都不记）', () => {
+  // 用户反馈：「AI 说没看懂/库里没有，一条都记不上」——记不上比记不准更伤积极性。
+  // 现在的做法：本地写死的同类均值先顶上，界面写明「按同类估算」、可以删。
   const out = normalizeAiItems({
     items: [
       { name: '米饭', grams: 200 },
@@ -138,12 +140,21 @@ test('AI 认出但本地库里没有的：不记录、但要让用户看见（�
     ],
     questions: ['酱放了吗？'],
   });
-  assert.equal(out.items.length, 1, '只有能算的那条被记上');
-  assert.deepEqual(out.unmatched, ['某网红限定轻食碗', '另一个没听过的菜']);
+  assert.equal(out.items.length, 3, '三条都要能记上');
+  assert.deepEqual(out.unmatched, ['某网红限定轻食碗', '另一个没听过的菜'], '仍要告诉用户哪些是兜底估的');
   assert.equal(out.unmatchedItems.length, 2);
-  assert.deepEqual(out.unmatchedItems[1], { name: '另一个没听过的菜', grams: 150 }, '要带上克数，界面上要告诉用户');
-  // 关键：不许用 AI 编的热量
-  assert.equal(out.items.some((i) => i.source === 'ai-estimate'), false, '不许出现「AI 估算热量」的条目');
+  assert.deepEqual(out.unmatchedItems[1].name, '另一个没听过的菜', '要带上名字，界面上要告诉用户');
+  const est = out.items.filter((i) => i.source === 'estimate');
+  assert.equal(est.length, 2);
+  for (const it of est) {
+    assert.equal(it.estimated, true);
+    assert.ok(it.note.includes('本地库里没有'), `要写明是估的：${it.note}`);
+    assert.ok(it.estimateId.startsWith('generic_'), '数字必须来自本地同类均值表');
+    assert.equal(it.foodId, null);
+  }
+  // 关键：数字只能来自本地表，不许出现「AI 编的热量」
+  assert.equal(out.items.some((i) => i.source === 'ai-estimate'), false);
+  assert.equal(est[0].kcal, 450, '300 克 × 家常菜均值 150/100');
 });
 
 test('一条都没认出来时不问问题（问了也答不上来）', () => {
@@ -265,4 +276,44 @@ test('离线解析：完全看不懂的内容不伪造条目，而是回报原�
   const r = parseDescription('今天心情不好随便吃了点');
   assert.equal(r.items.length, 0);
   assert.ok(r.unknown.length > 0, '应当把没认出来的原文回报给界面');
+});
+
+test('v31 整条链路：AI 返回组合菜 + 库里没有的菜，本地都要能记上（不能空手而归）', async () => {
+  const upstream = fakeFetch({
+    json: {
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            meal: 'dinner',
+            // 故意用「foods」而不是「items」，名字故意用口语 —— 模拟模型不按约定来
+            foods: [
+              { food: '黄焖鸡米饭', amount: '约 550 克' },
+              { dish: '外婆家秘制扣肉', grams: 180 },
+              { name: '某网红限定轻食碗', portion: '一大碗' },
+            ],
+            questions: ['扣肉咸不咸？'],
+          }),
+        },
+      }],
+    },
+  });
+  const aiRaw = await callUpstream({ text: '晚上吃了黄焖鸡米饭、外婆家秘制扣肉和某网红限定轻食碗', hour: 19, config: CONFIG, fetchImpl: upstream });
+  assert.equal(aiRaw.items.length, 3, '三种写法都要被收敛进来');
+
+  const out = normalizeAiItems(aiRaw, 'dinner', { text: '晚上吃了黄焖鸡米饭、外婆家秘制扣肉和某网红限定轻食碗' });
+  assert.equal(out.items.length, 3, '三条都要能记上');
+  assert.equal(out.items[0].foodId, 'huangmenji');
+  assert.equal(out.items[0].grams, 550);
+  const est = out.items.filter((i) => i.source === 'estimate');
+  assert.equal(est.length, 2, '库里没有的两样要按同类均值兜底');
+  assert.deepEqual(out.estimated.length, 2);
+  // 兜底数字来自本地同类均值表，不是模型编的
+  assert.ok(est.every((i) => i.estimateId.startsWith('generic_')));
+});
+
+test('v31：提示词里不许掺「AI 编热量」的口子，但允许它说库里没有的菜名', () => {
+  const p = buildSystemPrompt();
+  assert.ok(p.includes('不要输出热量'));
+  assert.ok(!/可以估算热量/.test(p));
+  assert.ok(p.includes('照用户的叫法写名字'));
 });

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import {
   emptyState, addFoodEntry, addExercise, addWeight, demoProfile, todayKey, shiftDate,
 } from '../js/store.js';
-import { findFood } from '../js/foods.js';
+import { findFood, findMatchableFood } from '../js/foods.js';
 import { calcTargets } from '../js/calc.js';
 import { insights, insightHint } from '../js/insights.js';
 
@@ -206,4 +206,21 @@ test('洞察里的数字来自用户自己的记录，与手算一致', () => {
   const top = list.find((x) => x.kind === 'calories');
   assert.ok(top, `应当给出热量大头，实际：${list.map((x) => x.title).join('、')}`);
   assert.ok(top.detail.includes(String(expectPerDay)), `实际每天 ${gramsPerDay} 克 = ${expectPerDay} kcal，文案里应当是这个数：${top.detail}`);
+});
+
+test('v31：组合菜（从搜索里记的）也能出现在「热量大头」洞察里', () => {
+  const s = base();
+  const dish = findMatchableFood('huangmenji');
+  assert.ok(dish, '黄焖鸡米饭要能按 id 查到');
+  for (let i = 0; i < 4; i++) {
+    const key = shiftDate(todayKey(), -i);
+    addFoodEntry(s, key, 'lunch', findFood('egg'), 100);
+    addFoodEntry(s, key, 'lunch', dish, 550);
+    addFoodEntry(s, key, 'dinner', findFood('rice_cooked'), 180);
+  }
+  const list = insights(s, { proteinG: target.proteinG });
+  assert.ok(
+    list.some((x) => x.title.includes('黄焖鸡米饭')),
+    `热量大头洞察要认得组合菜：${JSON.stringify(list.map((x) => x.title))}`,
+  );
 });

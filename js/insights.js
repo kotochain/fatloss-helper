@@ -13,7 +13,7 @@
  */
 
 import { todayKey, shiftDate } from './store.js';
-import { findFood } from './foods.js';
+import { findFood, findMatchableFood } from './foods.js';
 
 /** 一天至少要有这些热量才算「记了正餐」，避免只记一颗鸡蛋就算一天 */
 const MIN_DAY_KCAL = 400;
@@ -136,7 +136,9 @@ function topSourceInsight(rows, days) {
   const ranked = [...byFood.entries()].sort((a, b) => b[1] - a[1]);
   if (!ranked.length) return null;
   const [id, total] = ranked[0];
-  const food = findFood(id);
+  // v31 起组合菜也能直接搜到并记录（id 在 dishes.js 里），所以这里要能查到它们；
+  // 查不到就照旧不说话（宁可少给一条，也不要编）。
+  const food = findFood(id) || findMatchableFood(id);
   if (!food) return null;
   const perDay = Math.round(total / logged.length);
   const share = Math.round((total / logged.reduce((a, r) => a + r.kcal, 0)) * 100);

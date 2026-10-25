@@ -51,9 +51,8 @@ const MUTATIONS = [
   { file: 'js/mealparse.js', from: '    out.push(portionFromBareUnit(unit, index));', to: '    void unit;', why: '口语里不带「一」的份量词也要算（喝了瓶运动饮料=瓶、吃了碗牛肉面=碗；删掉后置信度/理由/追问全变）' },
   { file: 'js/cardio.js', from: '  return valid.length ? valid : [...DEFAULT_EQUIPMENT];', to: '  return valid;', why: '器械一个都不剩时要回默认四项（空列表会让推荐全空）' },
   { file: 'js/mealparse.js', from: 'const perUnit = food.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[food.id] || portion.perUnit || 100;', to: 'const perUnit = portion.perUnit || 100;', why: '「一个」要按食物自己的份量换算（鸡蛋 50 克 ≠ 通用 100 克）' },
-  { file: 'js/mealparse.js', from: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: true,", to: "aliases: ['食堂打饭', '打饭', '两个菜', '三菜一汤', '一份饭', '食堂'], generic: false,", why: '「食堂」是泛称，不能抢走「牛肉面」' },
   { file: 'js/cardio.js', from: 'const avail = new Set(availableEquipment || []);', to: 'const avail = new Set(Object.keys(EQUIPMENT));', why: '替代动作必须是用户今天能用的器械' },
-  { file: 'js/ai-core.js', from: "    if (!(grams > 0) || grams > 5000) continue;", to: "    if (!(grams > -1)) continue;", why: 'AI 返回的离谱份量要被丢掉' },
+  { file: 'js/ai-core.js', from: '    if (grams > 5000) continue;', to: '    if (false) continue;', why: 'AI 返回的离谱份量要被丢掉' },
   // ── 第三轮新增：正反馈系统 ──
   { file: 'js/achievements.js', from: 'if (t.kcal > 0 && t.protein >= goal) n += 1;', to: 'if (t.kcal > 0) n += 1;', why: '「蛋白达标」必须用用户的目标判定，不能只要吃了就算达标' },
   { file: 'js/achievements.js', from: "const level = PLANT_STAGES.reduce((acc, s, i) => (total >= s.min ? i : acc), 0);", to: "const level = PLANT_STAGES.reduce((acc, s, i) => (streak >= s.min ? i : acc), 0);", why: '小植物按累计天数生长（断档不该倒退）' },
@@ -72,9 +71,9 @@ const MUTATIONS = [
   { file: 'js/recommend.js', from: 'if (fatRatio < 0.85) {', to: 'if (false) {', why: '脂肪不足时说明里必须点出来' },
   // ── 第六轮：本地周洞察 ──
   // ── 第七轮：AI 解析后按名字匹配本地食物（修的是一个「AI 模式从来没工作过」的 bug）──
-  { file: 'js/mealparse.js', from: 'const hit = matchFoodByName(raw.name, { preferForm: preferForm || detectFoodForm(raw.name) });', to: 'const hit = null;', why: 'AI 认出的食物必须能在本地库里匹配上（否则一条都记不上）' },
+  { file: 'js/mealparse.js', from: 'const hit = matchFoodByName(name, { preferForm: preferForm || detectFoodForm(name) });', to: 'const hit = null;', why: 'AI 认出的食物必须能在本地库里匹配上（否则一条都记不上）' },
   { file: 'js/mealparse.js', from: 'if (out.items.length) {', to: 'if (true) {', why: '一条都没记上时不该再追问（答不上来）' },
-  { file: 'js/mealparse.js', from: "out.unmatchedItems.push({ name: String(raw?.name || '?').trim(), grams: Math.round(grams) });", to: "out.unmatchedItems.push({ name: '?', grams: 0 });", why: '没匹配上的食物要原样告诉用户（名字和克数）' },
+  { file: 'js/mealparse.js', from: 'out.unmatchedItems.push({ name, grams, estimateId: generic.id });', to: "out.unmatchedItems.push({ name: '?', grams: 0 });", why: '没匹配上的食物要原样告诉用户（名字和克数）' },
   { file: 'js/foods.js', from: 'if (!best || best.score < minScore) return null;', to: 'if (!best) return null;', why: '匹配分数太低宁可不算（等价变异：现有食物库/查询里没有「有匹配但低分」的样本，实测输出一致）', sensitivity: 'equivalent' },
   { file: 'js/insights.js', from: 'if (logged.length < 4) return [];', to: 'if (false) return [];', why: '记录太少时不许给「规律」（等价变异：后面的 topSourceInsight 也有 ≥4 天门槛，0~3 天输出仍为空）', sensitivity: 'equivalent' },
   { file: 'js/insights.js', from: 'if (a.length < minPerGroup || b.length < minPerGroup) return null;', to: 'if (false) return null;', why: '两组样本都不够时不许做对比' },
@@ -131,6 +130,25 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: "  if (/生重|生(?:的)?(?:[\\u4e00-\\u9fa5]{0,2})(鸡|鸡脯|鸡腿|牛|猪|羊|鱼|虾|肉)/.test(s)) return 'raw';", to: "  if (false) return 'raw';", why: '句子里说「生」必须识别为生重（否则 100 克生鸡胸会按熟的算，多算 25%）' },
   { file: 'js/mealparse.js', from: '      if (foodForm === \'cooked\') continue; // 熟重数据已经包含做法，不能再按做法乘油量', to: '      if (false) continue;', why: '熟重条目不能再按做法乘油量（水煮鸡胸会变成 145 kcal）' },
   { file: 'js/recommend.js', from: "{ name: '鸡胸肉 + 米饭 + 西兰花', protein: ['chicken_breast_cooked'], ratio: [1], carb: 'rice_cooked', veg: 'broccoli', side: null },", to: "{ name: '鸡胸肉 + 米饭 + 西兰花', protein: ['chicken_breast'], ratio: [1], carb: 'rice_cooked', veg: 'broccoli', side: null },", why: '餐单的肉/鱼必须是熟重条目（用户照餐单克数去记录时默认也是熟重，两边口径要一致）' },
+  // ── v31：说一句记不上 / AI 听懂了却记不上 ──
+  { file: 'js/mealparse.js', from: 'for (const a of (ALIASES[f.id] || [])) {', to: 'for (const a of []) {', why: '食物别名要进离线词典（否则「一杯酸奶」「半斤牛奶」整句认不出来）' },
+  { file: 'js/foods.js', from: 'export const CATALOG_FOODS = [...FOODS, ...DISH_FOODS];', to: 'export const CATALOG_FOODS = [...FOODS];', why: '组合菜也要进「可匹配目录」（AI 说「黄焖鸡米饭」才能对上）' },
+  { file: 'js/dishes.js', from: '    _aliases: dish.aliases,', to: '    _aliases: [],', why: '组合菜的别名要带上（「盖饭」「三明治」「烧烤」全靠它）' },
+  { file: 'js/mealparse.js', from: '    const generic = genericEstimateFor(name);', to: "    const generic = genericEstimateFor('米饭');", why: '兜底要按名字归类（不能全按主食算）' },
+  { file: 'js/mealparse.js', from: '      if (perServing) return perServing[1] * (portion.count || 1);', to: '      if (perServing) return portion.grams;', why: '「一碗馄饨」要按一份 300 克算，不是通用碗重 350 克' },
+  { file: 'js/mealparse.js', from: '      const mealWord = entry.text.length === 1 && /[早午晚夜中宵]/.test(text[idx - 1] || \'\');', to: '      const mealWord = false;', why: '「晚饭」里的「饭」不能当成一碗米饭（否则热量翻倍）' },
+  { file: 'js/mealparse.js', from: '  if (chosenDish && !dropGeneric) {', to: '  if (chosenDish) {', why: '食堂打饭 + 三道具体菜时不能一顿算成两顿' },
+  { file: 'js/ai-core.js', from: '  if (cn) return CN_QTY[cn[1]] * (cn[2] === \'斤\' ? 500 : 50);', to: '  if (false) return 0;', why: '「三两」「半斤」这种中文数字 + 市制单位要能认' },
+  { file: 'js/ai-core.js', from: '  if (!attempt.ok && attempt.status === 400 && /response_format|json_object|json mode/i.test(attempt.body || \'\')) {', to: '  if (false) {', why: '服务商不支持 JSON 模式时要自动去掉参数重试（否则用户只看到「AI 没成功」）' },
+  { file: 'js/ai-core.js', from: "      { role: 'user', content: '上面这段不是合法 JSON。请只输出 JSON 对象，格式：{\"meal\":\"lunch\",\"items\":[{\"name\":\"食物名\",\"grams\":150}],\"questions\":[]}' },", to: "      { role: 'user', content: '再试一次' },", why: '模型没按 JSON 回时要再要一次，并重申只要 JSON' },
+  { file: 'js/ai-core.js', from: '    const portion = portionRaw && PORTION_HINT.test(portionRaw) ? portionRaw.trim().slice(0, 20) : null;', to: '    const portion = null;', why: 'AI 只给「一碗」这种份量说法时不能丢（否则用户白说）' },
+  { file: 'js/foodlog.js', from: '  const all = [...customFoods, ...CATALOG_FOODS];', to: '  const all = [...customFoods];', why: '搜食物也要能搜到本地食物库和组合菜' },
+  // ── v31 补充：提示词与兜底 ──
+  { file: 'js/ai-core.js', from: "    '2. 只要这句话提到了吃或喝的东西（哪怕只说了一样、或者很不确定），items 里就**至少要有 1 条**。',", to: "    '2. 只要这句话提到了吃或喝的东西，items 里可以有 0 条。',", why: '提示词必须禁止「返回空 items / 说看不懂」（用户看到的就是没听懂）' },
+  { file: 'js/foods.js', from: '  for (const g of GENERIC_ESTIMATES) {\n    if (g.keywords && g.keywords.test(q)) return g;', to: '  for (const g of GENERIC_ESTIMATES) {\n    if (false) return g;', why: '兜底要按关键词归类（肉菜/主食/甜点…）' },
+  { file: 'js/ai-core.js', from: '  if (!first.items.length) {', to: '  if (false) {', why: '模型返回空 items 时要再要一次（这是「AI 说没听懂」最常见的来源）' },
+  { file: 'js/insights.js', from: '  const food = findFood(id) || findMatchableFood(id);', to: '  const food = findFood(id);', why: '组合菜从搜索里记进去后，也要能出现在「热量大头」洞察里' },
+
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

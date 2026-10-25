@@ -11,59 +11,133 @@ export const REQUEST_TIMEOUT_MS = 25000;
 /**
  * 系统提示词：只让它听懂和估份量，热量一律不许它编。
  * 热量由本地食物库算，这样数字能核对、能离线复算。
+ *
+ * v31 重写：
+ *  - 明确「只要提到了吃/喝就必须至少给一条」——模型返回空 items 是用户看到「没听懂」的主因之一；
+ *  - 把用户真会说的话（口语、简称、组合菜、家里做的菜）写成例子，减少「这是什么意思」；
+ *  - 说清「本地库里没有的菜也照实说名字」，不要为了迎合去换成别的食物（换掉的会被算错）。
  */
 export function buildSystemPrompt() {
   return [
-    '你是一个帮中国用户记录饮食的解析器。用户会用大白话描述吃了什么，你只负责理解，不要输出热量数字。',
+    '你是一个帮中国用户记录饮食的解析器。用户会用大白话描述吃了什么，你只负责听懂和估份量。',
+    '**绝对不要输出热量、蛋白质、脂肪、碳水等营养数字**，那些由本地数据库计算。',
     '',
     '要求：',
-    '1. 把描述拆成若干条食物，每条给出：name（中文名，尽量具体，例如"牛肉面"而不是"面"）、grams（估算克数，整数）。',
-    '2. 常见份量参考：一小碗米饭 130 克、一碗米饭 180 克、一碗面 600 克（含汤和浇头）、一碗粥 250 克、',
+    '1. 把描述拆成若干条食物，每条给出：name（中文名，用最常见的叫法，尽量具体）、grams（估算克数，整数）。',
+    '2. 只要这句话提到了吃或喝的东西（哪怕只说了一样、或者很不确定），items 里就**至少要有 1 条**。',
+    '   不要返回空 items，也不要说自己看不懂 —— 按最接近的常见食物估一条，把握不大就写进 questions。',
+    '3. 常见份量参考：一小碗米饭 130 克、一碗米饭 180 克、一碗面 600 克（含汤和浇头）、一碗粥 250 克、',
     '   一个鸡蛋 50 克、一个包子 100 克、一个苹果 200 克、一杯牛奶 250 克、中杯奶茶 500 克、',
-    '   一份盖饭 500 克、一份麻辣烫 500 克、一杯酸奶 150 克、一片吐司 35 克。',
-    '3. 如果用户说的份量含糊（例如只说"吃了碗面"），按上面参考值估一个，并在 questions 里提一个最关键的追问，',
+    '   一份盖饭 500 克、一份麻辣烫 500 克、一杯酸奶 150 克、一片吐司 35 克、一根香蕉 120 克。',
+    '4. 如果份量含糊（例如只说"吃了碗面"），按上面参考值估一个，并在 questions 里提一个最关键的追问，',
     '   例如"面大概多大一碗？（小碗/普通碗/大碗）"。最多问 2 个问题，别问不重要的。',
-    '4. 组合菜（牛肉面、盖饭、麻辣烫、火锅）算成一条，不要拆成原料再加一遍。',
-    '5. 用户提到"加了蛋""加了肉""加了麻酱""喝了一瓶啤酒"这类加料，单独列一条。',
-    '6. 识别餐次放进 meal："breakfast" | "lunch" | "dinner" | "snack"；用户没说就根据上下文和当前时间判断。',
-    '7. 不要输出热量、蛋白质、脂肪、碳水等营养数字，那些由本地数据库计算。',
-    '8. 只输出 JSON，不要任何解释文字。',
+    '5. 组合菜（牛肉面、盖饭、麻辣烫、火锅）算成一条，不要拆成原料再加一遍。',
+    '   但用户明确说"配了一碗饭""加了个蛋""加了肉""喝了瓶啤酒"这类**额外加的**，单独列一条。',
+    '6. 用户提到"加了蛋""加了肉""加了麻酱""喝了一瓶啤酒"这类加料，单独列一条。',
+    '7. 识别餐次放进 meal："breakfast" | "lunch" | "dinner" | "snack"；用户没说就根据上下文和当前时间判断。',
+    '8. 本地库里没有的菜（家里做的、地方小吃、新品牌）也**照用户的叫法写名字**，不要换成别的食物；',
+    '   本地会用同类均值先估，写对了才能对上。',
+    '9. 只输出 JSON，不要任何解释文字。',
+    '',
+    '用户可能会这样说（都按正常食物处理，不要回"看不懂"）：',
+    '- "早上喝了杯豆浆，吃了个鸡蛋灌饼" → 两条',
+    '- "中午食堂打了三个菜：土豆丝、青椒肉丝、炒青菜" → 三条（米饭没提就不加）',
+    '- "晚上我妈做的梅菜扣肉，配了半碗饭" → 梅菜扣肉 150、米饭 90',
+    '- "喝了杯三分糖奶茶" → 奶茶 500',
+    '- "就随便吃了点" → 按最常见的 1 条估，并在 questions 里问吃了什么',
     '',
     '输出格式：',
     '{"meal":"lunch","items":[{"name":"牛肉面","grams":600}],"questions":["面大概多大一碗？"]}',
   ].join('\n');
 }
 
-/** 把上游结果收敛成固定形状，挡住乱七八糟的输出 */
+/** 餐次的各种写法（模型偶尔会回中文）统一成内部 key */
+const MEAL_SYNONYMS = {
+  breakfast: 'breakfast', 早餐: 'breakfast', 早饭: 'breakfast', 早上: 'breakfast',
+  lunch: 'lunch', 午餐: 'lunch', 午饭: 'lunch', 中午: 'lunch',
+  dinner: 'dinner', 晚餐: 'dinner', 晚饭: 'dinner', 晚上: 'dinner',
+  snack: 'snack', 加餐: 'snack', 夜宵: 'snack', 宵夜: 'snack', 零食: 'snack', 下午茶: 'snack',
+};
+
+const PORTION_HINT = /[一二两三四五六七八九十半]\s*(?:小|大|超)?\s*(碗|份|个|杯|瓶|盘|盒|袋|包|块|片|根|只|颗|粒|把|勺)|^(小|大|超)?(碗|份|个|杯|瓶|盘|盒|袋|包|块|片|根|只|颗|粒|把|勺)/;
+
+/** 把「150」「150克」「约 150g」「0.3kg」「三两」都变成克数；看不懂返回 null */
+const CN_QTY = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 半: 0.5 };
+
+export function coerceGrams(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value !== 'string') return null;
+  // 「三两」「半斤」这种中文数字 + 市制单位
+  const cn = value.match(/^\s*([一二两三四五六七八九十半])\s*(斤|两)\s*$/);
+  if (cn) return CN_QTY[cn[1]] * (cn[2] === '斤' ? 500 : 50);
+  const m = value.match(/(\d+(?:\.\d+)?)\s*(kg|千克|克|g|毫升|ml|斤|两)?/i);
+  if (!m) return null;
+  let n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = String(m[2] || '').toLowerCase();
+  if (unit === 'kg' || unit === '千克') n *= 1000;
+  if (unit === '斤') n *= 500;
+  if (unit === '两') n *= 50;
+  return n;
+}
+
+/**
+ * 把上游结果收敛成固定形状，挡住乱七八糟的输出。
+ *
+ * v31 放宽了三处（都是为了「AI 听懂了、却还是记不上」）：
+ *  - 条目的字段名不只认 items：foods / results / list / dishes 也认；
+ *  - 名字不只认 name：food / dish / item / description 也认；
+ *  - 克数允许是字符串（"150克"），也允许只给份量说法（"一碗"）——克数留 null 交给本地换算。
+ */
 export function normalizeResult(raw) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const list = ['items', 'foods', 'results', 'list', 'dishes', 'data']
+    .map((k) => src[k])
+    .find((v) => Array.isArray(v)) || [];
+
   const items = [];
-  for (const it of Array.isArray(raw?.items) ? raw.items : []) {
-    const name = typeof it?.name === 'string' ? it.name.trim().slice(0, 40) : '';
-    const grams = Number(it?.grams);
+  for (const it of list) {
+    if (!it || typeof it !== 'object') continue;
+    const nameRaw = it.name ?? it.food ?? it.dish ?? it.item ?? it.description ?? it.label;
+    const name = typeof nameRaw === 'string' ? nameRaw.trim().slice(0, 40) : '';
     if (!name) continue;
-    if (!(grams > 0) || grams > 5000) continue;
-    items.push({ name, grams: Math.round(grams), note: typeof it?.note === 'string' ? it.note.slice(0, 60) : null });
+    const gramsRaw = it.grams ?? it.amount ?? it.weight ?? it.grams_estimate ?? it.portion_grams;
+    const grams = coerceGrams(gramsRaw);
+    // 只给了份量说法（"一碗""一份"）也要留下：本地会按食物换算
+    const portionRaw = typeof it.portion === 'string' ? it.portion : (typeof gramsRaw === 'string' ? gramsRaw : '');
+    // 只认真正的份量说法（「一碗」「两份」）；「很多」「一些」这种不算，否则等于没有克数
+    const portion = portionRaw && PORTION_HINT.test(portionRaw) ? portionRaw.trim().slice(0, 20) : null;
+    if (!(grams > 0) && !portion) continue;
+    if (grams > 5000) continue;
+    items.push({
+      name,
+      grams: grams > 0 ? Math.round(grams) : null,
+      portion: portion || null,
+      note: typeof it.note === 'string' ? it.note.slice(0, 60) : null,
+    });
   }
-  const meals = ['breakfast', 'lunch', 'dinner', 'snack'];
-  const questions = (Array.isArray(raw?.questions) ? raw.questions : [])
+
+  const questions = (Array.isArray(src.questions) ? src.questions : (typeof src.questions === 'string' ? [src.questions] : []))
     .filter((q) => typeof q === 'string' && q.trim())
     .map((q) => q.trim().slice(0, 80))
     .slice(0, 2);
-  return {
-    meal: meals.includes(raw?.meal) ? raw.meal : null,
-    items,
-    questions,
-  };
+  const mealKey = MEAL_SYNONYMS[String(src.meal ?? src.meal_type ?? src.mealTime ?? '').trim().toLowerCase()] || null;
+  return { meal: mealKey, items, questions };
 }
 
-/** 从模型返回的文本里抠出 JSON（有的模型会包一层 ```json） */
+/** 从模型返回的文本里抠出 JSON（有的模型会包一层 ```json，或有前后废话） */
 export function extractJson(content) {
+  const text = String(content || '').trim();
   try {
-    return JSON.parse(content);
+    return JSON.parse(text);
   } catch {
-    const m = String(content).match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('模型返回的不是 JSON');
-    return JSON.parse(m[0]);
+    const obj = text.match(/\{[\s\S]*\}/);
+    if (obj) {
+      try { return JSON.parse(obj[0]); } catch { /* 继续尝试数组 */ }
+    }
+    const arr = text.match(/\[[\s\S]*\]/);
+    if (arr) return JSON.parse(arr[0]);
+    throw new Error('模型返回的不是 JSON');
   }
 }
 
@@ -98,44 +172,92 @@ export function humanizeNetworkError(err, baseUrl) {
  * @param {{text:string, meal?:string|null, hour?:number, config:{baseUrl:string, model:string, apiKey:string}, fetchImpl?:Function}} opts
  */
 export async function requestParse({ text, meal, hour, config, fetchImpl = fetch }) {
-  const userContent = [
-    `用户说：${text}`,
-    meal ? `用户指定了这一餐是：${meal}` : '',
-    `当前时间：${hour ?? new Date().getHours()} 点`,
-  ].filter(Boolean).join('\n');
+  const baseMessages = [
+    { role: 'system', content: buildSystemPrompt() },
+    {
+      role: 'user',
+      content: [
+        `用户说：${text}`,
+        meal ? `用户指定了这一餐是：${meal}` : '',
+        `当前时间：${hour ?? new Date().getHours()} 点`,
+      ].filter(Boolean).join('\n'),
+    },
+  ];
 
-  let res;
+  const send = async (messages, withJsonMode) => {
+    let res;
+    try {
+      res = await fetchImpl(`${String(config.baseUrl).replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages,
+          temperature: 0.2,
+          ...(withJsonMode ? { response_format: { type: 'json_object' } } : {}),
+          max_tokens: 800,
+        }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      throw new Error(humanizeNetworkError(err, config.baseUrl));
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { ok: false, status: res.status, body };
+    }
+    const data = await res.json().catch(() => null);
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw emptyContentError(data) || new Error('服务商没有返回内容');
+    return { ok: true, content };
+  };
+
+  let attempt = await send(baseMessages, true);
+  // 有些服务商/中转不支持 JSON 模式，会直接 400。去掉这个参数再试一次，
+  // 否则用户看到的就是「AI 没成功」，明明只是少了个参数（v31 补的兼容）。
+  if (!attempt.ok && attempt.status === 400 && /response_format|json_object|json mode/i.test(attempt.body || '')) {
+    attempt = await send(baseMessages, false);
+  }
+  if (!attempt.ok) throw new Error(humanizeHttpError(attempt.status, attempt.body, { model: config.model }));
+
+  let first;
   try {
-    res = await fetchImpl(`${String(config.baseUrl).replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: 'system', content: buildSystemPrompt() },
-          { role: 'user', content: userContent },
-        ],
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-        max_tokens: 800,
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
+    first = normalizeResult(extractJson(attempt.content));
   } catch (err) {
-    throw new Error(humanizeNetworkError(err, config.baseUrl));
+    // 模型没按 JSON 回（常见于小模型/中文模型）：再要一次，并把要求重复一遍。
+    // 只重试一次，避免网络不好时把 25 秒拖成 50 秒。
+    const retry = await send([
+      ...baseMessages,
+      { role: 'assistant', content: String(attempt.content).slice(0, 500) },
+      { role: 'user', content: '上面这段不是合法 JSON。请只输出 JSON 对象，格式：{"meal":"lunch","items":[{"name":"食物名","grams":150}],"questions":[]}' },
+    ], false);
+    if (!retry.ok) throw new Error(humanizeHttpError(retry.status, retry.body, { model: config.model }));
+    try {
+      return normalizeResult(extractJson(retry.content));
+    } catch {
+      throw new Error(err.message || '模型返回的不是 JSON');
+    }
   }
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(humanizeHttpError(res.status, body, { model: config.model }));
+  // 模型听得懂、但返回了空 items（用户看到的就是「没听懂、记不上」）。
+  // 再要一次，并把「至少要有一条」再强调一遍；第二次还没有就照原样返回，交给离线兜底。
+  if (!first.items.length) {
+    try {
+      const retry = await send([
+        ...baseMessages,
+        { role: 'assistant', content: String(attempt.content).slice(0, 300) },
+        { role: 'user', content: '上一轮 items 是空的。但用户确实描述了吃了或喝了什么，请至少给出 1 条最可能的食物（name + grams），不确定的写进 questions，不要回空 items。' },
+      ], false);
+      if (retry.ok) {
+        const second = normalizeResult(extractJson(retry.content));
+        if (second.items.length) return second;
+      }
+    } catch { /* 第二次要不到就按第一次的结果走，别把原本的返回弄丢 */ }
   }
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw emptyContentError(data) || new Error('服务商没有返回内容');
-  return normalizeResult(extractJson(content));
+  return first;
 }
 
 /**

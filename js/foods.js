@@ -17,6 +17,8 @@
  *  - 自检规则：蛋白×4 + 脂肪×9 + 碳水×4 应当接近标称热量（含酒精的饮品除外）。
  */
 
+import { DISHES, dishAsFood } from './dishes.js';
+
 export const FOOD_CATEGORIES = [
   { key: 'staple', label: '主食' },
   { key: 'protein', label: '肉蛋豆' },
@@ -188,6 +190,42 @@ export const FOODS = [
   { id: 'hand_pancake', name: '手抓饼', category: 'dish', kcal: 330, protein: 6.0, fat: 20.0, carb: 31.0, servings: [['一个', 120]] },
   { id: 'jianbing', name: '煎饼果子', category: 'dish', kcal: 250, protein: 8.5, fat: 12.0, carb: 28.0, servings: [['一个', 250]] },
   { id: 'oden', name: '关东煮', category: 'dish', kcal: 90, protein: 6.0, fat: 4.0, carb: 7.0, servings: [['一串', 40]] },
+
+  // ── v31：用户真正常吃、但库里没有的（缺了它们，AI 听懂了也记不上）──
+  // 数据口径：每 100 克可食部，家常做法；4/9/4 折算由 checkFoodData 自检。
+  // 目的不是精确到个位数，而是「先能记上、量级不能差一倍」。
+  { id: 'suancaiyu', name: '酸菜鱼', category: 'dish', kcal: 110, protein: 10.0, fat: 6.5, carb: 3.5, servings: [['一份', 500]] },
+  { id: 'shuizhuyu', name: '水煮鱼', category: 'dish', kcal: 155, protein: 11.0, fat: 11.0, carb: 3.0, servings: [['一份', 500]] },
+  { id: 'roujiamo', name: '肉夹馍', category: 'dish', kcal: 290, protein: 11.0, fat: 12.0, carb: 34.0, servings: [['一个', 150]] },
+  { id: 'sushi', name: '寿司', category: 'dish', kcal: 150, protein: 6.0, fat: 2.5, carb: 25.0, servings: [['一贯', 25], ['一份（8 贯）', 200]] },
+  { id: 'onigiri', name: '饭团', category: 'dish', kcal: 180, protein: 5.0, fat: 4.0, carb: 31.0, servings: [['一个', 120]] },
+  { id: 'kaolengmian', name: '烤冷面', category: 'dish', kcal: 210, protein: 7.0, fat: 8.0, carb: 27.0, servings: [['一份', 250]] },
+  { id: 'jidanbing', name: '鸡蛋灌饼', category: 'dish', kcal: 240, protein: 8.0, fat: 12.0, carb: 26.0, servings: [['一个', 200]] },
+  { id: 'xiaolongbao', name: '小笼包', category: 'dish', kcal: 230, protein: 9.0, fat: 9.0, carb: 28.0, servings: [['一个', 25], ['一笼（8 个）', 200]] },
+  { id: 'shengjianbao', name: '生煎包', category: 'dish', kcal: 260, protein: 9.0, fat: 12.0, carb: 29.0, servings: [['一个', 45]] },
+  { id: 'shaomai', name: '烧麦', category: 'dish', kcal: 230, protein: 8.0, fat: 9.0, carb: 29.0, servings: [['一个', 30]] },
+  { id: 'youtiao', name: '油条', category: 'staple', kcal: 388, protein: 7.0, fat: 18.0, carb: 50.0, servings: [['一根', 70]] },
+  { id: 'congyoubing', name: '葱油饼', category: 'staple', kcal: 330, protein: 6.0, fat: 17.0, carb: 39.0, servings: [['一个', 120]] },
+  { id: 'luroufan', name: '卤肉饭', category: 'dish', kcal: 180, protein: 7.0, fat: 7.0, carb: 22.0, servings: [['一份', 450]] },
+  { id: 'zhujiaofan', name: '猪脚饭', category: 'dish', kcal: 200, protein: 9.0, fat: 10.0, carb: 19.0, servings: [['一份', 500]] },
+  { id: 'galifan', name: '咖喱鸡饭', category: 'dish', kcal: 160, protein: 6.0, fat: 6.0, carb: 20.0, servings: [['一份', 450]] },
+  { id: 'jigongbao', name: '鸡公煲', category: 'dish', kcal: 150, protein: 10.0, fat: 9.0, carb: 7.0, servings: [['一份', 500]] },
+  { id: 'pisa', name: '披萨', category: 'dish', kcal: 260, protein: 11.0, fat: 10.0, carb: 31.0, servings: [['一块', 100], ['一整个（6 块）', 600]] },
+  { id: 'doufunao', name: '豆腐脑', category: 'dish', kcal: 50, protein: 3.0, fat: 2.5, carb: 4.0, servings: [['一碗', 300]] },
+  { id: 'pidan_zhou', name: '皮蛋瘦肉粥', category: 'dish', kcal: 60, protein: 3.5, fat: 1.5, carb: 8.0, servings: [['一碗', 350]] },
+  { id: 'zongzi', name: '粽子', category: 'staple', kcal: 200, protein: 5.0, fat: 7.0, carb: 30.0, servings: [['一个', 150]] },
+  { id: 'tangyuan', name: '汤圆', category: 'snack', kcal: 300, protein: 5.0, fat: 12.0, carb: 42.0, servings: [['一个', 20], ['一碗（8 个）', 160]] },
+  { id: 'yuebing', name: '月饼', category: 'snack', kcal: 400, protein: 6.0, fat: 20.0, carb: 50.0, servings: [['一个', 100]] },
+  { id: 'fries', name: '薯条', category: 'dish', kcal: 312, protein: 3.5, fat: 15.0, carb: 41.0, servings: [['小份', 75], ['中份', 110], ['大份', 150]] },
+  { id: 'jipai', name: '鸡排', category: 'dish', kcal: 280, protein: 18.0, fat: 17.0, carb: 14.0, servings: [['一块', 150]] },
+  { id: 'jianjiao', name: '煎饺 / 锅贴', category: 'dish', kcal: 250, protein: 8.0, fat: 12.0, carb: 27.0, servings: [['一个', 25], ['一份（8 个）', 200]] },
+  { id: 'mala_xiangguo', name: '麻辣香锅', category: 'dish', kcal: 180, protein: 8.0, fat: 12.0, carb: 10.0, servings: [['一份', 500]] },
+  { id: 'liangmian', name: '凉面', category: 'dish', kcal: 150, protein: 4.5, fat: 5.0, carb: 22.0, servings: [['一份', 400]] },
+  { id: 'qingjiao_rousi', name: '青椒肉丝', category: 'dish', kcal: 120, protein: 7.0, fat: 8.0, carb: 5.0, servings: [['一份', 250]] },
+  { id: 'yuxiang_rousi', name: '鱼香肉丝', category: 'dish', kcal: 150, protein: 7.0, fat: 10.0, carb: 7.0, servings: [['一份', 250]] },
+  { id: 'huiguorou', name: '回锅肉', category: 'dish', kcal: 300, protein: 9.0, fat: 27.0, carb: 6.0, servings: [['一份', 200]] },
+  { id: 'tudousi', name: '炒土豆丝', category: 'dish', kcal: 120, protein: 2.0, fat: 6.0, carb: 15.0, servings: [['一份', 200]] },
+  { id: 'mixed_nuts', name: '混合坚果', category: 'fat', kcal: 600, protein: 18.0, fat: 50.0, carb: 20.0, servings: [['一小把', 25], ['一包（每日坚果）', 25]] },
 ];
 
 
@@ -249,9 +287,93 @@ export const ALIASES = {
   seaweed: ['海带丝'],
   mushroom: ['冬菇', '菌菇'],
   cola: ['汽水', '可乐'],
-  chips: ['薯条（片）'],
+  chips: ['薯片'],
   bread_whole: ['全麦吐司'],
+  // v31 补的别名：都是用户口语里真会说的词，之前缺了它们，
+  // AI 明明听懂了、本地库也有这条，却匹配不上（v31 的核心修复之一）。
+  cake_cream: ['蛋糕', '奶油蛋糕'],
+  sugar: ['糖', '白糖', '砂糖'],
+  soy_milk: ['豆浆', '无糖豆奶'],
+  almond: ['杏仁', '巴旦木', '扁桃仁'],
+  bread_white: ['吐司', '切片面包', '白面包'],
+  tomato_egg: ['番茄炒蛋', '西红柿炒蛋', '西红柿鸡蛋', '番茄鸡蛋'],
+  gongbao: ['宫爆鸡丁', '宫保鸡丁', '宫爆鸡'],
+  braised_pork: ['红烧五花肉', '红烧肉'],
+  mapo_tofu: ['麻婆豆腐'],
+  fried_rice: ['蛋炒饭', '炒米饭'],
+  chicken_skin: ['炸鸡', '炸鸡块', '炸鸡带皮'],
+  stirfry_greens: ['炒青菜', '炒菜', '青菜', '时蔬', '清炒时蔬'],
+  beef_noodle: ['牛肉面', '牛肉拉面', '拉面'],
+  hamburger: ['汉堡', '汉堡包', '鸡肉堡', '牛肉堡'],
+  // 新条目
+  suancaiyu: ['酸菜鱼', '老坛酸菜鱼', '酸菜鱼片'],
+  shuizhuyu: ['水煮鱼', '水煮鱼片'],
+  roujiamo: ['肉夹馍', '腊汁肉夹馍'],
+  sushi: ['寿司', '寿司拼盘'],
+  onigiri: ['饭团', '三角饭团', '紫菜包饭'],
+  kaolengmian: ['烤冷面', '东北烤冷面'],
+  jidanbing: ['鸡蛋灌饼', '灌饼'],
+  xiaolongbao: ['小笼包', '灌汤包', '小笼'],
+  shengjianbao: ['生煎', '生煎包'],
+  shaomai: ['烧麦', '烧卖'],
+  youtiao: ['油条'],
+  congyoubing: ['葱油饼'],
+  luroufan: ['卤肉饭', '台湾卤肉饭'],
+  zhujiaofan: ['猪脚饭', '猪手饭'],
+  galifan: ['咖喱鸡饭', '咖喱饭', '咖喱鸡'],
+  jigongbao: ['鸡公煲'],
+  pisa: ['披萨', '比萨', '匹萨'],
+  doufunao: ['豆腐脑', '豆花'],
+  pidan_zhou: ['皮蛋瘦肉粥', '皮蛋粥', '瘦肉粥'],
+  zongzi: ['粽子', '肉粽'],
+  tangyuan: ['汤圆', '元宵'],
+  yuebing: ['月饼'],
+  fries: ['薯条', '炸薯条'],
+  jipai: ['鸡排', '炸鸡排'],
+  jianjiao: ['煎饺', '锅贴', '煎饺子'],
+  mala_xiangguo: ['麻辣香锅', '香锅'],
+  liangmian: ['凉面', '麻酱凉面'],
+  qingjiao_rousi: ['青椒肉丝', '尖椒肉丝'],
+  yuxiang_rousi: ['鱼香肉丝'],
+  huiguorou: ['回锅肉'],
+  tudousi: ['炒土豆丝', '土豆丝'],
+  mixed_nuts: ['坚果', '混合坚果', '每日坚果', '一把坚果'],
 };
+
+/**
+ * 「按同类估算」用的兜底表。
+ *
+ * 用途：AI 或离线听懂了这句话，但本地库里确实没有这样东西（比如某个地方小吃、家里自制的菜）。
+ * 以前的做法是「一条都不记 + 告诉用户库里没有」，用户要么放弃记录、要么得自己搜——两样都很伤积极性。
+ * 现在按「它大概属于哪一类」给一个同类均值先记上，并且**在界面上写明这是估算、可以删掉**。
+ *
+ * 这不是放开「AI 编热量」的口子：这些数字是本地写死的同类均值，可核对、可离线复算，
+ * 模型依然一个营养数字都不许输出。
+ */
+export const GENERIC_ESTIMATES = [
+  // 顺序很重要：先主食（「皮蛋瘦肉粥」别被「肉」抢走），再肉、汤、甜点、饮料、零食、水果、蔬菜
+  { id: 'generic_staple', name: '主食（按同类估算）', category: 'staple', kcal: 180, protein: 5.0, fat: 3.0, carb: 32.0, servings: [['一份', 300]], keywords: /饭|面|粉|饼|包|馍|饺|馄饨|粥|馒头|花卷|油条|年糕|米糕|粽|麦|吐司|披萨|寿司|饭团|汉堡|卷/ },
+  { id: 'generic_meat', name: '肉菜（按同类估算）', category: 'dish', kcal: 220, protein: 15.0, fat: 16.0, carb: 4.0, servings: [['一份', 200]], keywords: /肉|鸡|鸭|鹅|牛|羊|猪|排|鱼|虾|蟹|海鲜|丸|肠|培根|火腿|翅|肘/ },
+  { id: 'generic_soup', name: '汤羹（按同类估算）', category: 'dish', kcal: 60, protein: 3.0, fat: 3.0, carb: 5.0, servings: [['一碗', 400]], keywords: /汤|羹|煲/ },
+  { id: 'generic_dessert', name: '甜点（按同类估算）', category: 'snack', kcal: 280, protein: 3.0, fat: 12.0, carb: 40.0, servings: [['一份', 150]], keywords: /蛋糕|甜|糖|巧克力|冰淇淋|冰激凌|派|挞|布丁|奶昔|沙冰|奶油|提拉米苏|慕斯/ },
+  { id: 'generic_drink', name: '饮料（按同类估算）', category: 'drink', kcal: 45, protein: 1.0, fat: 1.0, carb: 9.0, servings: [['一杯', 400]], keywords: /茶|咖啡|汁|可乐|汽水|酒|奶昔|豆浆|奶盖|椰子水|苏打水|矿泉水|气泡水/ },
+  { id: 'generic_snack', name: '零食（按同类估算）', category: 'snack', kcal: 450, protein: 6.0, fat: 22.0, carb: 55.0, servings: [['一小包', 50]], keywords: /薯|片|坚果|辣条|饼干|果干|牛肉干/ },
+  { id: 'generic_fruit', name: '水果（按同类估算）', category: 'fruit', kcal: 60, protein: 0.8, fat: 0.3, carb: 14.0, servings: [['一个', 200]], keywords: /果|瓜|莓|蕉|橙|桔|橘|柚|桃|梨|葡萄|荔|芒|菠萝|枣/ },
+  { id: 'generic_veg', name: '蔬菜（按同类估算）', category: 'vegetable', kcal: 70, protein: 2.5, fat: 4.0, carb: 6.0, servings: [['一份', 200]], keywords: /菜|豆|菇|笋|瓜|茄|椒|萝卜|藕|菌/ },
+  { id: 'generic_dish', name: '家常菜（按同类估算）', category: 'dish', kcal: 150, protein: 7.0, fat: 9.0, carb: 8.0, servings: [['一份', 250]], keywords: null },
+];
+
+/**
+ * 名字完全没见过时，按关键词归到「哪一类」，返回同类均值条目。
+ * 顺序有讲究：先判肉/主食，再判汤/甜点/饮料/水果/蔬菜/零食，最后落到「家常菜」。
+ */
+export function genericEstimateFor(name) {
+  const q = String(name || '');
+  for (const g of GENERIC_ESTIMATES) {
+    if (g.keywords && g.keywords.test(q)) return g;
+  }
+  return GENERIC_ESTIMATES[GENERIC_ESTIMATES.length - 1];
+}
 
 const ROUNDING_TOLERANCE = 0.22; // 食物表的热量普遍按 4/9/4 折算，允许 22% 偏差
 
@@ -301,6 +423,11 @@ export function findFood(id) {
   return FOODS.find((f) => f.id === id) || null;
 }
 
+/** 按 id 找「可匹配食物」（含组合菜换算出来的那份，AI 返回组合菜 id 时要用） */
+export function findMatchableFood(id) {
+  return CATALOG_FOODS.find((f) => f.id === id) || null;
+}
+
 /**
  * 从一句话里判断「生重还是熟重」。
  *
@@ -316,6 +443,22 @@ export function detectFoodForm(text) {
   if (/熟重|熟(的)?(鸡|牛|猪|鱼|虾|肉)|水煮|白灼|清蒸|煎|烤|炒|卤|炖|红烧|空气炸|蒸熟|煮熟/.test(s)) return 'cooked';
   return null;
 }
+
+/** 组合菜按「每 100 克」换算出来的可匹配条目（AI 说「黄焖鸡米饭」「馄饨」时要靠它） */
+export const DISH_FOODS = DISHES.map(dishAsFood).filter(
+  // 和食材表重复的 id 以食材表为准（食材表更细：牛肉面在两边都有）
+  (d) => !FOODS.some((f) => f.id === d.id),
+);
+
+/** 匹配和搜索用：食材 + 组合菜。顺序上食材优先，避免组合菜抢走更具体的条目 */
+export const CATALOG_FOODS = [...FOODS, ...DISH_FOODS];
+
+/** 这条食物有哪些别名（组合菜的别名在 dishes.js 里，不重复维护一份） */
+export function aliasesOf(food) {
+  return food?._aliases || ALIASES[food.id] || [];
+}
+
+const aliasList = aliasesOf;
 
 /** 名称归一化：去掉括号补充、空格、标点，方便比较 */
 function normName(text) {
@@ -354,12 +497,12 @@ export function matchFoodByName(name, { minScore = 70, preferForm = null } = {})
     if (!best || total > best.score) best = { food, score: total, reason };
   };
 
-  for (const food of FOODS) {
+  for (const food of CATALOG_FOODS) {
     const n = normName(food.name);
     // 1) 名字完全一致（去掉括号说明后）
     if (n === q) { consider(food, 100, '名字一致'); continue; }
     // 2) 别名完全一致
-    const aliases = ALIASES[food.id] || [];
+    const aliases = aliasList(food);
     let aliasHit = null;
     for (const a of aliases) {
       if (normName(a) === q) { aliasHit = a; break; }

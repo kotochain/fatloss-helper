@@ -1281,6 +1281,7 @@ async function runQuickParse(text, mealOverride = null) {
   let aiError = null;
   let aiNote = null;
   let unmatchedItems = [];
+  let normEstimated = [];
 
   if (aiOn()) {
     const res = await askAi(text, { meal });
@@ -1292,6 +1293,7 @@ async function runQuickParse(text, mealOverride = null) {
       );
       // AI 认出来了但本地库里没有的，要原样带出去给用户看（以前是直接丢掉，用户以为记上了）
       unmatchedItems = norm.unmatchedItems || [];
+      normEstimated = norm.estimated || [];
       if (norm.items.length) {
         items = norm.items;
         questions = norm.questions;
@@ -1328,6 +1330,7 @@ async function runQuickParse(text, mealOverride = null) {
     aiError,
     note: aiNote,
     unmatchedItems,
+    estimated: (normEstimated || []),
   };
   openDraftSheet();
 }
@@ -1367,28 +1370,50 @@ function drawDraft() {
   // 一条都没认出来：不许显示「记上」（记 0 条 = 留一条空记录，之后更乱）。
   // 而且要分清两种情况：AI 认出来了但库里没有 vs 完全没听懂 —— 给用户的建议完全不同。
   if (!draft.items.length) {
-    const missing = draft.unmatchedItems || [];
+    // 一条都认不出来很少见了（v31 起 AI 认出来的东西就算库里没有也会按同类均值记上），
+    // 但真遇到时也不能让用户卡在这儿：给能点的例子 + 直接进食物搜索 + 保留原句重写。
+    const original = draft.text || '';
+    const examples = ['一碗牛肉面加了个蛋', '半碗米饭、一份红烧肉', '一杯奶茶、一份鸡排'];
     box.innerHTML = `
       <div class="warn" style="margin-top:10px">
-        ${missing.length
-          ? `认出来了，但这些食物本地库里没有：<b>${missing.map((x) => esc(x.name)).join('、')}</b>。所以一条都没记上。`
-          : '这句我没认出来，所以一条都没记上。'}
+        ${draft.aiError
+          ? '这句没能记上：AI 那条路没通，离线识别也没认出里面的食物。'
+          : '这句我没认出里面的食物，所以一条都没记上。'}
       </div>
       ${draft.aiError ? `<div class="warn" style="margin-bottom:8px">
-        AI 这次也没成功：${esc(draft.aiError)}
-        —— 所以不是这句话奇怪，是 AI 那条路没通。可以去「我的 → 设置 → AI 设置」检查一下。
+        AI 给的原因：${esc(draft.aiError)}。可以去「我的 → 设置 → AI 设置」看看有没有配好。
       </div>` : ''}
-      ${missing.length ? `<p class="tiny muted" style="margin:0 0 10px">
-        可以直接告诉我更常见的叫法（例如把「小肉丸」说成「猪肉丸」），
-        或者用「手动记一笔」自己搜。宁可现在多花十秒，也别记一条 0 kcal 的假数据。
-      </p>` : `<p class="tiny muted" style="margin:0 0 10px">换个更常见的说法试试，比如「一碗牛肉面」「两个鸡蛋一碗粥」。</p>`}
-      <button class="btn block" id="draftAgain">重新说一句</button>
-      <button class="btn ghost block" style="margin-top:8px" id="draftManual">手动记一笔</button>`;
-    $('#draftAgain', box)?.addEventListener('click', () => closeSheet());
-    $('#draftManual', box)?.addEventListener('click', () => {
+      <p class="tiny muted" style="margin:0 0 8px">换成下面这种说法一般都能认；也可以直接搜食物自己记：</p>
+      <div class="chips" id="draftExamples">
+        ${examples.map((e) => `<button class="chip" type="button" data-example="${esc(e)}">${esc(e)}</button>`).join('')}
+      </div>
+      <button class="btn block" style="margin-top:12px" id="draftManual">手动搜食物记一笔</button>
+      <button class="btn ghost block" style="margin-top:8px" id="draftAgain">回到输入框改一改</button>`;
+    // 两个入口（记录页大输入框 / 加食物弹层里的「说一句」）都要能接上：
+    // 前者有 #quickText，后者弹层已经关了，只能重新打开「说一句」并把文字填好
+    const fillSay = (text, hint) => {
+      const meal = draft?.meal || null;
+      draft = null;
       closeSheet();
-      setTimeout(() => document.querySelector('#aiSettingsBtn')?.scrollIntoView({ block: 'center' }), 200);
-      toast('点下面的「手动记一笔」自己搜食物就行。');
+      const ta = $('#quickText');
+      if (ta) {
+        ta.value = text;
+        ta.focus();
+        toast(hint);
+        return;
+      }
+      openFoodSheet(meal, text);
+    };
+    box.querySelectorAll('[data-example]').forEach((btn) => {
+      btn.addEventListener('click', () => fillSay(btn.dataset.example, $('#quickText') ? '改成例句了，点「解析这一句」试试。' : '改成例句了，点「解析并记到这一餐」试试。'));
+    });
+    $('#draftAgain', box)?.addEventListener('click', () => fillSay(original, '原句给你留着了，改一改再点解析。'));
+    $('#draftManual', box)?.addEventListener('click', () => {
+      const meal = draft.meal;
+      draft = null;
+      closeSheet();
+      // 以前这里只是滚动到某个按钮 + toast，什么都打不开；现在直接进食物搜索
+      openFoodSheet(meal);
     });
     return;
   }
@@ -1397,12 +1422,16 @@ function drawDraft() {
   box.innerHTML = `
     <div class="warn ${draft.source === 'ai' ? 'info' : ''}" style="margin-top:10px">
       解析方式：${draft.source === 'ai' ? 'AI 识别' : '离线识别（常见说法）'}
-      ${draft.aiError ? `｜AI 这次没成功：${esc(draft.aiError)}` : ''}
+      ${draft.aiError
+        ? (draft.source === 'ai'
+          ? `｜AI 这次没成功：${esc(draft.aiError)}`
+          : `｜AI 没接上：${esc(draft.aiError)}。这次先用离线识别记上了，常见说法离线也能认。`)
+        : ''}
       ${draft.note ? `<br>${esc(draft.note)}` : ''}
     </div>
-    ${(draft.unmatchedItems || []).length ? `<div class="warn" style="margin-bottom:6px">
-      有 ${draft.unmatchedItems.length} 样没记上（本地库里没有）：<b>${draft.unmatchedItems.map((x) => esc(x.name)).join('、')}</b>
-      —— 可以手动补记，或者换成更常见的叫法。
+    ${(draft.estimated || []).length ? `<div class="warn" style="margin-bottom:6px">
+      有 ${draft.estimated.length} 样本地库里没有，先按<b>同类均值</b>估的（标签「按同类估算」）：
+      <b>${draft.estimated.map((x) => esc(x)).join('、')}</b>。不准就点右边的 × 删掉，或者直接改克数。
     </div>` : ''}
     ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
     <div style="margin-top:8px">
@@ -1410,12 +1439,15 @@ function drawDraft() {
         <div class="entry">
           <span class="name">${esc(it.name)}
             ${it.needsConfirm ? '<span class="tag amber">待确认</span>' : ''}
+            ${it.estimated ? '<span class="tag amber">按同类估算</span>' : ''}
             ${needsPortionPick(it) ? '<span class="tag amber">份量是猜的</span>' : ''}
             ${it.warning ? `<em style="display:block;color:#92400e">${esc(it.warning)}</em>` : ''}
+            ${it.note ? `<em class="draft-note">${esc(it.note)}</em>` : ''}
           </span>
           <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams" style="width:80px;padding:4px 6px;font-size:14px">
           <span class="kcal">克</span>
           <span class="kcal" data-kcal="${i}">${Math.round(it.kcal)} kcal</span>
+          <button class="del" type="button" data-del="${i}" aria-label="删掉这条" title="删掉这条">×</button>
         </div>
         ${needsPortionPick(it) ? `
           <div class="portion-guess" data-guess="${i}">
@@ -1447,6 +1479,22 @@ function drawDraft() {
       applyDraftGrams(box, Number(inp.dataset.grams), Number(inp.value));
       // 用户自己填了克数，这一条就不用再问了
       box.querySelector(`[data-guess="${inp.dataset.grams}"]`)?.remove();
+    });
+  });
+  // 删掉一条：AI 认错/估错的东西要能当场拿掉，不然用户只能整条重写（更常见的做法是干脆不记了）
+  box.querySelectorAll('[data-del]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!draft) return;
+      const idx = Number(btn.dataset.del);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= draft.items.length) return;
+      draft.items.splice(idx, 1);
+      if (!draft.items.length) {
+        draft = null;
+        closeSheet();
+        toast('这条没记上，可以换个说法再说一次。');
+        return;
+      }
+      drawDraft();
     });
   });
   box.querySelectorAll('[data-pick-portion]').forEach((btn) => {
@@ -1881,11 +1929,12 @@ function renderProgress() {
  * 现在顶部可以切到「说一句」，解析走的是和记录页顶部同一个流程（草稿确认 → 记进这一餐），
  * 差别只是**默认餐次已经定好**，不用用户再选。
  */
-function openFoodSheet(mealKey) {
+function openFoodSheet(mealKey, initialSay = '') {
   const slot = MEAL_SLOTS.find((s) => s.key === mealKey) || MEAL_SLOTS[0];
   // 记住上次用的哪条路：习惯说一句的人，不用每次再切一遍
   const savedPane = state.settings?.foodSheetPane;
-  let pane = ['say', 'kcal'].includes(savedPane) ? savedPane : 'search';
+  // 从「整句没认出来」的兜底页点例句进来时，直接落回「说一句」并把例句填好
+  let pane = initialSay ? 'say' : (['say', 'kcal'].includes(savedPane) ? savedPane : 'search');
 
   openSheet({
     title: `加到${slot.label}`,
@@ -1904,7 +1953,7 @@ function openFoodSheet(mealKey) {
       </div>
 
       <div id="paneSay" class="hidden">
-        <textarea id="foodSayText" rows="3" style="margin-top:10px" placeholder="例如：一碗牛肉面，加了个蛋"></textarea>
+        <textarea id="foodSayText" rows="3" style="margin-top:10px" placeholder="例如：一碗牛肉面，加了个蛋">${esc(initialSay)}</textarea>
         <button class="btn block" id="foodSayParse" style="margin-top:8px">解析并记到${slot.label}</button>
         <p class="tiny muted" style="margin:8px 0 0">
           解析完先给你看清单，克数能改，确认了才记上。连着说几样也行（「米饭一碗、青菜一份」）。

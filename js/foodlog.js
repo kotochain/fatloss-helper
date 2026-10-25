@@ -3,7 +3,7 @@
  * 不碰界面，也不直接碰 localStorage —— 由 app.js 负责存盘，这样测试起来方便。
  */
 
-import { FOODS, ALIASES } from './foods.js';
+import { CATALOG_FOODS, aliasesOf } from './foods.js';
 import { calcEntry, round } from './calc.js';
 
 export const MEAL_SLOTS = [
@@ -29,7 +29,8 @@ export function normalize(text) {
  */
 export function searchFoods(query, customFoods = [], limit = 30) {
   const q = normalize(query);
-  const all = [...customFoods, ...FOODS];
+  // v31：组合菜也进搜索 —— 以前「馄饨」「黄焖鸡米饭」这些只在离线解析表里，搜索页根本搜不到
+  const all = [...customFoods, ...CATALOG_FOODS];
   if (!q) return all.slice(0, limit);
 
   const scored = [];
@@ -40,7 +41,7 @@ export function searchFoods(query, customFoods = [], limit = 30) {
     else if (name.startsWith(q)) score = 80;
     else if (name.includes(q)) score = 60;
 
-    const aliases = ALIASES[food.id] || [];
+    const aliases = aliasesOf(food);
     for (const a of aliases) {
       const na = normalize(a);
       if (na === q) score = Math.max(score, 90);

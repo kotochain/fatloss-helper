@@ -257,9 +257,16 @@ async function main() {
       inp.value = '鸡胸';
       inp.dispatchEvent(new Event('input', { bubbles: true }));
       const hits = [...document.querySelectorAll('#foodResults [data-pick]')];
+      // v31：组合菜（以前只在离线解析表里，搜索/AI 都看不见）现在也搜得到
+      inp.value = '馄饨';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      const dishHits = [...document.querySelectorAll('#foodResults [data-pick] .nm')].map((x) => x.textContent.trim());
+      inp.value = '鸡胸';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
       return {
         结果数: hits.length,
         排序: hits.map((h) => h.querySelector('.nm')?.textContent.trim().replace(/\s+/g, ' ') || h.textContent.trim().slice(0, 12)).slice(0, 4),
+        搜馄饨: dishHits.slice(0, 3),
       };
     })()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-3-search.png`));
@@ -283,6 +290,129 @@ async function main() {
         弹层已关闭: document.querySelector('#sheetRoot').classList.contains('hidden'),
       };
     })()`);
+
+    // 第四步半（v31）：AI 认出来了、但本地库里没有的菜 —— 必须按同类均值先记上，
+    // 标明「按同类估算」、能删；不能再出现「一条都记不上」的死胡同。
+    // 用 CDP 拦住 chat/completions 请求，喂一份「黄焖鸡米饭 + 库里没有的菜」的假返回。
+    const fakeAiBody = JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            meal: 'lunch',
+            items: [
+              { name: '黄焖鸡米饭', grams: 550 },
+              { name: '外婆家秘制扣肉', grams: 180 },
+              { name: '某网红限定轻食碗', grams: 300 },
+            ],
+            questions: [],
+          }),
+        },
+      }],
+    });
+    await evaluate(client, `(() => {
+      const raw = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      raw.settings = { ...(raw.settings || {}), mode: 'ai' };
+      localStorage.setItem('fatloss.state.v2', JSON.stringify(raw));
+      localStorage.setItem('fatloss.ai.v1', JSON.stringify({
+        presetId: 'custom', baseUrl: location.origin + '/fake-ai/v1',
+        model: 'fake-model', apiKey: 'sk-fake-for-browser-check', mode: 'direct', // secret-scan:allow 假密钥（只发给本地假服务商）
+        updatedAt: new Date().toISOString(),
+      }));
+    })()`);
+    await client.send('Fetch.enable', { patterns: [{ urlPattern: '*chat/completions*', requestStage: 'Request' }] });
+    client.on('Fetch.requestPaused', (p) => {
+      if (p.request.url.includes('chat/completions')) {
+        client.send('Fetch.fulfillRequest', {
+          requestId: p.requestId,
+          responseCode: 200,
+          responseHeaders: [
+            { name: 'Content-Type', value: 'application/json' },
+            { name: 'Access-Control-Allow-Origin', value: '*' },
+            { name: 'Access-Control-Allow-Headers', value: 'authorization,content-type' },
+            { name: 'Access-Control-Allow-Methods', value: 'POST,OPTIONS' },
+          ],
+          body: Buffer.from(fakeAiBody).toString('base64'),
+        }).catch(() => { /* 请求可能已经结束 */ });
+      } else {
+        client.send('Fetch.continueRequest', { requestId: p.requestId }).catch(() => { /* 同上 */ });
+      }
+    });
+    await evaluate(client, 'location.reload()');
+    await sleep(1600);
+    await evaluate(client, `document.querySelector('.tab[data-view="log"]').click()`);
+    await sleep(400);
+    await evaluate(client, `(() => {
+      const ta = document.querySelector('#quickText');
+      ta.value = '中午吃了黄焖鸡米饭、外婆家秘制扣肉和某网红限定轻食碗';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#quickParse').click();
+    })()`);
+    await sleep(1200);
+    const aiFallback = await evaluate(client, `(() => {
+      const rows = [...document.querySelectorAll('#draftHost .entry')];
+      const est = rows.filter((r) => (r.querySelector('.tag.amber')?.textContent || '').includes('按同类估算'));
+      return {
+        弹层标题: document.querySelector('#sheetTitle')?.textContent || '',
+        行数: rows.length,
+        估算行数: est.length,
+        估算说明: est.map((r) => r.querySelector('.draft-note')?.textContent.trim().slice(0, 60) || '').slice(0, 2),
+        有删除按钮: document.querySelectorAll('#draftHost .entry [data-del]').length,
+        合计文本: (document.querySelector('#draftHost .row.between.small')?.textContent || '').replace(/\s+/g, ' ').trim(),
+      };
+    })()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-10-ai-fallback.png`));
+    // 删掉一条估算条目 → 行数和合计都要跟着变（不能只是视觉上隐藏）
+    await evaluate(client, `document.querySelector('#draftHost .entry [data-del]').click()`);
+    await sleep(300);
+    const aiFallbackAfterDel = await evaluate(client, `(() => ({
+      行数: document.querySelectorAll('#draftHost .entry').length,
+      合计: (document.querySelector('#draftHost .row.between.small')?.textContent || '').replace(/\s+/g, ' ').trim(),
+    }))()`);
+    // 存下来：估算条目也要能落库（记 0 条才是失败的）
+    await evaluate(client, `document.querySelector('#draftSave')?.click()`);
+    await sleep(500);
+    const aiFallbackSaved = await evaluate(client, `(() => {
+      const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      const today = st.days[Object.keys(st.days).sort().pop()];
+      const all = Object.values(today.meals).flat();
+      return { 条数: all.length, 名字: all.map((e) => e.food.name).slice(0, 6) };
+    })()`);
+    await client.send('Fetch.disable').catch(() => { /* 已经关了 */ });
+    await evaluate(client, `(() => {
+      localStorage.removeItem('fatloss.ai.v1');
+      const raw = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      raw.settings = { ...(raw.settings || {}), mode: 'basic' };
+      localStorage.setItem('fatloss.state.v2', JSON.stringify(raw));
+    })()`);
+    await evaluate(client, 'location.reload()');
+    await sleep(1400);
+
+    // 第四步半之二（v31）：整句都没认出来时不许死胡同 —— 有例句、能点、能回到「说一句」。
+    await evaluate(client, `document.querySelector('.tab[data-view="log"]').click()`);
+    await sleep(400);
+    await evaluate(client, `(() => {
+      const ta = document.querySelector('#quickText');
+      ta.value = '今天吃了佛跳墙';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#quickParse').click();
+    })()`);
+    await sleep(900);
+    const deadEnd = await evaluate(client, `(() => ({
+      标题: document.querySelector('#sheetTitle')?.textContent || '',
+      例句数: document.querySelectorAll('#draftHost [data-example]').length,
+      有手动: Boolean(document.querySelector('#draftManual')),
+      有返回: Boolean(document.querySelector('#draftAgain')),
+      文案: (document.querySelector('#draftHost')?.innerText || '').replace(/\s+/g, ' ').slice(0, 80),
+    }))()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-11-deadend.png`));
+    await evaluate(client, `document.querySelector('#draftHost [data-example]').click()`);
+    await sleep(400);
+    const deadEndAfter = await evaluate(client, `(() => ({
+      // 记录页有自己的大输入框：点例句应该把例句填回那个框、弹层关掉。
+      // （从「今天」页的加食物弹层进来时没有 #quickText，会重新打开「说一句」并把文字填好。）
+      例句填进去了: (document.querySelector('#quickText')?.value || '').slice(0, 30),
+      弹层关了: document.querySelector('#sheetRoot').classList.contains('hidden'),
+    }))()`);
 
     // 第五步：四个标签页都点一遍
     const tabs = {};
@@ -434,7 +564,7 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, deadEnd, deadEndAfter, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -471,6 +601,12 @@ function printReport(report) {
     console.log(`  搜索「鸡胸」：${r.searchWorks.结果数} 条 → ${JSON.stringify(r.searchWorks.排序)}`);
     console.log(`  份量预览：${r.amountPreview}`);
     console.log(`  加入记录后：${JSON.stringify(r.afterAdd)}`);
+    console.log(`  搜「馄饨」：${JSON.stringify(r.searchWorks.搜馄饨)}`);
+    console.log(`  AI 兜底：${r.aiFallback.行数} 行（估算 ${r.aiFallback.估算行数} 行）｜删除按钮 ${r.aiFallback.有删除按钮} 个｜合计 ${r.aiFallback.合计文本}`);
+    console.log(`       ↳ 估算说明：${JSON.stringify(r.aiFallback.估算说明)}`);
+    console.log(`       ↳ 删一条后 ${r.aiFallbackAfterDel.行数} 行｜存下 ${r.aiFallbackSaved.条数} 条：${JSON.stringify(r.aiFallbackSaved.名字)}`);
+    console.log(`  没认出来时：${r.deadEnd.例句数} 个例句｜手动 ${r.deadEnd.有手动 ? '有' : '缺'}｜返回 ${r.deadEnd.有返回 ? '有' : '缺'}｜文案「${r.deadEnd.文案}」`);
+    console.log(`       ↳ 点例句后：输入框「${r.deadEndAfter.例句填进去了}」｜弹层关闭 ${r.deadEndAfter.弹层关了 ? '是' : '否'}`);
     console.log(`  四个标签页卡片数：${JSON.stringify(r.tabs)}`);
     console.log(`  图标：${r.iconAudit.图标数} 个｜兜底方块 ${r.iconAudit.兜底方块.length} 个｜缺尺寸 ${r.iconAudit.缺尺寸} 个｜界面残留 emoji ${r.iconAudit.emoji行.length} 行`);
     if (r.iconAudit.emoji行.length) for (const l of r.iconAudit.emoji行) console.log(`       ↳ 还有 emoji：${l}`);
@@ -493,6 +629,14 @@ function printReport(report) {
       || r.settings.图标 > 0 && (r.settings.图标尺寸 < 22 || r.settings.图标块最小 < 34)
       || r.update.标题 !== '更新了什么' || r.update.条目数 < 1 || !r.update.有按钮
       || !String(r.searchWorks.排序[0] || '').includes('熟重')
+      || !r.searchWorks.搜馄饨.some((x) => x.includes('馄饨'))
+      || r.aiFallback.行数 !== 3 || r.aiFallback.估算行数 !== 2 || r.aiFallback.有删除按钮 !== 3
+      || !r.aiFallback.估算说明.every((x) => x.includes('本地库里没有'))
+      || r.aiFallbackAfterDel.行数 !== 2 || !r.aiFallbackAfterDel.合计.includes('kcal')
+      || r.aiFallbackSaved.条数 < 2
+      || r.deadEnd.例句数 < 3 || !r.deadEnd.有手动 || !r.deadEnd.有返回
+      || !r.deadEnd.文案.includes('一条都没记上')
+      || r.deadEndAfter.例句填进去了.length < 4 || !r.deadEndAfter.弹层关了
       || !r.aboutCheck.有按钮 || !/最新版本/.test(r.aboutCheck.提示)
       || r.refresh.标题 !== '有新版本了' || !r.refresh.按钮.includes('刷新，用上新版')
       || !r.refresh.按钮.includes('先不刷新') || !r.refresh.正文.includes(r.refresh.假版本);

@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildSystemPrompt, normalizeResult, extractJson, humanizeHttpError,
-  humanizeNetworkError, requestParse, requestPing, requestModels,
+  humanizeNetworkError, requestParse, requestPing, requestModels, coerceGrams,
 } from '../js/ai-core.js';
 import { readAiConfig, writeAiConfig, clearAiConfig, AI_CONFIG_KEY } from '../js/ai-config.js';
 import { modelsUrl, parseModelsResponse, normalizeAiConfigInput, publicAiConfig, PRESETS } from '../js/providers.js';
@@ -186,11 +186,27 @@ test('模型返回带 ```json 包裹也能解析', () => {
   assert.throws(() => extractJson('完全不是 JSON'), /不是 JSON/);
 });
 
-test('normalizeResult 挡掉脏数据', () => {
+test('normalizeResult 挡掉脏数据，但认得「份量说法」和中文餐次', () => {
   const r = normalizeResult({ meal: '夜宵', items: [{ name: '', grams: 1 }, { name: '面', grams: 0 }, { name: '饭', grams: 200 }], questions: ['q', 5, 'p', 'z'] });
-  assert.equal(r.meal, null);
+  assert.equal(r.meal, 'snack', '中文「夜宵」要能认出来（v31 起），非法值才丢');
   assert.deepEqual(r.items.map((i) => i.name), ['饭']);
   assert.equal(r.questions.length, 2, '追问最多两个');
+
+  // v31：模型给字符串克数、或者只给「一碗」这种说法，都不能再被当成脏数据丢掉
+  const tolerant = normalizeResult({
+    meal: 'lunch',
+    foods: [
+      { food: '黄焖鸡米饭', amount: '约550克' },
+      { dish: '馄饨', portion: '一碗' },
+      { name: '一些', grams: '很多' },
+    ],
+  });
+  assert.deepEqual(tolerant.items.map((i) => i.name), ['黄焖鸡米饭', '馄饨'], '「很多」不是份量，要丢掉');
+  assert.equal(tolerant.items[0].grams, 550);
+  assert.equal(tolerant.items[1].grams, null);
+  assert.equal(tolerant.items[1].portion, '一碗');
+  const bad = normalizeResult({ meal: 'brunch', items: [{ name: '饭', grams: 200 }] });
+  assert.equal(bad.meal, null, '不认识的餐次仍然是 null');
 });
 
 test('连通测试：成功返回模型回复，失败抛出中文原因', async () => {
@@ -234,4 +250,98 @@ test('保存配置会记录更新时间（界面要显示「更新于」）', ()
   const cfg = readAiConfig(st);
   assert.ok(cfg.updatedAt, '应当记录更新时间');
   assert.ok(!Number.isNaN(Date.parse(cfg.updatedAt)), '更新时间要是合法时间');
+});
+
+test('v31：克数容错 —— 数字、字符串、斤两、带单位都能认', () => {
+  assert.equal(coerceGrams(150), 150);
+  assert.equal(coerceGrams('150'), 150);
+  assert.equal(coerceGrams('150克'), 150);
+  assert.equal(coerceGrams('约 150g'), 150);
+  assert.equal(coerceGrams('0.3kg'), 300);
+  assert.equal(coerceGrams('三两'), 150);
+  assert.equal(coerceGrams('很多'), null, '「很多」不是克数');
+  assert.equal(coerceGrams(-5), null);
+});
+
+test('v31：提示词必须要求「至少回一条」，并给出常见口语的例子', () => {
+  const p = buildSystemPrompt();
+  assert.ok(p.includes('不要输出热量'), '红线不能丢：不许模型编营养数字');
+  assert.ok(p.includes('至少要有 1 条'), '要让模型知道「提到吃的就必须给条目」，否则用户看到的就是没听懂');
+  assert.ok(p.includes('鸡蛋灌饼') && p.includes('梅菜扣肉'), '要给出用户真会说的例子');
+  assert.ok(p.includes('照用户的叫法写名字'), '库里没有的菜要照实说名字，别换成别的食物');
+});
+
+/** 造一个假的上游：按顺序返回预设响应 */
+function scriptedFetch(responses, capture = []) {
+  let i = 0;
+  return async (url, init) => {
+    capture.push({ url, body: JSON.parse(init.body) });
+    const r = responses[Math.min(i++, responses.length - 1)];
+    if (r.throw) throw r.throw;
+    return {
+      ok: r.ok ?? true,
+      status: r.status ?? 200,
+      json: async () => r.json,
+      text: async () => r.text ?? '',
+    };
+  };
+}
+
+const CFG = { baseUrl: 'https://fake.example/v1', model: 'fake-model', apiKey: 'sk-fake' };
+
+test('v31：服务商不支持 JSON 模式（400）时，去掉 response_format 自动重试一次', async () => {
+  const calls = [];
+  const fetchImpl = scriptedFetch([
+    { ok: false, status: 400, text: 'response_format is not supported for this model' },
+    { json: { choices: [{ message: { content: '{"items":[{"name":"米饭","grams":200}]}' } }] } },
+  ], calls);
+  const r = await requestParse({ text: '吃了200克米饭', config: CFG, fetchImpl });
+  assert.equal(r.items.length, 1);
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0].body.response_format, '第一次带着 JSON 模式试');
+  assert.equal(calls[1].body.response_format, undefined, '第二次要去掉它');
+});
+
+test('v31：模型没按 JSON 回时，会再要一次；第二次成功就正常返回', async () => {
+  const calls = [];
+  const fetchImpl = scriptedFetch([
+    { json: { choices: [{ message: { content: '抱歉，我理解一下……用户吃了米饭。' } }] } },
+    { json: { choices: [{ message: { content: '{"meal":"lunch","items":[{"name":"米饭","grams":200}],"questions":[]}' } }] } },
+  ], calls);
+  const r = await requestParse({ text: '中午吃了米饭', config: CFG, fetchImpl });
+  assert.equal(r.items.length, 1);
+  assert.equal(r.meal, 'lunch');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].body.messages.at(-1).content.includes('只输出 JSON'), '重试时要再强调一次只要 JSON');
+});
+
+test('v31：两次都不是 JSON 时，报的是「不是 JSON」而不是空白结果', async () => {
+  const fetchImpl = scriptedFetch([
+    { json: { choices: [{ message: { content: '我不知道。' } }] } },
+    { json: { choices: [{ message: { content: '还是不知道。' } }] } },
+  ]);
+  await assert.rejects(
+    () => requestParse({ text: 'x', config: CFG, fetchImpl }),
+    /不是 JSON/,
+  );
+});
+
+test('v31：模型返回空 items 时会再要一次（真的什么都没有才交给离线兜底）', async () => {
+  const calls = [];
+  const fetchImpl = scriptedFetch([
+    { json: { choices: [{ message: { content: '{"meal":"lunch","items":[],"questions":[]}' } }] } },
+    { json: { choices: [{ message: { content: '{"meal":"lunch","items":[{"name":"牛肉面","grams":600}],"questions":[]}' } }] } },
+  ], calls);
+  const r = await requestParse({ text: '中午吃了碗面', config: CFG, fetchImpl });
+  assert.equal(r.items.length, 1, '第二次要到的条目要能用上');
+  assert.equal(r.items[0].name, '牛肉面');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].body.messages.at(-1).content.includes('不要回空 items'));
+
+  // 第二次还是空的：返回空结果（由界面退回离线解析），不能抛错
+  const emptyFetch = scriptedFetch([
+    { json: { choices: [{ message: { content: '{"items":[]}' } }] } },
+  ]);
+  const empty = await requestParse({ text: 'x', config: CFG, fetchImpl: emptyFetch });
+  assert.deepEqual(empty.items, []);
 });
