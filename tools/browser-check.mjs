@@ -350,7 +350,7 @@ async function main() {
     await sleep(1200);
     const aiFallback = await evaluate(client, `(() => {
       const rows = [...document.querySelectorAll('#draftHost .entry')];
-      const est = rows.filter((r) => (r.querySelector('.tag.amber')?.textContent || '').includes('按同类估算'));
+      const est = rows.filter((r) => (r.querySelector('.tag.amber')?.textContent || '').includes('估算'));
       return {
         弹层标题: document.querySelector('#sheetTitle')?.textContent || '',
         行数: rows.length,
@@ -631,7 +631,7 @@ function printReport(report) {
       || !String(r.searchWorks.排序[0] || '').includes('熟重')
       || !r.searchWorks.搜馄饨.some((x) => x.includes('馄饨'))
       || r.aiFallback.行数 !== 3 || r.aiFallback.估算行数 !== 2 || r.aiFallback.有删除按钮 !== 3
-      || !r.aiFallback.估算说明.every((x) => x.includes('本地库里没有'))
+      || !r.aiFallback.估算说明.every((x) => x.includes('食物库里没有'))
       || r.aiFallbackAfterDel.行数 !== 2 || !r.aiFallbackAfterDel.合计.includes('kcal')
       || r.aiFallbackSaved.条数 < 2
       || r.deadEnd.例句数 < 3 || !r.deadEnd.有手动 || !r.deadEnd.有返回

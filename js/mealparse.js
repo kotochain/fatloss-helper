@@ -825,14 +825,14 @@ export function normalizeAiItems(aiResult, defaultMeal = null, { text = '' } = {
         grams,
         ...nut,
         confidence: 'low',
-        confidenceReason: '本地库里没有这样东西，先按同类均值估的',
+        confidenceReason: '食物库里没有这样东西，先按平均值估的',
         portionChoices: buildPortionChoices(generic, grams),
         needsConfirm: false,
         source: 'estimate',
         foodId: null,
         estimated: true,
         estimateId: generic.id,
-        note: `本地库里没有「${name}」，按「${generic.name}」的均值算的（每 100 克 ${generic.kcal} kcal）；不对就删掉或改克数`,
+        note: `食物库里没有「${name}」，先按「${generic.name.replace(/（.*?）/g, '')}」的平均值估的；不准就删掉或改克数`,
       });
       out.unmatched.push(name);
       out.unmatchedItems.push({ name, grams, estimateId: generic.id });

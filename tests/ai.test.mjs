@@ -148,7 +148,7 @@ test('AI 认出但本地库里没有的：按同类均值记上、并标明是�
   assert.equal(est.length, 2);
   for (const it of est) {
     assert.equal(it.estimated, true);
-    assert.ok(it.note.includes('本地库里没有'), `要写明是估的：${it.note}`);
+    assert.ok(it.note.includes('食物库里没有'), `要写明是估的：${it.note}`);
     assert.ok(it.estimateId.startsWith('generic_'), '数字必须来自本地同类均值表');
     assert.equal(it.foodId, null);
   }

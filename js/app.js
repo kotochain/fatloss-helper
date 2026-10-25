@@ -1264,7 +1264,8 @@ function bindQuickLog() {
 function openDraftSheet() {
   if (!draft) return;
   openSheet({
-    title: '这样记对吗？',
+    // 一条都没认出来时，标题不能还问「这样记对吗？」
+    title: draft.items.length ? '这样记对吗？' : '这句没认出来',
     body: '<div id="draftHost"></div>',
     onMount: () => {
       drawDraft();
@@ -1421,7 +1422,7 @@ function drawDraft() {
   const needsCheck = draft.items.some((it) => it.needsConfirm);
   box.innerHTML = `
     <div class="warn ${draft.source === 'ai' ? 'info' : ''}" style="margin-top:10px">
-      解析方式：${draft.source === 'ai' ? 'AI 识别' : '离线识别（常见说法）'}
+      这次是：${draft.source === 'ai' ? 'AI 认出来的' : '离线认出来的（常见说法）'}
       ${draft.aiError
         ? (draft.source === 'ai'
           ? `｜AI 这次没成功：${esc(draft.aiError)}`
@@ -1430,24 +1431,26 @@ function drawDraft() {
       ${draft.note ? `<br>${esc(draft.note)}` : ''}
     </div>
     ${(draft.estimated || []).length ? `<div class="warn" style="margin-bottom:6px">
-      有 ${draft.estimated.length} 样本地库里没有，先按<b>同类均值</b>估的（标签「按同类估算」）：
+      有 ${draft.estimated.length} 样食物库里没有，先按<b>同类食物的平均值</b>估了（标签「估算」）：
       <b>${draft.estimated.map((x) => esc(x)).join('、')}</b>。不准就点右边的 × 删掉，或者直接改克数。
     </div>` : ''}
     ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
     <div style="margin-top:8px">
       ${draft.items.map((it, i) => `
-        <div class="entry">
-          <span class="name">${esc(it.name)}
-            ${it.needsConfirm ? '<span class="tag amber">待确认</span>' : ''}
-            ${it.estimated ? '<span class="tag amber">按同类估算</span>' : ''}
-            ${needsPortionPick(it) ? '<span class="tag amber">份量是猜的</span>' : ''}
-            ${it.warning ? `<em style="display:block;color:#92400e">${esc(it.warning)}</em>` : ''}
-            ${it.note ? `<em class="draft-note">${esc(it.note)}</em>` : ''}
-          </span>
-          <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams" style="width:80px;padding:4px 6px;font-size:14px">
-          <span class="kcal">克</span>
-          <span class="kcal" data-kcal="${i}">${Math.round(it.kcal)} kcal</span>
-          <button class="del" type="button" data-del="${i}" aria-label="删掉这条" title="删掉这条">×</button>
+        <div class="entry draft-entry">
+          <div class="draft-line">
+            <span class="name">${esc(it.name)}
+              ${it.needsConfirm ? '<span class="tag amber">待确认</span>' : ''}
+              ${it.estimated ? '<span class="tag amber">估算</span>' : ''}
+              ${!it.estimated && needsPortionPick(it) ? '<span class="tag amber">份量是猜的</span>' : ''}
+            </span>
+            <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams" style="width:80px;padding:4px 6px;font-size:14px">
+            <span class="kcal">克</span>
+            <span class="kcal" data-kcal="${i}">${Math.round(it.kcal)} kcal</span>
+            <button class="del" type="button" data-del="${i}" aria-label="删掉这条" title="删掉这条">×</button>
+          </div>
+          ${it.warning ? `<em class="draft-warn">${esc(it.warning)}</em>` : ''}
+          ${it.note ? `<em class="draft-note">${esc(it.note)}</em>` : ''}
         </div>
         ${needsPortionPick(it) ? `
           <div class="portion-guess" data-guess="${i}">

@@ -199,7 +199,7 @@ function startStaticServer() {
 }
 
 const AI_OK_ITEMS = [{ name: '牛肉面', grams: 600 }];
-const UNMATCHED_ITEMS = [{ name: '量子寿司', grams: 100 }];
+const UNMATCHED_ITEMS = [{ name: '夸克能量块', grams: 100 }];
 const MANY_ITEMS = Array.from({ length: 50 }, (_, i) => ({ name: i % 2 ? '鸡蛋' : '米饭（熟）', grams: i % 2 ? 50 : 100 }));
 
 const fakeStats = { byModel: Object.create(null), pingCalls: 0, lastAuth: '', slowHits: 0 };
@@ -664,12 +664,12 @@ async function closeAndReadState() {
 
 /** 成功路径（AI 真的成功，条目必须来自 AI） */
 async function scenarioAiSuccess(group, id, title, { model, text, shotPrefix }) {
-  const sc = beginScenario(group, id, title, '弹层显示「AI 识别」、条目正确记上、热量非 0、保存后记录里真有这几条');
+  const sc = beginScenario(group, id, title, '弹层显示「AI 认出来的」、条目正确记上、热量非 0、保存后记录里真有这几条');
   const r = await aiRound({ model, text });
   chk(sc, '页面启动', r.ready, 'window.__appReady === true', r.ready ? '是' : `否（${r.bootErr || '启动失败'}）`, '严重');
   chk(sc, 'AI 配置生效', r.aiReady, '记录页按钮显示「AI 已开启」', r.aiReady ? '是' : '否（AI 没被调用，测试无意义）', '严重');
   chk(sc, '假服务商真的收到请求', r.hits >= 1, 'chat/completions 至少 1 次', `${r.hits} 次`);
-  chk(sc, '来源标注为 AI', /AI 识别/.test(r.dom.warnText), '弹层显示「解析方式：AI 识别」', clip(r.dom.warnText, 150), '事故级');
+  chk(sc, '来源标注为 AI', /AI 认出来的/.test(r.dom.warnText), '弹层显示「这次是：AI 认出来的」', clip(r.dom.warnText, 150), '事故级');
   chk(sc, '条目被记上', r.dom.entries.length >= 1, '至少 1 条可确认的条目', `${r.dom.entries.length} 条${r.dom.entries.length ? `：${r.dom.entries.map((e) => e.name).join('、')}` : ''}`, '事故级');
   const totalNum = Number(String(r.dom.total).replace(/[^0-9.]/g, ''));
   chk(sc, '热量非 0', totalNum > 0, '这一餐合计热量 > 0', `合计「${r.dom.total || '（无）'}」`, '事故级');
@@ -685,7 +685,7 @@ async function scenarioAiSuccess(group, id, title, { model, text, shotPrefix }) 
     '保存的食物每 100 克热量 > 0（界面才能算出非 0 热量）', st.entries.map((e) => e.kcalPer100).join(' / ') || '无', '严重');
   chk(sc, '用户看得到「记上」', saved, '点了「就这样，记上」并能保存', saved ? '已点' : '没有按钮');
   await dismissCelebrate();
-  endScenario(sc, `来源「AI 识别」，弹层 ${r.dom.entries.length} 条、合计 ${Math.round(totalNum)} kcal；保存后记录 ${st.entries.length} 条（${first ? `${first.name} ${first.grams} 克` : '无'}）`);
+  endScenario(sc, `来源「AI 认出来的」，弹层 ${r.dom.entries.length} 条、合计 ${Math.round(totalNum)} kcal；保存后记录 ${st.entries.length} 条（${first ? `${first.name} ${first.grams} 克` : '无'}）`);
   return sc;
 }
 
@@ -721,7 +721,7 @@ async function scenarioAiFailure(group, id, title, {
     chk(sc, '不显示「记上」按钮', !r.dom.saveBtn, '一条都没解析出来时不显示 #draftSave', r.dom.saveBtn ? `有（${r.dom.saveBtnText}）` : '没有', '严重');
     chk(sc, '没有 0 kcal 草稿', r.dom.entries.length === 0 && !/0\s*kcal/.test(r.dom.draftText), '不出现条目/0 kcal 草稿', `条目 ${r.dom.entries.length} 条`);
   } else {
-    chk(sc, '离线兜底如实标成离线', /离线识别/.test(r.dom.warnText), '弹层显示「离线识别（常见说法）」', clip(r.dom.warnText, 150), '事故级');
+    chk(sc, '离线兜底如实标成离线', /离线认出来的/.test(r.dom.warnText), '弹层显示「这次是：离线认出来的（常见说法）」', clip(r.dom.warnText, 150), '事故级');
   }
   chk(sc, '保留用户输入的文字', r.dom.inputValue === text, `输入框仍是「${text}」`, `输入框是「${clip(r.dom.inputValue, 80)}」`, '一般');
   sc.shots.push(await shot(`${shotPrefix}-sheet`));
@@ -735,59 +735,79 @@ async function scenarioAiFailure(group, id, title, {
   return sc;
 }
 
-/** items 全部匹配不上本地食物库（AI 返回了名字，但库里没有） */
+/**
+ * items 全部匹配不上本地食物库（AI 返回了名字，但库里没有）。
+ * v31 起产品行为变了：不再「一条都不记」，而是按同类估算记上并标明「估算」。
+ */
 async function scenarioAiUnmatched(group, id, title, { text, shotPrefix }) {
-  const sc = beginScenario(group, id, title, '明确列出哪些没匹配上、不给「记上」按钮、不显示「AI 识别」、不创建记录');
+  const sc = beginScenario(group, id, title,
+    '按同类估算记上、标明「估算」与原因、给出「记上」按钮、保存后能落库（v31 起不再一条都不记）');
   const r = await aiRound({ model: 'unmatched', text });
   chk(sc, '页面启动', r.ready, 'window.__appReady === true', r.ready ? '是' : '否', '严重');
   chk(sc, '假服务商真的收到请求', r.hits >= 1, 'chat/completions 至少 1 次', `${r.hits} 次`);
   chk(sc, '界面没卡住', !r.waitErr, '弹层在限时内出现', r.waitErr || '正常');
-  chk(sc, '明确列出没匹配上的食物', /量子寿司/.test(r.dom.draftText), '弹层列出「量子寿司」', clip(r.dom.draftText, 200), '严重');
-  chk(sc, '不显示「记上」按钮', !r.dom.saveBtn, '一条都没记上时不显示 #draftSave', r.dom.saveBtn ? `有（${r.dom.saveBtnText}）` : '没有', '事故级');
-  chk(sc, '不显示「AI 识别」', !/AI 识别/.test(r.dom.warnText), '弹层里没有「AI 识别」', `弹层提示「${clip(r.dom.warnText, 160)}」`, '事故级');
-  chk(sc, '没有 0 kcal 草稿', r.dom.entries.length === 0, '不出现条目', `${r.dom.entries.length} 条`);
+  chk(sc, '不再一条都不记', r.dom.entries.length === 1, '1 条按同类估算的条目',
+    `${r.dom.entries.length} 条${r.dom.entries.map((e) => e.name).join('、')}`, '事故级');
+  chk(sc, '标明是估算', /估算/.test(r.dom.entries[0]?.name || ''), '条目上带「估算」标签',
+    `条目名「${clip(r.dom.entries[0]?.name, 60)}」`, '事故级');
+  chk(sc, '说明为什么是估的', /食物库里没有/.test(r.dom.draftText), '说明里写「食物库里没有…」',
+    clip(r.dom.draftText, 180), '严重');
+  chk(sc, '来源如实写 AI', /AI 认出来的/.test(r.dom.warnText), '弹层显示「这次是：AI 认出来的」',
+    clip(r.dom.warnText, 150), '事故级');
+  chk(sc, '有「记上」按钮', r.dom.saveBtn, '存在 #draftSave', r.dom.saveBtn ? `有（${r.dom.saveBtnText}）` : '没有', '事故级');
+  const totalNum = Number(String(r.dom.total).replace(/[^0-9.]/g, ''));
+  chk(sc, '不是 0 kcal 草稿', totalNum > 0, '这一餐合计热量 > 0', `合计「${r.dom.total || '（无）'}」`, '事故级');
   sc.shots.push(await shot(`${shotPrefix}-unmatched`));
-  const st = await closeAndReadState();
-  chk(sc, '没有创建记录', st.entries.length === 0, '存档里 0 条食物记录', `${st.entries.length} 条`, '事故级');
-  endScenario(sc, `弹层列出「量子寿司」并说明本地库没有；无「记上」按钮；未创建记录`);
+  const saved = await clickSaveDraft();
+  const st = await readMainState();
+  chk(sc, '存得进记录', saved && st.entries.length === 1 && st.entries[0].name.includes('夸克能量块'),
+    '记录里 1 条「夸克能量块」', `${st.entries.length} 条${st.entries.length ? `：${st.entries.map((e) => e.name).join('、')}` : ''}`, '事故级');
+  chk(sc, '存的热量可用', st.entries.length > 0 && Number(st.entries[0].kcalPer100) > 0,
+    '每 100 克热量 > 0', st.entries.map((e) => e.kcalPer100).join(' / ') || '无');
+  await dismissCelebrate();
+  endScenario(sc, `按同类估算记上「${r.dom.entries[0]?.name || '?'}」并标明估算；保存后记录 ${st.entries.length} 条`);
   return sc;
 }
 
 /**
- * 额外场景（来源造假）：AI 返回的条目全部匹配不上，但离线兜底恰好认得出这句话。
- * 这条路会走到「AI 结果为空 → 退回离线 → 但 source 仍被标成 ai」，是最容易被忽略的「骗人」路径。
+ * 额外场景（来源不能被标错）：AI 返回的条目全部匹配不上，但离线兜底恰好认得出这句话。
+ * v31 起：AI 的条目会先进「同类估算」，所以来源写「AI 认出来的」是真的（名字来自 AI、热量来自本地估算表），
+ * 但**不能**把这条说成是离线认出来的，也不能假装它匹配上了本地库。
  */
 async function scenarioAiProvenanceLie(group, id, title) {
   const sc = beginScenario(group, id, title,
-    'AI 全部没匹配上时，界面不能把离线兜底的结果标成「AI 识别」，也不该在 AI 什么都没匹配到时给「记上」');
+    '来源写「AI 认出来的」+ 条目标「估算」，不能冒充成离线识别，也不能假装匹配上了库');
   const r = await aiRound({ model: 'unmatched', text: '中午吃了一碗牛肉面' });
   chk(sc, '假服务商真的收到请求', r.hits >= 1, 'chat/completions 至少 1 次', `${r.hits} 次`);
   chk(sc, '界面没卡住', !r.waitErr, '弹层在限时内出现', r.waitErr || '正常');
-  chk(sc, '列出没匹配上的食物', /量子寿司/.test(r.dom.draftText), '弹层列出「量子寿司」', clip(r.dom.draftText, 200));
-  chk(sc, '不显示「AI 识别」', !/AI 识别/.test(r.dom.warnText), '弹层里没有「AI 识别」', `弹层提示「${clip(r.dom.warnText, 180)}」`, '事故级');
-  // 产品决定（2026-10-20，Lead）：AI 一条都没匹配上、但离线解析认得出这句话时，
-  // 允许把离线结果给用户记 —— 但**来源必须写明「离线识别」**，并把 AI 没匹配上的列出来。
-  // 以前这里要求「不许给记上」，那等于把用户这句话作废：离线明明认对了牛肉面。
-  chk(sc, '来源写明是离线识别', /离线识别/.test(r.dom.warnText), '弹层写明「离线识别（常见说法）」',
+  chk(sc, '来源如实写 AI', /AI 认出来的/.test(r.dom.warnText), '弹层显示「这次是：AI 认出来的」',
     `弹层提示「${clip(r.dom.warnText, 180)}」`, '事故级');
-  chk(sc, '离线认出来了就允许记上', Boolean(r.dom.saveBtn), '有「就这样，记上」按钮',
-    r.dom.saveBtn ? '有' : '没有（离线认出来的结果被白白丢掉）', '严重');
-  const shownNames = r.dom.entries.map((e) => e.name).join('、');
-  chk(sc, 'AI 没匹配上的东西要列出来', /量子寿司/.test(r.dom.draftText), '弹层列出「量子寿司」',
-    `界面条目：${shownNames || '无'}`, '严重');
+  chk(sc, '不冒充离线识别', !/离线认出来的/.test(r.dom.warnText), '弹层里没有「离线认出来的」',
+    `弹层提示「${clip(r.dom.warnText, 180)}」`, '事故级');
+  chk(sc, '条目标明是估算', /估算/.test(r.dom.entries.map((e) => e.name).join(' ')), '条目上带「估算」标签',
+    `界面条目：${r.dom.entries.map((e) => e.name).join('、') || '无'}`, '事故级');
+  chk(sc, '不能假装匹配上了库', /食物库里没有/.test(r.dom.draftText), '说明里写「食物库里没有…」',
+    clip(r.dom.draftText, 180), '严重');
+  chk(sc, '允许记上（不把用户这句话作废）', Boolean(r.dom.saveBtn), '有「就这样，记上」按钮',
+    r.dom.saveBtn ? '有' : '没有', '严重');
   sc.shots.push(await shot(`${id.toLowerCase()}-provenance`));
-  const st = await closeAndReadState();
-  chk(sc, '未创建记录（没有点保存）', st.entries.length === 0, '存档里 0 条食物记录', `${st.entries.length} 条`, '事故级');
-  endScenario(sc, `弹层写明来源「离线识别」，条目「${shownNames || '无'}」来自离线兜底；AI 没匹配上的「量子寿司」也列出来了`);
+  const saved = await clickSaveDraft();
+  const st = await readMainState();
+  const shownNames = st.entries.map((e) => e.name).join('、');
+  chk(sc, '保存后只有 AI 估算的那一条', saved && st.entries.length === 1 && st.entries[0].name.includes('夸克能量块'),
+    '1 条「夸克能量块」估算记录', `${st.entries.length} 条：${shownNames || '无'}`, '事故级');
+  await dismissCelebrate();
+  endScenario(sc, `弹层来源写「AI 认出来的」、条目「${shownNames || '无'}」标了估算；没有冒充离线识别`);
   return sc;
 }
 
 /** items 空数组 */
 async function scenarioAiEmptyItems(group, id, title) {
-  const sc = beginScenario(group, id, title, '绝不显示「记上」按钮、绝不显示 0 kcal 草稿、不显示「AI 识别」、不创建记录');
-  const r = await aiRound({ model: 'empty', text: '吃了两份量子寿司' });
+  const sc = beginScenario(group, id, title, '标题改说「这句没认出来」、绝不显示「记上」按钮、不显示 0 kcal 草稿、不创建记录');
+  const r = await aiRound({ model: 'empty', text: '吃了两份宇宙能量块' });
   chk(sc, '假服务商真的收到请求', r.hits >= 1, 'chat/completions 至少 1 次', `${r.hits} 次`);
   chk(sc, '界面没卡住', !r.waitErr, '弹层在限时内出现', r.waitErr || '正常');
+  chk(sc, '标题不再问「这样记对吗」', r.dom.sheetTitle === '这句没认出来', '标题是「这句没认出来」', `标题「${r.dom.sheetTitle}」`, '严重');
   chk(sc, '不显示「记上」按钮', !r.dom.saveBtn, '不出现 #draftSave', r.dom.saveBtn ? `有（${r.dom.saveBtnText}）` : '没有', '事故级');
   chk(sc, '没有 0 kcal 草稿', r.dom.entries.length === 0 && !/0\s*kcal/.test(r.dom.draftText), '不出现条目、不出现「0 kcal」', `条目 ${r.dom.entries.length} 条；弹层「${clip(r.dom.draftText, 120)}」`, '事故级');
   chk(sc, '不显示「AI 识别」', !/AI 识别/.test(r.dom.warnText), '弹层里没有「AI 识别」', clip(r.dom.warnText, 140) || '（无）', '事故级');
@@ -795,7 +815,7 @@ async function scenarioAiEmptyItems(group, id, title) {
   const st = await closeAndReadState();
   chk(sc, '没有创建记录', st.entries.length === 0, '存档里 0 条食物记录', `${st.entries.length} 条`, '事故级');
   chk(sc, '没有未捕获异常', (await readAuditErrors()).length === 0, 'window 错误列表为空', JSON.stringify(await readAuditErrors()).slice(0, 200));
-  endScenario(sc, `AI 返回空 items → 弹层只说「没认出来」，没有「记上」按钮，也没有 0 kcal 草稿`);
+  endScenario(sc, `AI 返回空 items → 标题「这句没认出来」，没有「记上」按钮，也没有 0 kcal 草稿`);
   return sc;
 }
 
@@ -1404,7 +1424,7 @@ async function runReverse() {
     const sc = beginScenario('反向', 'R-1', '把正常场景改成返回空 items', '');
     const r = await aiRound({ model: 'ok', text: '随便对付了一口' });
     chk(sc, '条目被记上', r.dom.entries.length >= 1, '至少 1 条可确认的条目', `${r.dom.entries.length} 条`);
-    chk(sc, '来源标注为 AI', /AI 识别/.test(r.dom.warnText), '弹层显示「AI 识别」', clip(r.dom.warnText, 120));
+    chk(sc, '来源标注为 AI', /AI 认出来的/.test(r.dom.warnText), '弹层显示「AI 认出来的」', clip(r.dom.warnText, 120));
     const failed = sc.checks.filter((c) => !c.pass).map((c) => c.name);
     const ok = failed.includes('条目被记上');
     lines.push(`反向验证 1：把「正常场景」的假服务商改成返回空 items`);
@@ -1414,10 +1434,10 @@ async function runReverse() {
   const probe2 = async () => {
     // 反向 2：人为在失败弹层里塞「AI 识别」，DOM 文本断言必须抓住
     const sc = beginScenario('反向', 'R-2', '人为让失败弹层显示「AI 识别」', '');
-    const r = await aiRound({ model: '401', text: '吃了两份量子寿司' });
-    await evalJs(`(() => { const h = document.querySelector('#draftHost'); if (h) h.insertAdjacentHTML('beforeend', '<div class="warn">解析方式：AI 识别</div>'); return true; })()`);
+    const r = await aiRound({ model: '401', text: '吃了两份宇宙能量块' });
+    await evalJs(`(() => { const h = document.querySelector('#draftHost'); if (h) h.insertAdjacentHTML('beforeend', '<div class="warn">这次是：AI 认出来的</div>'); return true; })()`);
     const dom = await readDraftDom();
-    chk(sc, '不显示「AI 识别」', !/AI 识别/.test(dom.warnText), '弹层里没有「AI 识别」', clip(dom.warnText, 140));
+    chk(sc, '不显示「AI 识别」', !/AI 认出来的/.test(dom.warnText), '弹层里没有「AI 认出来的」', clip(dom.warnText, 140));
     const failed = sc.checks.filter((c) => !c.pass).map((c) => c.name);
     const ok = failed.includes('不显示「AI 识别」');
     lines.push(`反向验证 2：人为让 401 失败弹层出现「AI 识别」字样`);
@@ -1465,17 +1485,17 @@ const REPRO_STEPS = {
   'AI-1': '把 localStorage 的 fatloss.ai.v1 写成 {baseUrl:"http://127.0.0.1:18880/v1",model:"ok",apiKey:"sk-audit-fake",mode:"direct"}，重新打开页面；记录页输入「随便对付了一口」，点「解析这一句」。',
   'AI-2': '同上，但把 model 改成 "fenced"（假服务商返回 ```json 围栏）；输入「随便对付了一口」后看弹层来源与条目。',
   'AI-3': '同上，但把 model 改成 "prose"（假服务商在 JSON 前后加了自然语言）；看弹层来源与条目。',
-  'AI-4a': '把 model 改成 "401"（假服务商返回 HTTP 401）；记录页输入「吃了两份量子寿司」（离线解析器认不出这句），点「解析这一句」；检查弹层里有没有「密钥」字样。',
+  'AI-4a': '把 model 改成 "401"（假服务商返回 HTTP 401）；记录页输入「吃了两份宇宙能量块」（离线解析器认不出这句），点「解析这一句」；检查弹层里有没有「密钥」字样。',
   'AI-4b': '同 AI-4a，但输入「中午吃了一碗牛肉面」（离线解析器认得这句），看「AI 这次没成功」那一行有没有密钥提示。',
-  'AI-5a': '把 model 改成 "500"（假服务商返回 HTTP 500）；输入「吃了两份量子寿司」；检查弹层有没有服务商出错提示。',
+  'AI-5a': '把 model 改成 "500"（假服务商返回 HTTP 500）；输入「吃了两份宇宙能量块」；检查弹层有没有服务商出错提示。',
   'AI-5b': '同 AI-5a，但输入「中午吃了一碗牛肉面」，看「AI 这次没成功」那一行。',
-  'AI-6a': '把 model 改成 "slow"（假服务商收下请求但 60 秒不响应）；输入「吃了两份量子寿司」；耐心等 25 秒左右，看弹层有没有超时提示、按钮有没有恢复。',
+  'AI-6a': '把 model 改成 "slow"（假服务商收下请求但 60 秒不响应）；输入「吃了两份宇宙能量块」；耐心等 25 秒左右，看弹层有没有超时提示、按钮有没有恢复。',
   'AI-6b': '同 AI-6a，但输入「中午吃了一碗牛肉面」，看「AI 这次没成功：等了 25 秒没有响应」那一行。',
-  'AI-7a': '把 model 改成 "badjson"（HTTP 200，但 content 是 "not json at all"）；输入「吃了两份量子寿司」；看弹层有没有解析失败提示。',
+  'AI-7a': '把 model 改成 "badjson"（HTTP 200，但 content 是 "not json at all"）；输入「吃了两份宇宙能量块」；看弹层有没有解析失败提示。',
   'AI-7b': '同 AI-7a，但输入「中午吃了一碗牛肉面」，看「AI 这次没成功：模型返回的不是 JSON」那一行。',
-  'AI-8': '把 model 改成 "empty"（返回 {"items":[]}）；输入「吃了两份量子寿司」；检查弹层有没有「记上」按钮、有没有 0 kcal 条目。',
-  'AI-9': '把 model 改成 "unmatched"（返回 {"items":[{"name":"量子寿司","grams":100}]}）；输入「吃了两份量子寿司」；检查弹层是否列出「量子寿司」、有没有「记上」按钮。',
-  'AI-9b': '把 model 改成 "unmatched"（AI 只返回「量子寿司」）；输入「中午吃了一碗牛肉面」（离线解析器认得这句）；看弹层来源是不是「AI 识别」、条目是不是「牛肉面」、有没有「记上」按钮。',
+  'AI-8': '把 model 改成 "empty"（返回 {"items":[]}）；输入「吃了两份宇宙能量块」；检查弹层标题是不是「这句没认出来」、有没有「记上」按钮、有没有 0 kcal 条目。',
+  'AI-9': '把 model 改成 "unmatched"（返回 {"items":[{"name":"夸克能量块","grams":100}]}）；输入「吃了两份宇宙能量块」；检查弹层是不是按同类估算记上、标了「估算」、能保存。',
+  'AI-9b': '把 model 改成 "unmatched"（AI 只返回「夸克能量块」）；输入「中午吃了一碗牛肉面」（离线解析器认得这句）；看弹层来源是不是「AI 认出来的」+ 条目标了「估算」，不能冒充离线识别。',
   'AI-10': '把 model 改成 "many"（返回 50 条 items）；输入「今天吃了一桌菜」；看弹层是否卡死、能否关掉、页面是否还能操作。',
   'AI-11': '把 fatloss.ai.v1 的 baseUrl 改成 http://127.0.0.1:18881/v1（这个服务商故意不给跨域头）；输入「中午吃了一碗牛肉面」；看弹层是否提示「连不上」。',
   'S-1': '在 localStorage 里写 fatloss.state.v2 = "{oops"，刷新页面；看页面能否打开、有没有「记录读取有问题」提示、刷新后坏数据是否还在。',
@@ -1568,7 +1588,7 @@ function buildReport() {
   lines.push('- 假服务商**不实现** `/models` 与中转接口；静态服务也不实现 `/api/*`，所以应用不会退回电脑中转，失败路径只会走离线兜底或直接报错。');
   lines.push('- 存档场景通过 `localStorage` 预置真实形状的存档（坏 JSON / v999 / v1 / v2 / 存储满），再走真实界面按钮（设置、数据与备份、从头开始、找回记录）。');
   lines.push('- `window.confirm` 被注入脚本替换为「总是确定」（测试环境没有人点确认框）；这只影响「回滚快照」的确认，**清除数据仍然要求输入「清除」二字**，没有被绕过。');
-  lines.push('- 「离线也认不出」输入用「吃了两份量子寿司」，「离线能认出」输入用「中午吃了一碗牛肉面」（已用离线解析器实测确认）。成功场景用「随便对付了一口」——离线解析器对它**什么都认不出**，所以能证明条目真的来自 AI。');
+  lines.push('- 「离线也认不出」输入用「吃了两份宇宙能量块」，「离线能认出」输入用「中午吃了一碗牛肉面」（已用离线解析器实测确认）。成功场景用「随便对付了一口」——离线解析器对它**什么都认不出**，所以能证明条目真的来自 AI。');
   lines.push('- **并行修改说明**：审计期间工作区有其他任务在同时改代码（未提交）。S-2b（未来版本存档被欢迎页按钮覆盖）和 E-1（切回普通模式抛 ReferenceError）在本次审计早期的两轮运行里都是失败的；最后一次运行时工作区已有修复（原始内容另存 `fatloss.state.unreadable` + 欢迎页常驻提示；`clearDraft` 改为 `draft = null`），因此这两个场景本报告判定通过，并保留为回归检查。');
   lines.push('');
   lines.push('## 一、AI 失败与畸形返回');
@@ -1742,7 +1762,7 @@ async function main() {
     await scenarioAiSuccess('AI', 'AI-2', '返回 ```json 围栏包裹', { model: 'fenced', text: '随便对付了一口', shotPrefix: 'ai-2-fenced' });
     await scenarioAiSuccess('AI', 'AI-3', 'JSON 前后夹带自然语言废话', { model: 'prose', text: '随便对付了一口', shotPrefix: 'ai-3-prose' });
     await scenarioAiFailure('AI', 'AI-4a', '401 密钥无效 + 离线也认不出', {
-      model: '401', text: '吃了两份量子寿司', offlineUnknown: true,
+      model: '401', text: '吃了两份宇宙能量块', offlineUnknown: true,
       expectText: '明确提示密钥/鉴权问题', promptPatterns: [/密钥/, /鉴权/, /401/, /API key/i], shotPrefix: 'ai-4a-401-unknown',
     });
     await scenarioAiFailure('AI', 'AI-4b', '401 密钥无效 + 离线能认出（对照组）', {
@@ -1750,7 +1770,7 @@ async function main() {
       expectText: '明确提示密钥/鉴权问题', promptPatterns: [/密钥/, /鉴权/, /401/], shotPrefix: 'ai-4b-401-known',
     });
     await scenarioAiFailure('AI', 'AI-5a', '500 服务端错误 + 离线也认不出', {
-      model: '500', text: '吃了两份量子寿司', offlineUnknown: true,
+      model: '500', text: '吃了两份宇宙能量块', offlineUnknown: true,
       expectText: '明确提示服务商出问题', promptPatterns: [/服务商这边出问题/, /500/, /服务端/], shotPrefix: 'ai-5a-500-unknown',
     });
     await scenarioAiFailure('AI', 'AI-5b', '500 服务端错误 + 离线能认出（对照组）', {
@@ -1758,7 +1778,7 @@ async function main() {
       expectText: '明确提示服务商出问题', promptPatterns: [/服务商这边出问题/, /500/, /服务端/], shotPrefix: 'ai-5b-500-known',
     });
     await scenarioAiFailure('AI', 'AI-6a', '连接超时 + 离线也认不出', {
-      model: 'slow', text: '吃了两份量子寿司', offlineUnknown: true, waitMs: 40000,
+      model: 'slow', text: '吃了两份宇宙能量块', offlineUnknown: true, waitMs: 40000,
       expectText: '明确提示超时，不永久卡在「解析中」', promptPatterns: [/没有响应/, /超时/, /秒/], shotPrefix: 'ai-6a-timeout-unknown',
     });
     await scenarioAiFailure('AI', 'AI-6b', '连接超时 + 离线能认出（对照组）', {
@@ -1766,7 +1786,7 @@ async function main() {
       expectText: '明确提示超时，不永久卡在「解析中」', promptPatterns: [/没有响应/, /超时/, /秒/], shotPrefix: 'ai-6b-timeout-known',
     });
     await scenarioAiFailure('AI', 'AI-7a', '返回非法 JSON + 离线也认不出', {
-      model: 'badjson', text: '吃了两份量子寿司', offlineUnknown: true,
+      model: 'badjson', text: '吃了两份宇宙能量块', offlineUnknown: true,
       expectText: '明确提示解析失败', promptPatterns: [/JSON/, /解析失败/, /不是 JSON/], shotPrefix: 'ai-7a-badjson-unknown',
     });
     await scenarioAiFailure('AI', 'AI-7b', '返回非法 JSON + 离线能认出（对照组）', {
@@ -1774,8 +1794,8 @@ async function main() {
       expectText: '明确提示解析失败', promptPatterns: [/JSON/, /解析失败/, /不是 JSON/], shotPrefix: 'ai-7b-badjson-known',
     });
     await scenarioAiEmptyItems('AI', 'AI-8', 'items 为空数组');
-    await scenarioAiUnmatched('AI', 'AI-9', 'items 全部匹配不上本地食物库（离线也认不出）', { text: '吃了两份量子寿司', shotPrefix: 'ai-9-unmatched' });
-    await scenarioAiProvenanceLie('AI', 'AI-9b', 'items 全部未匹配 + 离线能认出（来源是否被冒充成 AI）');
+    await scenarioAiUnmatched('AI', 'AI-9', 'items 全部匹配不上本地食物库（离线也认不出）', { text: '吃了两份宇宙能量块', shotPrefix: 'ai-9-unmatched' });
+    await scenarioAiProvenanceLie('AI', 'AI-9b', 'items 全部未匹配 + 离线能认出（估算条目优先、来源不能标错）');
     await scenarioAiManyItems('AI', 'AI-10', '50 条超长返回');
     await scenarioAiFailure('AI', 'AI-11', '服务商正常但网络层失败（CORS 被拒）', {
       model: 'cors', text: '中午吃了一碗牛肉面', offlineUnknown: false, baseUrl: CORS_FAIL_BASE,
