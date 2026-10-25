@@ -6,6 +6,7 @@
 import {
   calcTargets, calcEntry, calcExerciseKcal, diffAgainstTargets, macroSplit,
   defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, LIMITS, round,
+  isProfileUsable, validateProfile,
 } from './calc.js';
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount, kcalOnlyFood } from './foods.js';
 import { icon } from './icons.js';
@@ -46,7 +47,7 @@ import {
 import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   addExercise, removeExercise, addWeight, addCustomFood, weightTrend, analyzeProgress,
-  demoProfile, demoEntries, frequentFoods,
+  demoProfile, demoEntries, frequentFoods, recordedDays, hasUserData,
 } from './store.js';
 
 const STORAGE_KEY = 'fatloss.state.v2';
@@ -62,24 +63,18 @@ const $ = (sel, root = document) => root.querySelector(sel);
 let startupNotice = null;
 
 /**
- * 资料够不够用 —— 只有这几项都齐了才算能算目标。
+ * 上一次**由本页**写进本地存储的原文。
  *
- * 为什么要单独判一次：这个应用的目标数字全靠 profile 里的身高/体重/年龄/性别，
- * 少一项 calcTargets 就会抛错。真出过一次（缺 weightKg 的存档直接崩到今天页），
- * 而**迁移写错字段名时就是这个症状**。宁可把用户当「还没填资料」，也不能让用户看到崩溃页。
+ * 为什么要记：两个标签页/窗口同时开着时，各自持有一份整包存档，
+ * 后保存的会把先保存的整个盖掉（用户看不见、也找不回）。
+ * 每次保存前比一下「存储里的原文还是不是本页上次写的那份」：
+ * 不是就说明别的窗口写过，这一笔先不写，改为把对方的数据接过来并说清原因。
  */
-function usableProfile(p) {
-  if (!p || typeof p !== 'object') return false;
-  const inRange = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
-  return (p.sex === 'female' || p.sex === 'male')
-    && inRange(p.heightCm, 100, 250)
-    && inRange(p.weightKg, 25, 300)
-    && inRange(p.age, 10, 120);
-}
+let lastWrittenRaw = null;
 
 let state = load();
 // 资料存在但残缺：退回「还没填资料」，但原始资料原样留着，不删用户的东西
-if (state && state.profile && !usableProfile(state.profile)) {
+if (state && state.profile && !isProfileUsable(state.profile)) {
   state.legacyProfile = state.profile;
   state.profile = null;
   startupNotice = {
@@ -165,16 +160,57 @@ function load() {
   if (res.data && res.upgradedFrom) {
     startupNotice = { kind: 'ok', text: describeMigration(res) };
   }
+  // 记下本页看到的存档原文：之后别的窗口写过，保存前才能发现并让路（见 save()）
+  try { lastWrittenRaw = localStorage.getItem(STORAGE_KEY); } catch { lastWrittenRaw = null; }
   return res.data;
 }
 
 /** 上一次存盘成功了没有 —— 用来拦住「存不进去」之后又报喜 */
 let lastSaveOk = true;
 
+/**
+ * 把别的窗口写的最新存档接过来。
+ *
+ * 只在「确认别的窗口写过」时调用：要么保存时发现存档被改过，要么收到 storage 事件。
+ * 接过来之后本页的内存状态就是存储里的最新那份，下一次保存不会再覆盖别人。
+ */
+function adoptExternalState(message = '') {
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch { /* 读不到就只提示，至少不覆盖 */ }
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && parsed.days) {
+        state = migrate(parsed);
+        lastWrittenRaw = raw;
+        hideSyncBanner();
+        render();
+      }
+    } catch {
+      // 对方写的内容坏了：不动内存里的数据，至少不会把它盖掉
+      console.warn('另一个窗口的存档读不出来，先不切换');
+    }
+  }
+  toast(message || '另一个窗口改了记录，已换成最新的那份。');
+}
+
 function save() {
   try {
+    const rawNow = localStorage.getItem(STORAGE_KEY);
+    /*
+     * 别的窗口在本页上次保存之后又写过：这份内存数据已经旧了，
+     * 直接写下去会把对方的新记录整个盖掉（用户看不见、也找不回）。
+     * 所以先让路：接过来对方的版本，并说清楚这一笔没记上。
+     */
+    if (lastWrittenRaw !== null && rawNow !== lastWrittenRaw) {
+      lastSaveOk = false;
+      adoptExternalState('另一个窗口刚改过记录，这一笔没记上 —— 看一眼最新记录，再点一次就好。');
+      return false;
+    }
     state.schemaVersion = SCHEMA_VERSION;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    const json = JSON.stringify(state);
+    localStorage.setItem(STORAGE_KEY, json);
+    lastWrittenRaw = json;
     lastSaveOk = true;
     return true;
   } catch (err) {
@@ -185,6 +221,38 @@ function save() {
     return false;
   }
 }
+
+/*
+ * 另一个窗口/标签页存了盘 —— 本页手里的数据就旧了。
+ * 空闲时直接同步（不然会出现「页面上有、其实已经被人改掉」的错觉）；
+ * 正在填东西（面板开着 / 输入框里有字）时只挂一条提示，绝不把输入到一半的内容冲掉。
+ * 等关面板时会自动补同步（见 closeSheet）。
+ */
+let syncBanner = null;
+function showSyncBanner() {
+  if (syncBanner) return;
+  const el = document.createElement('div');
+  el.className = 'sync-banner';
+  const text = document.createElement('span');
+  text.textContent = '另一个窗口改了记录';
+  const btn = document.createElement('button');
+  btn.className = 'btn ghost';
+  btn.textContent = '同步';
+  btn.addEventListener('click', () => adoptExternalState('已同步到另一个窗口的最新记录。'));
+  el.append(text, btn);
+  document.body.appendChild(el);
+  syncBanner = el;
+}
+function hideSyncBanner() { if (syncBanner) { syncBanner.remove(); syncBanner = null; } }
+
+window.addEventListener('storage', (e) => {
+  if (!e || e.key !== STORAGE_KEY || !e.newValue) return;
+  const sheetOpen = !$('#sheetRoot').classList.contains('hidden');
+  const ae = document.activeElement;
+  const typing = Boolean(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName) && String(ae.value || '').trim());
+  if (sheetOpen || typing) { showSyncBanner(); return; }
+  adoptExternalState('另一个窗口改了记录，已同步到这里。');
+});
 
 /**
  * 用户的每日目标 —— **只由公式决定，跟餐单无关**。
@@ -197,7 +265,7 @@ function save() {
  * 餐单给不到目标时，由餐单自己如实说明差多少、怎么补（见 recommend.js 的 deviationNote）。
  */
 function targets() {
-  if (!state.profile || !usableProfile(state.profile)) return null;
+  if (!state.profile || !isProfileUsable(state.profile)) return null;
   return calcTargets(state.profile);
 }
 
@@ -272,6 +340,11 @@ function closeSheet() {
   $('#sheetBody').innerHTML = '';
   $('#sheetFoot').innerHTML = '';
   pendingFood = null;
+  /*
+   * 面板开着时如果别的窗口改过记录，只在顶部挂了提示（怕冲掉正在填的内容）。
+   * 关面板了就补上同步 —— 否则下一次保存会拿旧数据把对方的新记录盖掉。
+   */
+  if (syncBanner) adoptExternalState('已同步另一个窗口的最新记录。');
 }
 
 $('#sheetClose').addEventListener('click', closeSheet);
@@ -465,7 +538,7 @@ function handleAction(act, data) {
     case 'log-weight': return openWeightSheet();
     case 'export': return exportData();
     case 'import': return importData();
-    case 'demo': return loadDemo();
+    case 'demo': return requestDemo();
     case 'reset-today':
       if (confirm('清空这一天的所有饮食和运动记录？（历史记录不受影响）')) {
         state.days[dateKey] = { meals: { breakfast: [], lunch: [], dinner: [], snack: [] }, exercises: [], note: '' };
@@ -679,7 +752,39 @@ function renderWelcome() {
     </div>`;
 }
 
-function loadDemo() {
+/**
+ * 演示入口。
+ *
+ * `?demo=1` 这个链接的用途是「发给别人看一眼」，但它在**任何**手机上都会整包覆盖存档。
+ * 自己的手机打开一次，几个月的记录就没了 —— 所以有记录时必须先问，并且留快照。
+ * 没有记录（新装）就直接进，不要拦。
+ */
+function requestDemo() {
+  if (!hasUserData(state)) return startDemo();
+  const days = recordedDays(state).length;
+  const what = days > 0 ? `这台设备上有 ${days} 天的记录` : '这台设备上已经填好资料了';
+  openSheet({
+    title: '看演示会覆盖现在的记录',
+    body: `
+      <div class="warn">${what}。演示会用一份假数据把它整包换掉。</div>
+      <div class="set-note">
+        换之前会<b>自动留一份快照</b>。看完演示想回来，在「我的 → 数据与备份」里点「回滚」就行。
+      </div>`,
+    foot: `
+      <button class="btn block" id="demoGo">留快照并看演示</button>
+      <button class="btn ghost block" id="demoCancel">取消</button>`,
+    onMount: (body, foot) => {
+      $('#demoGo', foot).addEventListener('click', () => { closeSheet(); startDemo(); });
+      $('#demoCancel', foot).addEventListener('click', closeSheet);
+    },
+  });
+}
+
+/** 真的装演示数据（整包替换，只由 requestDemo 调用） */
+function startDemo() {
+  const hadData = hasUserData(state);
+  // 有东西就先留底：演示的代价不能是「记录没了」
+  if (hadData) saveBackup(localStorage, state, '看演示之前的自动快照');
   state = emptyState();
   state.profile = demoProfile();
   // 示例是「新装上的样子」，不是老用户升级 —— 不该弹更新说明
@@ -692,7 +797,9 @@ function loadDemo() {
   view = 'today';
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
   render();
-  toast('已填入一份示例数据（26 岁女性 163cm 58kg），可以随便改。');
+  toast(hadData
+    ? '已填入示例数据。你原来的记录留了快照，看完在「我的 → 数据与备份」里能回滚。'
+    : '已填入一份示例数据（26 岁女性 163cm 58kg），可以随便改。');
 }
 
 /* ── 今天 ────────────────────────────────── */
@@ -2939,16 +3046,12 @@ function openBackupSheet() {
     try { return Math.round((localStorage.getItem(STORAGE_KEY) || '').length / 1024); } catch { return 0; }
   })();
   /*
-   * 「X 天的记录」只算**真的有东西**的日子。
-   * 以前直接数 days 的键：今天页一渲染就会顺手建出「今天」这一格，洞察那段更狠，
-   * 会把最近 14 天全建出来 —— 于是用户只记了 1 天，这里却写着「14 天的记录」。
+   * 「X 天的记录」只算真的有东西的日子 —— 统一用 store 的 recordedDays()。
+   * 以前这里自己数 days 的键：今天页一渲染就会建出「今天」这一格，洞察那段更狠，
+   * 会把最近 14 天全建出来 —— 于是只记了 1 天，这里却写着「14 天的记录」。
+   * 判断只留一份：备份页、「覆盖前要不要确认」都用它。
    */
-  const days = Object.keys(state.days || {}).filter((key) => {
-    const d = state.days[key];
-    if (!d) return false;
-    const foods = Object.values(d.meals || {}).flat().filter((e) => e && e.food).length;
-    return foods > 0 || (d.exercises || []).length > 0 || String(d.note || '').trim().length > 0;
-  }).length;
+  const days = recordedDays(state).length;
 
   openSheet({
     title: '数据与备份',
@@ -2969,7 +3072,7 @@ function openBackupSheet() {
       ${backup ? `
         <hr class="sep">
         <div class="set-note">
-          <b>升级前的自动快照</b><br>
+          <b>自动快照</b><br>
           时间：${esc(String(backup.savedAt).slice(0, 16).replace('T', ' '))}<br>
           来源版本：v${esc(String(backup.schemaVersion))}<br>
           ${esc(backup.note || '')}
@@ -2977,7 +3080,7 @@ function openBackupSheet() {
         <div class="btn-row">
           <button class="btn ghost grow" id="doRestore">回滚到这份快照</button>
           <button class="btn ghost" id="doForget">删除快照</button>
-        </div>` : '<p class="tiny muted" style="margin-top:10px">还没有快照。下次存档结构升级时会自动留一份。</p>'}
+        </div>` : '<p class="tiny muted" style="margin-top:10px">还没有快照。存档升级、导入、看演示之前都会自动留一份。</p>'}
     `,
     onMount: (body) => {
       $('#doExport', body).addEventListener('click', exportData);
@@ -3599,39 +3702,6 @@ function drawAiSettings(cfg, relay, then = null) {
 /* ── 弹层：资料 ──────────────────────────── */
 
 /**
- * 资料校验。界面上的红字提示只是提示，保存前必须真的挡住，
- * 否则清空身高会存进 heightCm:0，目标热量静默掉到 1200 而用户不知道。
- * @returns {string|null} 有问题就返回说明，没问题返回 null
- */
-export function validateProfile(form) {
-  const ranges = {
-    age: [LIMITS.ageYears[0], LIMITS.ageYears[1], '年龄'],
-    heightCm: [LIMITS.heightCm[0], LIMITS.heightCm[1], '身高'],
-    weightKg: [LIMITS.weightKg[0], LIMITS.weightKg[1], '体重'],
-  };
-  for (const [key, [lo, hi, label]] of Object.entries(ranges)) {
-    const v = form[key];
-    if (typeof v !== 'number' || !Number.isFinite(v)) return `${label}要填一个数字。`;
-    if (v < lo || v > hi) return `${label}要在 ${lo}~${hi} 之间。`;
-  }
-  if (form.age < 18) return '这个工具只适合 18 岁以上使用，未成年人请先问医生。';
-  // 昵称是可选的，不校验；空值由 nickname() 统一回落到默认名
-  if (form.bodyFatPct !== null && form.bodyFatPct !== undefined) {
-    const bf = form.bodyFatPct;
-    if (typeof bf !== 'number' || !Number.isFinite(bf) || bf < 3 || bf > 60) {
-      return '体脂率要么留空，要么填 3~60 之间的数（填的是百分数，例如 25）。';
-    }
-  }
-  if (form.targetWeightKg !== null && form.targetWeightKg !== undefined) {
-    if (typeof form.targetWeightKg !== 'number' || !Number.isFinite(form.targetWeightKg)) return '目标体重要么留空，要么填数字。';
-    if (form.targetWeightKg < LIMITS.weightKg[0] || form.targetWeightKg > LIMITS.weightKg[1]) {
-      return `目标体重要在 ${LIMITS.weightKg[0]}~${LIMITS.weightKg[1]} 之间。`;
-    }
-  }
-  return null;
-}
-
-/**
  * 资料表单。openProfileSheet 和「新手引导」共用这一套 —— 校验只有一份，
  * 免得「第一次填」和「以后修改」走两套规则，出现引导能存、设置里存不了这种怪事。
  *
@@ -3848,11 +3918,16 @@ function importData() {
           toast(migrated.error);
           return;
         }
-        if (!confirm('导入会覆盖现在这台设备上的所有记录，确定吗？')) return;
+        const hadData = hasUserData(state);
+        const days = recordedDays(state).length;
+        const what = days > 0 ? `${days} 天的记录` : '现在填好的资料';
+        if (!confirm(`导入会覆盖这台设备上的${what}。\n会先自动留一份快照，之后可以在「我的 → 数据与备份」里回滚。继续？`)) return;
+        // 覆盖前先留底：导入是唯一一个「用旧文件换掉现状」的入口，不留底就是不可恢复
+        if (hadData) saveBackup(localStorage, state, '导入之前的自动快照');
         state = migrated.data;
         save();
         render();
-        toast('导入完成。');
+        toast(hadData ? '导入完成。之前的记录留了快照，可以在「数据与备份」里回滚。' : '导入完成。');
       } catch (err) {
         toast('这个文件读不出来，可能不是导出的存档。');
         console.error(err);
@@ -3956,15 +4031,13 @@ if (bootParams.has('__selfcheck')) {
   selfCheck();
 } else if (bootParams.get('demo') === '1') {
   // ?demo=1：一键进演示（GitHub Pages 上可以直接把链接发人看）
-  state = emptyState();
-  state.profile = demoProfile();
-  state.settings = { ...(state.settings || {}), lastSeenVersion: APP_VERSION };
-  const demoToday = todayKey();
-  demoEntries(state, demoToday, calcTargets(state.profile));
-  addWeight(state, shiftDate(demoToday, -14), 59.4);
-  addWeight(state, demoToday, 58);
-  save();
-  render();
+  // 有记录时不能直接装：先在正常界面里弹确认，并且留快照（见 requestDemo）
+  if (hasUserData(state)) {
+    render();
+    requestDemo();
+  } else {
+    startDemo();
+  }
 } else if (!state) {
   // 空存档：只负责建状态，界面交给 render() —— 它才会绑按钮。
   // 之前这里直接调 renderWelcome() 并且只补了 bindCommon()，

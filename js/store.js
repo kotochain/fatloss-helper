@@ -68,6 +68,38 @@ export function getDay(state, key) {
   return day;
 }
 
+/**
+ * 真的记过东西的日子（食物 / 运动 / 备注）。
+ *
+ * 为什么不能直接数 `days` 的键：渲染今天页、洞察会顺手建出空日期，
+ * 于是「只记了 1 天」会被数成 14 天。备份提示和「覆盖前要不要确认」都要用这个数，
+ * 所以要有一个唯一来源，不能每处各写一遍。
+ */
+export function recordedDays(state) {
+  const days = state?.days;
+  if (!days || typeof days !== 'object') return [];
+  return Object.keys(days).filter((key) => {
+    const d = days[key];
+    if (!d) return false;
+    const foods = Object.values(d.meals || {}).flat().filter((e) => e && e.food).length;
+    return foods > 0 || (d.exercises || []).length > 0 || String(d.note || '').trim().length > 0;
+  });
+}
+
+/**
+ * 有没有「丢了会心疼」的东西：记录、体重、自己加的食物、填好的资料。
+ *
+ * 演示数据、导入存档都是**整包替换**，覆盖前必须先问一句并留快照。
+ * 判断放在这里而不是界面里，是因为以后新增覆盖入口（比如分享链接）还会用到它。
+ */
+export function hasUserData(state) {
+  if (!state || typeof state !== 'object') return false;
+  return recordedDays(state).length > 0
+    || (Array.isArray(state.weights) && state.weights.length > 0)
+    || (Array.isArray(state.customFoods) && state.customFoods.length > 0)
+    || Boolean(state.profile);
+}
+
 let seq = 0;
 function newId(prefix) {
   seq += 1;

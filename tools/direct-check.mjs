@@ -487,6 +487,123 @@ async function main() {
   console.log('点日历切日期 →', JSON.stringify(switched));
   if (!switched.顶部显示的日期) problems.push('点日历没有切换日期');
 
+  console.log('\n=== 六、覆盖类操作不能悄悄丢记录（v33） ===');
+  // 造一份「有记录」的存档：演示/导入都会整包替换，覆盖前必须先问、先留快照
+  const seeded = await evaluate(`(async () => {
+    const store = await import('./js/store.js');
+    const s = JSON.parse(localStorage.getItem('fatloss.state.v2') || 'null') || store.emptyState();
+    store.addFoodEntry(s, store.todayKey(), 'lunch',
+      { id: 'qa-rice', name: 'QA测试米饭', kcal: 130, protein: 2.5, fat: 0.3, carb: 28 }, 150);
+    localStorage.setItem('fatloss.state.v2', JSON.stringify(s));
+    localStorage.removeItem('fatloss.backup');
+    return JSON.parse(localStorage.getItem('fatloss.state.v2')).days[store.todayKey()].meals.lunch.length;
+  })()`);
+  console.log('造好一份带记录的存档，午餐条数：', seeded);
+
+  await client.send('Page.navigate', { url: BASE + '/?demo=1' });
+  await sleep(1600);
+  const guard = await evaluate(`(() => ({
+    弹出确认: !document.querySelector('#sheetRoot').classList.contains('hidden'),
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    记录还在: (localStorage.getItem('fatloss.state.v2') || '').includes('QA测试米饭'),
+    有按钮: [...document.querySelectorAll('#sheetFoot button')].map((b) => b.id),
+  }))()`);
+  console.log('?demo=1 有记录时 →', JSON.stringify(guard));
+  if (!guard.弹出确认) problems.push('有记录时打开 ?demo=1 没有先确认，记录会被直接覆盖');
+  if (!guard.标题.includes('覆盖')) problems.push(`演示确认的标题没说清会覆盖：${guard.标题}`);
+  if (!guard.记录还在) problems.push('演示确认之前记录就已经被覆盖了');
+  if (!guard.有按钮.includes('demoGo')) problems.push('演示确认缺少「留快照并看演示」按钮');
+
+  // 取消后不能有任何改动
+  await evaluate(`document.querySelector('#demoCancel')?.click()`);
+  await sleep(500);
+  const cancelled = await evaluate(`(() => ({
+    面板关掉了: document.querySelector('#sheetRoot').classList.contains('hidden'),
+    记录还在: (localStorage.getItem('fatloss.state.v2') || '').includes('QA测试米饭'),
+  }))()`);
+  console.log('点取消 →', JSON.stringify(cancelled));
+  if (!cancelled.面板关掉了) problems.push('演示确认点取消后面板没关');
+  if (!cancelled.记录还在) problems.push('演示确认点取消后记录却变了');
+
+  // 确认之后：先留快照，再换演示数据
+  await client.send('Page.navigate', { url: BASE + '/?demo=1' });
+  await sleep(1600);
+  await evaluate(`document.querySelector('#demoGo')?.click()`);
+  await sleep(900);
+  const demoApplied = await evaluate(`(() => {
+    const raw = localStorage.getItem('fatloss.state.v2') || '';
+    const backupRaw = localStorage.getItem('fatloss.backup') || '{}';
+    let note = '';
+    try { note = JSON.parse(backupRaw).note || ''; } catch {}
+    return {
+      换成了演示: !raw.includes('QA测试米饭'),
+      快照有原记录: backupRaw.includes('QA测试米饭'),
+      快照说明: note,
+    };
+  })()`);
+  console.log('确认看演示 →', JSON.stringify(demoApplied));
+  if (!demoApplied.换成了演示) problems.push('确认之后没有进入演示数据');
+  if (!demoApplied.快照有原记录) problems.push('看演示覆盖了记录，却没有留下快照（找不回来）');
+  if (!/演示/.test(demoApplied.快照说明)) problems.push(`快照说明没写清来源：${demoApplied.快照说明}`);
+
+  console.log('\n=== 六·二、两个窗口同时开：不能互相盖掉 ===');
+  const sync = await evaluate(`(async () => {
+    const store = await import('./js/store.js');
+    const s = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    store.addFoodEntry(s, store.todayKey(), 'dinner',
+      { id: 'qa-leg', name: '另一个窗口的鸡腿', kcal: 190, protein: 20, fat: 11, carb: 0 }, 100);
+    const json = JSON.stringify(s);
+    localStorage.setItem('fatloss.state.v2', json);
+    const before = document.querySelector('#app').textContent.includes('另一个窗口的鸡腿');
+    window.dispatchEvent(new StorageEvent('storage', { key: 'fatloss.state.v2', newValue: json }));
+    await new Promise((r) => setTimeout(r, 700));
+    return {
+      同步前页面有没有: before,
+      同步后页面有没有: document.querySelector('#app').textContent.includes('另一个窗口的鸡腿'),
+    };
+  })()`);
+  console.log('另一个窗口写入（空闲时）→', JSON.stringify(sync));
+  if (sync.同步后页面有没有 !== true) problems.push('别的窗口改记录后，本页没有同步（下次保存会把它盖掉）');
+
+  const conflict = await evaluate(`(async () => {
+    const store = await import('./js/store.js');
+    const s = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    store.addFoodEntry(s, store.todayKey(), 'snack',
+      { id: 'qa-other', name: '另一个窗口的新记录', kcal: 88, protein: 1, fat: 1, carb: 18 }, 100);
+    const otherRaw = JSON.stringify(s);
+    // 直接写存储、不派发事件：模拟「事件没送到」的窗口 —— 本页内存里还是旧的
+    localStorage.setItem('fatloss.state.v2', otherRaw);
+    document.querySelector('[data-view="progress"]').click();
+    await new Promise((r) => setTimeout(r, 600));
+    const btn = document.querySelector('[data-act="log-weight"]');
+    const hasBtn = !!btn;
+    btn?.click();
+    await new Promise((r) => setTimeout(r, 500));
+    const input = document.querySelector('#wInput');
+    const sheetOpen = !document.querySelector('#sheetRoot').classList.contains('hidden');
+    if (input) {
+      input.value = '60.1';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const inputNow = document.querySelector('#wInput')?.value;
+    document.querySelector('#wSave')?.click();
+    await new Promise((r) => setTimeout(r, 900));
+    const rawAfter = localStorage.getItem('fatloss.state.v2') || '';
+    const toasts = [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' | ');
+    return {
+      按到按钮: hasBtn,
+      面板开着: sheetOpen,
+      输入框值: inputNow,
+      存储里还有对方记录: rawAfter.includes('另一个窗口的新记录'),
+      我们的体重没写进去: !rawAfter.includes('60.1'),
+      提示: toasts.slice(0, 140),
+    };
+  })()`);
+  console.log('另一个窗口写过、本页再保存 →', JSON.stringify(conflict));
+  if (!conflict.存储里还有对方记录) problems.push('别的窗口写过记录后，本页保存把它整个盖掉了');
+  if (!conflict.我们的体重没写进去) problems.push('本页用旧数据保存成功 —— 应该让路而不是覆盖');
+  if (!/没记上/.test(conflict.提示)) problems.push('保存被另一个窗口的数据挡住时，没有说清「这一笔没记上」');
+
   console.log('\n=== 结论 ===');
   console.log(`假服务商收到的请求：模型列表 ${hits.models} 次、对话 ${hits.chat} 次`);
   console.log(`带上的鉴权头：${[...new Set(hits.authSeen)].join(', ') || '（无）'}`);
@@ -501,7 +618,7 @@ async function main() {
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill(), () => fake.close(), () => staticServer.close()]);
 }
 
-armWatchdog('direct-check.mjs', 240);
+armWatchdog('direct-check.mjs', 300);
 
 // 失败路径也必须收尾：只设 exitCode 的话进程会一直挂着（被看门狗杀掉 → 退出码又变了）
 main().catch((err, cleanup) => {

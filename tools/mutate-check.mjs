@@ -35,6 +35,10 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: 'kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9', to: 'kcal: 316, protein: 2.6, fat: 0.3, carb: 25.9', why: '熟米饭每 100 克 116 kcal' },
   { file: 'js/foods.js', from: 'if (/斤/.test(unit)) return round1(qty * 500);', to: 'if (/斤/.test(unit)) return round1(qty * 50);', why: '一斤 = 500 克' },
   { file: 'js/foods.js', from: 'const exact = pairs.find((x) => x.key === unit);', to: 'const exact = null;', why: '「一碗」必须精确命中而不是被「一小碗」抢走' },
+  // v33：数据安全相关的三条（覆盖前判断 + 范围只认一处）
+  { file: 'js/store.js', from: 'return foods > 0 || (d.exercises || []).length > 0 || String(d.note || \'\').trim().length > 0;', to: 'return true;', why: '「记过的日子」不能把打开页面顺手建的空日期算进去（会把备份页/覆盖确认的数字撑大）' },
+  { file: 'js/store.js', from: '|| Boolean(state.profile);', to: '|| false;', why: '只填了资料也算「丢了会心疼」——演示/导入会把它换掉' },
+  { file: 'js/calc.js', from: 'bodyFatPct: [3, 60],', to: 'bodyFatPct: [8, 55],', why: '体脂率范围只认 LIMITS 一处（表单校验和基础代谢公式共用）' },
   { file: 'js/store.js', from: "const entry = { id: newId('e'), meal: mealKey,", to: "const entry = { id: newId('e'),", why: '记录里必须写明哪一餐' },
   { file: 'js/store.js', from: "if (typeof grams !== 'number' || !Number.isFinite(grams) || grams <= 0) {", to: 'if (grams <= 0) {', why: '份量必须是数字而不是字符串' },
   { file: 'js/recommend.js', from: 'const MAIN_PROTEIN_KCAL_SHARE = 0.7;', to: 'const MAIN_PROTEIN_KCAL_SHARE = 5;', why: '主菜占当餐热量的上限' },

@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   calcBMR, calcTDEE, calcBMI, classifyBMI, calcTargets, calcEntry,
   calcExerciseKcal, diffAgainstTargets, macroSplit, KCAL_PER_KG_FAT, round,
+  LIMITS, PROFILE_ACCEPT_LEGACY, isProfileUsable, validateProfile,
 } from '../js/calc.js';
 
 const nearly = (a, b, tol = 0.5) => assert.ok(Math.abs(a - b) <= tol, `期望 ${b}，实际 ${a}`);
@@ -245,4 +246,68 @@ test('round 的边界：0.5 向上进位，1.005 这类浮点陷阱要进位到 
   assert.equal(round(-0.5), -1);
   assert.equal(Object.is(round(-0.4), -0), false, '不要返回 -0');
   assert.equal(round(NaN), NaN);
+});
+
+
+/*
+ * v33：资料校验只有一份来源。
+ *
+ * 以前同一件事有 3 套数值（表单校验 130~220/18~80、能否算目标 100~250/10~120、
+ * 体脂率还有一个没人引用的 LIMITS.bodyFatPct [8,55]）。不报错，只会让
+ * 「能存进去但算出来怪」悄悄发生。这几条测试就是钉住「只有一处」。
+ */
+
+const goodProfile = { sex: 'female', age: 26, heightCm: 163, weightKg: 58, bodyFatPct: null, targetWeightKg: null };
+
+test('资料校验：正常资料通过，边界值按 LIMITS 一处判断', () => {
+  assert.equal(validateProfile(goodProfile), null);
+  assert.equal(LIMITS.ageYears[0], 18);
+  assert.equal(LIMITS.heightCm[0], 130);
+  assert.equal(LIMITS.weightKg[0], 30);
+  // 上下边界本身都要能过
+  assert.equal(validateProfile({ ...goodProfile, age: 18 }), null);
+  assert.equal(validateProfile({ ...goodProfile, age: 80 }), null);
+  assert.equal(validateProfile({ ...goodProfile, heightCm: 130 }), null);
+  assert.equal(validateProfile({ ...goodProfile, heightCm: 220 }), null);
+  assert.equal(validateProfile({ ...goodProfile, weightKg: 30 }), null);
+  assert.equal(validateProfile({ ...goodProfile, weightKg: 250 }), null);
+});
+
+test('资料校验：越界/缺项要挡住（不是只提示）', () => {
+  assert.match(validateProfile({ ...goodProfile, age: 17 }), /18 岁/, '17 岁要说清为什么不行');
+  assert.match(validateProfile({ ...goodProfile, age: 81 }), /年龄要在 18~80/);
+  assert.match(validateProfile({ ...goodProfile, heightCm: 129 }), /身高要在 130~220/);
+  assert.match(validateProfile({ ...goodProfile, heightCm: 221 }), /身高要在 130~220/);
+  assert.match(validateProfile({ ...goodProfile, weightKg: 29 }), /体重要在 30~250/);
+  assert.match(validateProfile({ ...goodProfile, weightKg: 251 }), /体重要在 30~250/);
+  assert.match(validateProfile({ ...goodProfile, age: undefined }), /年龄要填一个数字/);
+  assert.match(validateProfile({ ...goodProfile, heightCm: '163' }), /身高要填一个数字/);
+});
+
+test('体脂率：表单和公式认同一个范围（LIMITS.bodyFatPct 不再是死常量）', () => {
+  assert.deepEqual(LIMITS.bodyFatPct, [3, 60]);
+  assert.equal(validateProfile({ ...goodProfile, bodyFatPct: 3 }), null);
+  assert.equal(validateProfile({ ...goodProfile, bodyFatPct: 60 }), null);
+  assert.match(validateProfile({ ...goodProfile, bodyFatPct: 2 }), /3~60/);
+  assert.match(validateProfile({ ...goodProfile, bodyFatPct: 61 }), /3~60/);
+  assert.match(validateProfile({ ...goodProfile, bodyFatPct: '25' }), /3~60/, '字符串不是数字，要挡住');
+  // 基础代谢必须真的按这个范围决定用哪条公式（改坏常量这里会红）
+  assert.equal(calcBMR({ sex: 'female', weightKg: 58, heightCm: 163, age: 26, bodyFatPct: 3 }).method, 'katch');
+  assert.equal(calcBMR({ sex: 'female', weightKg: 58, heightCm: 163, age: 26, bodyFatPct: 60 }).method, 'katch');
+  assert.equal(calcBMR({ sex: 'female', weightKg: 58, heightCm: 163, age: 26, bodyFatPct: 2 }).method, 'mifflin');
+  assert.equal(calcBMR({ sex: 'female', weightKg: 58, heightCm: 163, age: 26, bodyFatPct: 61 }).method, 'mifflin');
+});
+
+test('老存档能不能算：用更宽的范围，不把老数据判成「没填资料」', () => {
+  // 表单范围更严（年龄 18+），但已经有老资料的设备不该被退回欢迎页 ——
+  // 否则记录还在、却看不到，而且表单填不回原值，变成死胡同。
+  assert.equal(isProfileUsable({ sex: 'female', age: 16, heightCm: 110, weightKg: 40 }), true);
+  assert.equal(isProfileUsable({ sex: 'male', age: 100, heightCm: 250, weightKg: 300 }), true);
+  assert.equal(isProfileUsable({ sex: 'female', age: 9, heightCm: 163, weightKg: 58 }), false);
+  assert.equal(isProfileUsable({ sex: 'female', age: 26, heightCm: 99, weightKg: 58 }), false);
+  assert.equal(isProfileUsable({ sex: 'female', age: 26, heightCm: 163, weightKg: 24 }), false);
+  assert.equal(isProfileUsable({ age: 26, heightCm: 163, weightKg: 58 }), false, '没有性别算不了代谢');
+  assert.equal(isProfileUsable(null), false);
+  // 两套范围是**有意**不同，不是分叉：第 17 条测试（body）已确认表单更严。
+  assert.ok(PROFILE_ACCEPT_LEGACY.ageYears[0] < LIMITS.ageYears[0], '宽范围必须比表单范围宽，否则老资料会被判成没填');
 });

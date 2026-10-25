@@ -190,7 +190,7 @@
   并断言「徽章 ≥48px、设置图标 23px / 图标块 ≥34px、徽章名一个都不空」；
 - 反向验证（`node tools/mutate-check.mjs`）故意把代码改坏，确认测试真的会红。
   **v27 修掉了这个工具从 v26 起的一个假绿灯**（临时沙箱漏了 `index.html` 等文件 → 基线本来就红 → 每条变异都算「抓到」），
-  并如实区分「测试守得住」和「改坏后行为不变的等价变异」：现在严格捕获 98/98，另有 2 条半敏感、4 条等价变异单独标注。
+  并如实区分「测试守得住」和「改坏后行为不变的等价变异」：现在严格捕获 101/101，另有 2 条半敏感、4 条等价变异单独标注。
 
 **可复现**：`npm test`、`node tools/browser-check.mjs`（截图在 `.selfcheck/shot-phone-*`）、
 `node tools/mutate-check.mjs`。
@@ -287,6 +287,34 @@
 `browser-check` 用两种真实存档跑界面：今天空着 → 点按钮进记录页且输入框聚焦；昨天空着 → 点「今天不补」后当天消失。
 截图 `.selfcheck/shot-phone-12-nudge-today.png` / `shot-phone-13-nudge-yesterday.png`。
 
+## 〇·九、覆盖类操作先留快照 + 两个窗口不互相盖（2026-10-25，v33）
+
+独立审计（`.audit/arch-audit-v33.md`）发现三条会**静默覆盖真实记录**的路径。这类问题不会报错，
+但代价是几个月的记录没了 —— 所以它排在所有新功能前面，而且每一条都补了测试。
+
+| 场景 | 以前 | 现在 |
+| --- | --- | --- |
+| 打开演示链接 `?demo=1`（或欢迎页「看一个填好的例子」） | 直接清空整包存档、换成示例数据 | 有记录时先确认「会覆盖 X 天记录」，并**自动留快照**；看完可以回滚 |
+| 从文件导入存档 | 只问一句「会覆盖，确定吗」 | 先自动留快照再覆盖；提示里说明去哪儿回滚 |
+| 同时开两个窗口/标签页 | 后保存的把先保存的整包盖掉，无提示、找不回 | 另一个窗口写入时本页会提示并同步；正在填东西时不打断，关面板后自动补同步；本页拿旧数据去保存会**让路**，并说清「这一笔没记上」 |
+
+设计约束（别改坏）：
+
+- **快照只有一份**：升级 / 导入 / 看演示前都会覆盖它，但存的永远是「刚刚那份真实记录」，比更早的旧快照更有用；
+- **不让用户选「要不要留底」**：留底不是可选项，直接做掉；
+- **多窗口默认同步、不打断输入**：只在「面板开着 / 输入框有字」时挂一条提示，绝不把输入到一半的内容冲掉；
+- 判断「有没有会丢的东西」只有一处（`js/store.js#hasUserData`）：记录、体重、自己加的食物、填好的资料都算。
+
+**仍有限制（如实说）**：两个窗口同时开着、且都在同一天记不同的东西时，后保存的那一笔如果触发「让路」，
+会提示没记上、需要再点一次；没有做真正的合并。这是「数据不会悄悄丢」和「两笔都不丢」之间的取舍 ——
+宁可提示重做，也不静默覆盖。
+
+**验收**：`tests/calc.test.mjs` / `tests/store.test.mjs` 覆盖范围与「有没有会丢的东西」；
+`direct-check` 用真实界面走三条路径（演示确认/取消/确认后快照、多窗口同步、旧数据保存让路）；
+反向验证：把修复临时关掉，`direct-check` 和单测都会红。
+
+---
+
 ---
 
 ## 待办（GitHub Issues）
@@ -300,6 +328,11 @@
 | [12](https://github.com/kotochain/fatloss-helper/issues/12) | AI 直接估热量，认不出的菜存成「我的食物」（不再只当匹配器） | 待评审 |
 | [13](https://github.com/kotochain/fatloss-helper/issues/13) | 记录链路剩余漏洞：AI 只给名字会被丢 / 离线部分漏识别不提示 | 待做 |
 | [14](https://github.com/kotochain/fatloss-helper/issues/14) | 留存后续：A 今日两件事 / C 成长回顾 / 定时提醒（做不了，见说明） | 待做 |
+| [15](https://github.com/kotochain/fatloss-helper/issues/15) | 数据安全：演示/导入/多窗口三条会静默覆盖记录的路径 | v33 已修 |
+| [16](https://github.com/kotochain/fatloss-helper/issues/16) | 同一规则多份实现且已分叉（资料校验 3 套、4/9/4 换算 4 份） | 待做 |
+| [17](https://github.com/kotochain/fatloss-helper/issues/17) | app.js 4021 行：拆分方案与触发条件 | 押后 |
+| [18](https://github.com/kotochain/fatloss-helper/issues/18) | 测试守不住：空转断言 + 关键校验没测试 | 待做 |
+| [19](https://github.com/kotochain/fatloss-helper/issues/19) | 产品逻辑总账：每条承诺 → 代码 → 测试 → 决策号 | 待做 |
 
 已关闭：[#2 普通模式](https://github.com/kotochain/fatloss-helper/issues/2)、
 [#3 份量配对](https://github.com/kotochain/fatloss-helper/issues/3)、[#4 器械勾选](https://github.com/kotochain/fatloss-helper/issues/4)（v20）、
@@ -477,7 +510,7 @@ npm run check:full      # 全套 12 项（含全按钮清扫、AI 失败注入�
 npm run check:live      # 只测线上：文件逐字节一致 + 真打开线上网址跑一遍（需联网）
 
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
-npm test                       # 342 个自动化测试
+npm test                       # 349 个自动化测试
 node tools/mutate-check.mjs    # 反向验证：故意改坏 98 处代码，确认测试符合预期（在临时副本里做）
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程

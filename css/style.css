@@ -92,6 +92,34 @@ body {
 }
 .toast.in { opacity: 1; transform: translate(-50%, 0); }
 
+/*
+ * 另一个窗口改了记录时的提示条。
+ * 放在底栏上方：顶部有 toast、底部是固定标签栏 —— 夹在两处都能看见的地方，
+ * 而且不抢焦点（正在输入时不打断，只提醒，点「同步」才换数据）。
+ */
+.sync-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 440px;
+  width: calc(100% - 28px);
+  background: #FFF6E8;
+  border: 1px solid #EAD6B4;
+  color: #3A2E33;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px 8px 14px;
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(120, 82, 40, 0.14);
+}
+.sync-banner span { flex: 1; }
+.sync-banner .btn { padding: 6px 12px; font-size: 13px; flex: 0 0 auto; }
+
 /* 内联图标 */
 .ic {
   width: 20px; height: 20px;

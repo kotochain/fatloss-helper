@@ -23,12 +23,33 @@ export const GOAL_PACE = [
   { key: 'fast', label: '想快一点', hint: '每周减约 0.75% 体重，更饿、更容易掉肌肉', pctPerWeek: 0.0075 },
 ];
 
-/** 女生/男生的大致身高体重范围，用来挡住手滑输错 */
+/**
+ * 表单能填的范围（保存前按这个挡）。
+ *
+ * 体脂率也在这里，**别在别处再写一遍**：以前表单校验和基础代谢公式各写了一个
+ * `3~60`，而 `LIMITS.bodyFatPct` 是 `[8, 55]` 却没人引用（死常量）。
+ * 三处数值不一致不会报错，只会让「表单能存、公式不认」这种怪事悄悄发生。
+ */
 export const LIMITS = {
   weightKg: [30, 250],
   heightCm: [130, 220],
   ageYears: [18, 80],
-  bodyFatPct: [8, 55],
+  // 3% 是极端低体脂（健美比赛水平），60% 是极端高；区间外基本是填错了或把 25% 写成 0.25
+  bodyFatPct: [3, 60],
+};
+
+/**
+ * 老存档 / 导入数据「能不能拿来算目标」的宽范围。
+ *
+ * 为什么比 `LIMITS` 宽（年龄还允许 10 岁以上）：老版本允许过更宽的值，
+ * 这些数据不该因为超出新表单范围就被判成「还没填资料」——那会让人以为记录丢了，
+ * 而且表单填不回原值（会被挡住），变成进不去也退不出的死胡同。
+ * **只用来判断「能不能算」，不用于保存校验。**
+ */
+export const PROFILE_ACCEPT_LEGACY = {
+  ageYears: [10, 120],
+  heightCm: [100, 250],
+  weightKg: [25, 300],
 };
 
 /** 每减掉 1 公斤体重（主要是脂肪）大致需要 7700 kcal 的热量缺口。这是估算值。 */
@@ -45,6 +66,66 @@ export function round(value, digits = 0) {
 
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * 资料够不够用来算目标 —— 只有这几项都齐了才算能算。
+ *
+ * 为什么要单独判一次：目标数字全靠 profile 里的身高/体重/年龄/性别，
+ * 少一项 calcTargets 就会抛错。真出过一次（缺 weightKg 的存档直接崩到今天页），
+ * 而**迁移写错字段名时就是这个症状**。宁可把使用者当「还没填资料」，也不能让人看到崩溃页。
+ *
+ * 范围用 `PROFILE_ACCEPT_LEGACY`（宽），不是表单范围 —— 原因见那个常量的注释。
+ */
+export function isProfileUsable(p) {
+  if (!p || typeof p !== 'object') return false;
+  const inRange = (v, [lo, hi]) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+  return (p.sex === 'female' || p.sex === 'male')
+    && inRange(p.heightCm, PROFILE_ACCEPT_LEGACY.heightCm)
+    && inRange(p.weightKg, PROFILE_ACCEPT_LEGACY.weightKg)
+    && inRange(p.age, PROFILE_ACCEPT_LEGACY.ageYears);
+}
+
+/**
+ * 资料校验（保存前真的挡住）。
+ *
+ * 界面上的红字提示只是提示，这里才是最后一道拦截 ——
+ * 否则清空身高会存进 heightCm:0，目标热量静默掉到 1200 而使用者不知道。
+ * 范围只认 `LIMITS` 一处，别再在这里写死数字。
+ *
+ * @returns {string|null} 有问题就返回说明，没问题返回 null
+ */
+export function validateProfile(form) {
+  // 年龄先单独判：17 岁的人看到「年龄要在 18~80 之间」会困惑，要说清为什么。
+  // （这个分支以前写在范围检查后面，永远轮不到它 —— 和 LIMITS.ageYears 的下限重复了。）
+  const age = form?.age;
+  if (typeof age !== 'number' || !Number.isFinite(age)) return '年龄要填一个数字。';
+  if (age < 18) return '这个工具只适合 18 岁以上使用，未成年人请先问医生。';
+  const ranges = {
+    age: [LIMITS.ageYears[0], LIMITS.ageYears[1], '年龄'],
+    heightCm: [LIMITS.heightCm[0], LIMITS.heightCm[1], '身高'],
+    weightKg: [LIMITS.weightKg[0], LIMITS.weightKg[1], '体重'],
+  };
+  for (const [key, [lo, hi, label]] of Object.entries(ranges)) {
+    const v = form?.[key];
+    if (typeof v !== 'number' || !Number.isFinite(v)) return `${label}要填一个数字。`;
+    if (v < lo || v > hi) return `${label}要在 ${lo}~${hi} 之间。`;
+  }
+  // 昵称是可选的，不校验；空值由昵称函数统一回落到默认名
+  if (form.bodyFatPct !== null && form.bodyFatPct !== undefined) {
+    const bf = form.bodyFatPct;
+    const [lo, hi] = LIMITS.bodyFatPct;
+    if (typeof bf !== 'number' || !Number.isFinite(bf) || bf < lo || bf > hi) {
+      return `体脂率要么留空，要么填 ${lo}~${hi} 之间的数（填的是百分数，例如 25）。`;
+    }
+  }
+  if (form.targetWeightKg !== null && form.targetWeightKg !== undefined) {
+    if (typeof form.targetWeightKg !== 'number' || !Number.isFinite(form.targetWeightKg)) return '目标体重要么留空，要么填数字。';
+    if (form.targetWeightKg < LIMITS.weightKg[0] || form.targetWeightKg > LIMITS.weightKg[1]) {
+      return `目标体重要在 ${LIMITS.weightKg[0]}~${LIMITS.weightKg[1]} 之间。`;
+    }
+  }
+  return null;
 }
 
 function assertNumber(value, name) {
@@ -64,11 +145,12 @@ export function calcBMR({ sex, weightKg, heightCm, age, bodyFatPct = null }) {
   if (sex !== 'female' && sex !== 'male') throw new Error('性别必须是 female 或 male');
 
   const bf = typeof bodyFatPct === 'number' && Number.isFinite(bodyFatPct) ? bodyFatPct : null;
-  if (bf !== null && bf >= 3 && bf <= 60) {
+  const [bfLo, bfHi] = LIMITS.bodyFatPct;
+  if (bf !== null && bf >= bfLo && bf <= bfHi) {
     const leanMass = weightKg * (1 - bf / 100);
     return { bmr: 370 + 21.6 * leanMass, method: 'katch', leanMass };
   }
-  // 体脂率超出 3%~60% 基本是填错了（例如把 25% 写成 0.25），这时退回身高体重公式更稳
+  // 体脂率超出范围基本是填错了（例如把 25% 写成 0.25），这时退回身高体重公式更稳
   const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
   const bmr = sex === 'female' ? base - 161 : base + 5;
   return { bmr, method: 'mifflin', leanMass: null };

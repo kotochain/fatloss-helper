@@ -8,6 +8,7 @@ import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   updateFoodEntry, addExercise, removeExercise, addWeight, addCustomFood,
   weightTrend, analyzeProgress, demoProfile, demoEntries, STATE_VERSION, frequentFoods,
+  recordedDays, hasUserData,
 } from '../js/store.js';
 import { migrate } from '../js/schema.js';
 import { calcTargets, calcEntry } from '../js/calc.js';
@@ -287,4 +288,54 @@ test('「只填热量」记进去就是这一顿的热量，且不会变成「�
   const freq = frequentFoods(s, 8);
   assert.ok(!freq.some((x) => x.food.kcalOnly), '只填热量的条目不该出现在常吃的里');
   assert.ok(freq.some((x) => x.food.id === 'egg'));
+});
+
+
+/*
+ * v33：覆盖类操作（演示、导入）前必须先判断「有没有会丢的东西」。
+ * 这个判断只能有一份 —— 备份页的「X 天记录」和覆盖确认都用它。
+ */
+
+test('「记过的日子」只数真有内容的：打开页面建的空日期不算', () => {
+  const s = emptyState();
+  const d = todayKey();
+  getDay(s, d);                       // 渲染今天页会顺手建出空日期
+  getDay(s, shiftDate(d, -1));        // 洞察还会往前建
+  assert.deepEqual(recordedDays(s), [], '空日期不能算成「记过」');
+  assert.equal(hasUserData(s), false, '没有任何东西时不该弹覆盖确认');
+
+  addFoodEntry(s, d, 'lunch', rice, 150);
+  assert.deepEqual(recordedDays(s), [d]);
+  assert.equal(hasUserData(s), true);
+});
+
+test('覆盖前判断：记录、体重、自己加的食物、填好的资料都算「丢了会心疼」', () => {
+  const base = emptyState();
+  assert.equal(hasUserData(base), false);
+
+  const withProfile = { ...emptyState(), profile: demoProfile() };
+  assert.equal(hasUserData(withProfile), true, '只填了资料也算：演示/导入会把它换掉');
+
+  const withWeight = emptyState();
+  addWeight(withWeight, todayKey(), 57.8);
+  assert.equal(hasUserData(withWeight), true, '体重趋势也是记录');
+
+  const withCustom = emptyState();
+  addCustomFood(withCustom, { name: '楼下那家馄饨', kcal: 120, protein: 6, fat: 4, carb: 16 });
+  assert.equal(hasUserData(withCustom), true, '自己加的食物不该被演示覆盖');
+
+  assert.equal(hasUserData(null), false);
+  assert.equal(hasUserData({}), false);
+});
+
+test('只有备注/只有运动的日子也算记过（别把这类记录当空的）', () => {
+  const s = emptyState();
+  const d = todayKey();
+  const day = getDay(s, d);
+  day.note = '今天外食，没法称重';
+  assert.deepEqual(recordedDays(s), [d]);
+
+  const s2 = emptyState();
+  addExercise(s2, d, 'walk', 30);
+  assert.deepEqual(recordedDays(s2), [d]);
 });
