@@ -29,7 +29,7 @@ import { labelToPer100, checkConsistency, photoRetakeHint } from './label.js';
 import { PRESETS, findPreset } from './providers.js';
 import {
   achievements, plantState, weeklyReview, weeklyHighlight, afterLogMessage,
-  markAchievementsSeen, shouldShowWeekly, nickname, greeting, hitMilestone, badgeLabel,
+  markAchievementsSeen, shouldShowWeekly, nickname, greeting, hitMilestone, badgeLabel, dailyNudge,
 } from './achievements.js';
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment, normalizeEquipment,
@@ -422,6 +422,24 @@ function handleAction(act, data) {
       if (ta) { ta.focus(); toast('在这里写一句，会自动记到你那一餐。'); }
       return;
     }
+    case 'nudge-yesterday': {
+      // 补记昨天：把当前日期切到昨天，再进「说一句」。
+      // 不自动切回今天（用户可能还想补别的），但会告诉他怎么回去。
+      dateKey = shiftDate(todayKey(), -1);
+      state.settings = { ...(state.settings || {}), recordTab: 'food' };
+      save();
+      goView('log');
+      const ta = $('#quickText');
+      if (ta) { ta.focus(); toast('现在记到昨天。记完点顶部日期 →「回到今天」就行。'); }
+      return;
+    }
+    case 'nudge-skip-yesterday': {
+      // 只跳过「今天」这一天：明天打开如果昨天还是空的，还会再问一次（但不会骂人）
+      state.settings = { ...(state.settings || {}), yesterdayNudgeSkipped: todayKey() };
+      save();
+      render();
+      return;
+    }
     case 'del-food': {
       const day = getDay(state, dateKey);
       const entry = Object.values(day.meals).flat().find((e) => e.id === data.id);
@@ -727,6 +745,8 @@ function renderToday() {
   const exerciseMin = day.exercises.reduce((a, x) => a + x.minutes, 0);
   const plant = { state: plantState(state), ach: achievements(state, t.proteinG) };
   const greet = greeting(state);
+  // v32：今天页的「接住」——今天空着就提醒先记一口；昨天空着就问要不要补（各只一句）
+  const nudge = dateKey === todayKey() ? dailyNudge(state) : null;
   const macros = diff.filter((d) => d.key !== 'kcal');
 
   app.innerHTML = `
@@ -769,11 +789,25 @@ function renderToday() {
       </div>
 
       <div class="stats">
-        ${streak > 1 ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>连续记录 <b>${streak}</b> 天</span>` : ''}
+        ${streak >= 1 ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>连续记录 <b>${streak}</b> 天</span>` : ''}
         ${exerciseMin ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-today"/></svg>今天运动 <b>${exerciseMin}</b> 分钟</span>` : ''}
         <span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-pin"/></svg>蛋白 <b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
       </div>
     </div>
+
+    ${nudge ? `
+      <div class="card nudge">
+        ${nudge.kind === 'today-empty' ? `
+          <p class="nudge-title">今天还空着</p>
+          <p class="nudge-text">先记一口也算 —— 一句话就行，不用纠结准不准。</p>
+          <button class="btn block" data-act="quick-fill">说一句</button>` : `
+          <p class="nudge-title">昨天没记，要补一笔吗？</p>
+          <p class="nudge-text">补上之后连续记录就能接上；不补也没关系，今天记了就算重新开始。</p>
+          <div class="btn-row">
+            <button class="btn grow" data-act="nudge-yesterday">补记昨天</button>
+            <button class="btn ghost" data-act="nudge-skip-yesterday">今天不补</button>
+          </div>`}
+      </div>` : ''}
 
     ${myInsights(3).length || insightHint(state) ? `
       <div class="card insight-card">

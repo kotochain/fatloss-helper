@@ -281,6 +281,9 @@ body {
 
 /* ── 通用卡片 ───────────────────────────── */
 main { padding: 12px; }
+.card.nudge { background: #FFFCFC; border: 1px dashed var(--line); }
+.nudge .nudge-title { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.nudge .nudge-text { margin: 0 0 10px; font-size: 12.5px; color: var(--ink-2); line-height: 1.55; }
 .card {
   background: var(--card);
   border-radius: var(--radius);

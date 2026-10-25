@@ -190,7 +190,7 @@
   并断言「徽章 ≥48px、设置图标 23px / 图标块 ≥34px、徽章名一个都不空」；
 - 反向验证（`node tools/mutate-check.mjs`）故意把代码改坏，确认测试真的会红。
   **v27 修掉了这个工具从 v26 起的一个假绿灯**（临时沙箱漏了 `index.html` 等文件 → 基线本来就红 → 每条变异都算「抓到」），
-  并如实区分「测试守得住」和「改坏后行为不变的等价变异」：现在严格捕获 95/95，另有 2 条半敏感、4 条等价变异单独标注。
+  并如实区分「测试守得住」和「改坏后行为不变的等价变异」：现在严格捕获 98/98，另有 2 条半敏感、4 条等价变异单独标注。
 
 **可复现**：`npm test`、`node tools/browser-check.mjs`（截图在 `.selfcheck/shot-phone-*`）、
 `node tools/mutate-check.mjs`。
@@ -260,6 +260,34 @@
 
 ---
 
+## 〇·八、断签保护 + 打开时接住（2026-10-25，v32）
+
+用户说：「需要一些能让用户更主动使用的东西，核心目的是每天有主动去用的想法。」
+查下来，这类记录工具最常见的死法不是「功能不够」，而是**断签一次就再也不打开**：
+连续记录归零、页面没有任何招呼、回来还要面对「你已断签 N 天」的指责。所以先做了最小的三件事：
+
+| 场景 | 现在会怎样 |
+| --- | --- |
+| 今天一笔都没记 | 今天页多一张小卡片：「今天还空着 —— 先记一口也算，一句话就行」，点一下直接进「说一句」 |
+| 今天记了、昨天空着（而且是老用户） | 问一句「昨天没记，要补一笔吗？」→「补记昨天」直接切到昨天记；「今天不补」当天不再问 |
+| 连续记录 | 第 1 天开始就显示；断了不会清零惩罚、植物也不会枯萎，今天记了就算重新开始 |
+
+设计约束（别改坏）：
+
+- **不指责、不显示「断签 N 天」**，只给最小动作；「昨天没记」一天只问一次；
+- **新用户不催**：一条记录都没有时不显示任何卡片（交给欢迎页/引导）；
+- **补记不是伪造**：只是把日期切到昨天、让用户自己记，系统不替用户填数；
+- 没有惩罚性设计：不清零、不扣徽章、不显示「失败」。
+
+**没有做的部分（受架构限制，别写成能做）**：真正的定时推送提醒。应用是纯静态网页 + 数据只在本机，
+浏览器通知需要服务端推送；要做就得上后端，和「无后端、数据只在本机」冲突，需要单独决策（见 issue #14）。
+
+**验收**：`tests/achievements.test.mjs` 断言「什么时候该出现、什么时候不该出现」；
+`browser-check` 用两种真实存档跑界面：今天空着 → 点按钮进记录页且输入框聚焦；昨天空着 → 点「今天不补」后当天消失。
+截图 `.selfcheck/shot-phone-12-nudge-today.png` / `shot-phone-13-nudge-yesterday.png`。
+
+---
+
 ## 待办（GitHub Issues）
 
 **[→ 全部 issue](https://github.com/kotochain/fatloss-helper/issues)**
@@ -268,6 +296,9 @@
 | --- | --- | --- |
 | [6](https://github.com/kotochain/fatloss-helper/issues/6) | 真机试用：把发现的问题记在这里 | 进行中 |
 | [1](https://github.com/kotochain/fatloss-helper/issues/1) | 会员制度：不用自己配 API，充值即用 | 日后 |
+| [12](https://github.com/kotochain/fatloss-helper/issues/12) | AI 直接估热量，认不出的菜存成「我的食物」（不再只当匹配器） | 待评审 |
+| [13](https://github.com/kotochain/fatloss-helper/issues/13) | 记录链路剩余漏洞：AI 只给名字会被丢 / 离线部分漏识别不提示 | 待做 |
+| [14](https://github.com/kotochain/fatloss-helper/issues/14) | 留存后续：A 今日两件事 / C 成长回顾 / 定时提醒（做不了，见说明） | 待做 |
 
 已关闭：[#2 普通模式](https://github.com/kotochain/fatloss-helper/issues/2)、
 [#3 份量配对](https://github.com/kotochain/fatloss-helper/issues/3)、[#4 器械勾选](https://github.com/kotochain/fatloss-helper/issues/4)（v20）、
@@ -445,8 +476,8 @@ npm run check:full      # 全套 12 项（含全按钮清扫、AI 失败注入�
 npm run check:live      # 只测线上：文件逐字节一致 + 真打开线上网址跑一遍（需联网）
 
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
-npm test                       # 341 个自动化测试
-node tools/mutate-check.mjs    # 反向验证：故意改坏 95 处代码，确认测试符合预期（在临时副本里做）
+npm test                       # 342 个自动化测试
+node tools/mutate-check.mjs    # 反向验证：故意改坏 98 处代码，确认测试符合预期（在临时副本里做）
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程
 

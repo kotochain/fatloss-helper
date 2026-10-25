@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
+import { appVersion } from './app-version.mjs';
 
 /**
  * 干完活之后主动退出。
@@ -414,6 +415,70 @@ async function main() {
       弹层关了: document.querySelector('#sheetRoot').classList.contains('hidden'),
     }))()`);
 
+    // 第四步半之三（v32 留存 B）：「今天还空着」和「昨天没记要补吗」两种接住
+    // 先备份当前存档，测完恢复，免得影响后面的回归步骤
+    // 备份放 localStorage，不放 window —— 中间会 reload，window 上的东西会丢（v32 踩过：恢复成字符串 "undefined"）
+    await evaluate(client, `(() => { localStorage.setItem('__qaBackupState', localStorage.getItem('fatloss.state.v2') || 'null'); return true; })()`);
+    const todayNudge = await evaluate(client, `(() => {
+      const raw = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      const key = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString('sv-SE'); };
+      const demoDay = Object.values(raw.days)[0];
+      raw.days = { [key(3)]: demoDay };
+      raw.settings = { ...(raw.settings || {}), lastSeenVersion: ${JSON.stringify(appVersion())}, mode: 'basic' };
+      localStorage.setItem('fatloss.state.v2', JSON.stringify(raw));
+      location.reload();
+    })()`);
+    await sleep(1500);
+    const nudgeToday = await evaluate(client, `(() => ({
+      有卡片: Boolean(document.querySelector('.card.nudge')),
+      标题: document.querySelector('.nudge-title')?.textContent.trim() || '',
+      正文: document.querySelector('.nudge-text')?.textContent.trim() || '',
+      按钮: [...document.querySelectorAll('.card.nudge button')].map((b) => b.textContent.trim()),
+    }))()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-12-nudge-today.png`));
+    await evaluate(client, `document.querySelector('.card.nudge [data-act="quick-fill"]')?.click()`);
+    await sleep(400);
+    const nudgeTodayAfter = await evaluate(client, `(() => ({
+      在记录页: Boolean(document.querySelector('.tab[data-view="log"]')?.classList.contains('active')),
+      输入框聚焦: document.activeElement?.id === 'quickText',
+    }))()`);
+
+    // 昨天没记：今天已记 + 4 天前记过 → 问要不要补；点「今天不补」之后当天不再出现
+    await evaluate(client, `(() => {
+      const raw = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      const key = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString('sv-SE'); };
+      const demoDay = Object.values(raw.days)[0];
+      raw.days = { [key(0)]: demoDay, [key(4)]: demoDay };
+      raw.settings = { ...(raw.settings || {}), lastSeenVersion: ${JSON.stringify(appVersion())}, mode: 'basic' };
+      delete raw.settings.yesterdayNudgeSkipped;
+      localStorage.setItem('fatloss.state.v2', JSON.stringify(raw));
+      location.reload();
+    })()`);
+    await sleep(1500);
+    const nudgeYesterday = await evaluate(client, `(() => ({
+      有卡片: Boolean(document.querySelector('.card.nudge')),
+      标题: document.querySelector('.nudge-title')?.textContent.trim() || '',
+      按钮: [...document.querySelectorAll('.card.nudge button')].map((b) => b.textContent.trim()),
+    }))()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-13-nudge-yesterday.png`));
+    await evaluate(client, `document.querySelector('.card.nudge [data-act="nudge-skip-yesterday"]')?.click()`);
+    await sleep(500);
+    const skipYesterday = await evaluate(client, `(() => {
+      const raw = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+      return {
+        卡片没了: !document.querySelector('.card.nudge'),
+        记了跳过: Boolean(raw.settings?.yesterdayNudgeSkipped),
+      };
+    })()`);
+    // 恢复备份，别影响后面的回归
+    await evaluate(client, `(() => {
+      const backup = localStorage.getItem('__qaBackupState');
+      localStorage.setItem('fatloss.state.v2', backup && backup !== 'undefined' ? backup : 'null');
+      localStorage.removeItem('__qaBackupState');
+      location.reload();
+    })()`);
+    await sleep(1500);
+
     // 第五步：四个标签页都点一遍
     const tabs = {};
     for (const view of ['log', 'plan', 'progress', 'today']) {
@@ -564,7 +629,7 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, deadEnd, deadEndAfter, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -606,6 +671,8 @@ function printReport(report) {
     console.log(`       ↳ 估算说明：${JSON.stringify(r.aiFallback.估算说明)}`);
     console.log(`       ↳ 删一条后 ${r.aiFallbackAfterDel.行数} 行｜存下 ${r.aiFallbackSaved.条数} 条：${JSON.stringify(r.aiFallbackSaved.名字)}`);
     console.log(`  没认出来时：${r.deadEnd.例句数} 个例句｜手动 ${r.deadEnd.有手动 ? '有' : '缺'}｜返回 ${r.deadEnd.有返回 ? '有' : '缺'}｜文案「${r.deadEnd.文案}」`);
+    console.log(`  今天空着：卡片 ${r.nudgeToday.有卡片 ? '有' : '缺'}｜标题「${r.nudgeToday.标题}」｜按钮 ${JSON.stringify(r.nudgeToday.按钮)}｜点了进记录页 ${r.nudgeTodayAfter.在记录页 ? '是' : '否'}｜输入框聚焦 ${r.nudgeTodayAfter.输入框聚焦 ? '是' : '否'}`);
+    console.log(`  昨天没记：卡片 ${r.nudgeYesterday.有卡片 ? '有' : '缺'}｜标题「${r.nudgeYesterday.标题}」｜按钮 ${JSON.stringify(r.nudgeYesterday.按钮)}｜点「今天不补」后消失 ${r.skipYesterday.卡片没了 ? '是' : '否'}｜跳过已存 ${r.skipYesterday.记了跳过 ? '是' : '否'}`);
     console.log(`       ↳ 点例句后：输入框「${r.deadEndAfter.例句填进去了}」｜弹层关闭 ${r.deadEndAfter.弹层关了 ? '是' : '否'}`);
     console.log(`  四个标签页卡片数：${JSON.stringify(r.tabs)}`);
     console.log(`  图标：${r.iconAudit.图标数} 个｜兜底方块 ${r.iconAudit.兜底方块.length} 个｜缺尺寸 ${r.iconAudit.缺尺寸} 个｜界面残留 emoji ${r.iconAudit.emoji行.length} 行`);
@@ -637,6 +704,11 @@ function printReport(report) {
       || r.deadEnd.例句数 < 3 || !r.deadEnd.有手动 || !r.deadEnd.有返回
       || !r.deadEnd.文案.includes('一条都没记上')
       || r.deadEndAfter.例句填进去了.length < 4 || !r.deadEndAfter.弹层关了
+      || !r.nudgeToday.有卡片 || !r.nudgeToday.标题.includes('今天还空着') || !r.nudgeToday.按钮.includes('说一句')
+      || !r.nudgeTodayAfter.在记录页 || !r.nudgeTodayAfter.输入框聚焦
+      || !r.nudgeYesterday.有卡片 || !r.nudgeYesterday.标题.includes('昨天没记')
+      || !r.nudgeYesterday.按钮.includes('补记昨天') || !r.nudgeYesterday.按钮.includes('今天不补')
+      || !r.skipYesterday.卡片没了 || !r.skipYesterday.记了跳过
       || !r.aboutCheck.有按钮 || !/最新版本/.test(r.aboutCheck.提示)
       || r.refresh.标题 !== '有新版本了' || !r.refresh.按钮.includes('刷新，用上新版')
       || !r.refresh.按钮.includes('先不刷新') || !r.refresh.正文.includes(r.refresh.假版本);

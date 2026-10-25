@@ -20,6 +20,7 @@ import {
   ACHIEVEMENTS, PLANT_STAGES, MILESTONES, achievements, plantState, currentStreak, longestStreak,
   totalLoggedDays, weeklyReview, weeklyHighlight, shouldShowWeekly, afterLogMessage,
   markAchievementsSeen, dayTotals, hasLog, recentDays, nickname, greeting, hitMilestone, badgeLabel,
+  dailyNudge,
 } from '../js/achievements.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -352,4 +353,51 @@ test('每日合计与记录判定（供其它模块复用）', () => {
   assert.ok(t.kcal > 0 && t.protein > 0);
   assert.equal(hasLog(s, '2020-01-01'), false);
   assert.deepEqual(dayTotals(s, '2020-01-01'), { kcal: 0, protein: 0, fat: 0, carb: 0 });
+});
+
+test('v32 留存 B：今天页的「接住」只在合适的时候出现', () => {
+  const s = emptyState();
+  s.profile = demoProfile();
+  const today = todayKey();
+  const d = (n) => shiftDate(today, -n);
+  const egg = { id: 'egg', name: '鸡蛋', category: 'protein', kcal: 143, protein: 13.3, fat: 8.8, carb: 2.8, servings: [['一个', 50]] };
+
+  // 新用户：一条记录都没有 → 不催（欢迎页/引导会带路）
+  assert.equal(dailyNudge(s), null);
+
+  // 老用户，今天空着 → 先记一口的提醒
+  addFoodEntry(s, d(3), 'lunch', egg, 50);
+  assert.equal(dailyNudge(s).kind, 'today-empty');
+
+  // 今天记了、昨天也记了 → 不打扰
+  addFoodEntry(s, today, 'lunch', egg, 50);
+  addFoodEntry(s, d(1), 'lunch', egg, 50);
+  assert.equal(dailyNudge(s), null);
+
+  // 昨天空着、但今天记了、之前有记录 → 问要不要补
+  const s2 = emptyState();
+  s2.profile = demoProfile();
+  addFoodEntry(s2, today, 'lunch', egg, 50);
+  addFoodEntry(s2, d(3), 'lunch', egg, 50);
+  const n = dailyNudge(s2);
+  assert.equal(n.kind, 'yesterday-empty');
+  assert.equal(n.date, d(1));
+
+  // 点「今天不补」之后，今天不再问
+  s2.settings = { ...(s2.settings || {}), yesterdayNudgeSkipped: today };
+  assert.equal(dailyNudge(s2), null);
+  // 但只是跳过当天，不是永久关闭：第二天打开，如果「昨天」还是空的，还会问
+  const tomorrow = shiftDate(today, 1);
+  const s2b = emptyState();
+  s2b.profile = demoProfile();
+  addFoodEntry(s2b, tomorrow, 'lunch', egg, 50);
+  addFoodEntry(s2b, d(4), 'lunch', egg, 50);
+  s2b.settings = { ...(s2b.settings || {}), yesterdayNudgeSkipped: today };
+  assert.equal(dailyNudge(s2b, tomorrow).kind, 'yesterday-empty', '只跳过当天，不是永久关闭');
+
+  // 第一次用（只有今天这一条）不该立刻被问「昨天怎么没记」
+  const s3 = emptyState();
+  s3.profile = demoProfile();
+  addFoodEntry(s3, today, 'lunch', egg, 50);
+  assert.equal(dailyNudge(s3), null);
 });

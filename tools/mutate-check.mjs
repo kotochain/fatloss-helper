@@ -148,6 +148,10 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: '  for (const g of GENERIC_ESTIMATES) {\n    if (g.keywords && g.keywords.test(q)) return g;', to: '  for (const g of GENERIC_ESTIMATES) {\n    if (false) return g;', why: '兜底要按关键词归类（肉菜/主食/甜点…）' },
   { file: 'js/ai-core.js', from: '  if (!first.items.length) {', to: '  if (false) {', why: '模型返回空 items 时要再要一次（这是「AI 说没听懂」最常见的来源）' },
   { file: 'js/insights.js', from: '  const food = findFood(id) || findMatchableFood(id);', to: '  const food = findFood(id);', why: '组合菜从搜索里记进去后，也要能出现在「热量大头」洞察里' },
+  // ── v32：留存 B（今天页的「接住」）──
+  { file: 'js/achievements.js', from: "  if (!loggedToday) return { kind: 'today-empty' };", to: '  if (false) return { kind: \'today-empty\' };', why: '今天还没记时要给「先记一口」的接住' },
+  { file: 'js/achievements.js', from: '  if (state?.settings?.yesterdayNudgeSkipped === today) return null;', to: '  if (false) return null;', why: '「今天不补」要真的跳过当天（否则一直问）' },
+  { file: 'js/achievements.js', from: '  const hasHistory = Object.keys(state?.days || {}).some((k) => k < yesterday && hasLog(state, k));', to: '  const hasHistory = true;', why: '第一次用的人不该被问「昨天怎么没记」' },
 
 ];
 

@@ -115,6 +115,33 @@ export function totalLoggedDays(state) {
   return Object.keys(state?.days || {}).filter((k) => hasLog(state, k)).length;
 }
 
+/**
+ * 今天页要不要给一句温和的「接住」（v32，留存方向 B）。
+ *
+ * 只做两种，不许多：
+ *  - today-empty：今天还一笔都没记（老用户才看得到；新用户由欢迎页/引导带路）；
+ *  - yesterday-empty：昨天没记、但今天记了 → 问一句要不要补，补了连续记录就能接上。
+ *
+ * 三条设计约束（别改坏）：
+ *  1) **不指责、不显示「断签 N 天」**，只给最小动作；
+ *  2) 「昨天没记」只问一次 —— 点「今天不补」后，这一天不再出现；
+ *  3) 新用户（一条记录都没有）不弹，避免第一眼就被催。
+ *
+ * @returns {{kind:'today-empty'}|{kind:'yesterday-empty', date:string}|null}
+ */
+export function dailyNudge(state, today = todayKey()) {
+  if (totalLoggedDays(state) === 0) return null;
+  const loggedToday = hasLog(state, today);
+  const yesterday = shiftDate(today, -1);
+  if (!loggedToday) return { kind: 'today-empty' };
+  if (hasLog(state, yesterday)) return null;
+  if (state?.settings?.yesterdayNudgeSkipped === today) return null;
+  // 只有「本来就在记」的人才会被问补记：昨天之前至少有一天记录。
+  // 第一次用的人今天记完，不该立刻被问「昨天怎么没记」。
+  const hasHistory = Object.keys(state?.days || {}).some((k) => k < yesterday && hasLog(state, k));
+  return hasHistory ? { kind: 'yesterday-empty', date: yesterday } : null;
+}
+
 /** 最近 N 天的日期（含今天，从早到晚） */
 export function recentDays(n, today = todayKey()) {
   const out = [];
