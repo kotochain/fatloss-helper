@@ -707,7 +707,7 @@ function printReport(report) {
       || !r.nudgeToday.有卡片 || !r.nudgeToday.标题.includes('今天还空着') || !r.nudgeToday.按钮.includes('说一句')
       || !r.nudgeTodayAfter.在记录页 || !r.nudgeTodayAfter.输入框聚焦
       || !r.nudgeYesterday.有卡片 || !r.nudgeYesterday.标题.includes('昨天没记')
-      || !r.nudgeYesterday.按钮.includes('补记昨天') || !r.nudgeYesterday.按钮.includes('今天不补')
+      || !r.nudgeYesterday.按钮.includes('补记昨天') || !r.nudgeYesterday.按钮.includes('不补了')
       || !r.skipYesterday.卡片没了 || !r.skipYesterday.记了跳过
       || !r.aboutCheck.有按钮 || !/最新版本/.test(r.aboutCheck.提示)
       || r.refresh.标题 !== '有新版本了' || !r.refresh.按钮.includes('刷新，用上新版')

@@ -750,6 +750,20 @@ function renderToday() {
   const macros = diff.filter((d) => d.key !== 'kcal');
 
   app.innerHTML = `
+    ${nudge ? `
+      <div class="card nudge">
+        ${nudge.kind === 'today-empty' ? `
+          <p class="nudge-title">今天还空着</p>
+          <p class="nudge-text">先记一口也算 —— 一句话就行，不用纠结准不准。</p>
+          <button class="btn block" data-act="quick-fill">说一句</button>` : `
+          <p class="nudge-title">昨天没记，要补一笔吗？</p>
+          <p class="nudge-text">补上之后连续记录就能接上；不补也没关系，今天记了就算重新开始。</p>
+          <div class="btn-row">
+            <button class="btn grow" data-act="nudge-yesterday">补记昨天</button>
+            <button class="btn ghost" data-act="nudge-skip-yesterday">不补了</button>
+          </div>`}
+      </div>` : ''}
+
     <div class="card hero">
       <div class="greet">${icon(greet.icon, { size: 18 })} <span>${greet.name ? `${esc(greet.word)}，<b>${esc(greet.name)}</b>` : esc(greet.word)}</span></div>
       <div class="ring-wrap">
@@ -794,20 +808,6 @@ function renderToday() {
         <span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-pin"/></svg>蛋白 <b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
       </div>
     </div>
-
-    ${nudge ? `
-      <div class="card nudge">
-        ${nudge.kind === 'today-empty' ? `
-          <p class="nudge-title">今天还空着</p>
-          <p class="nudge-text">先记一口也算 —— 一句话就行，不用纠结准不准。</p>
-          <button class="btn block" data-act="quick-fill">说一句</button>` : `
-          <p class="nudge-title">昨天没记，要补一笔吗？</p>
-          <p class="nudge-text">补上之后连续记录就能接上；不补也没关系，今天记了就算重新开始。</p>
-          <div class="btn-row">
-            <button class="btn grow" data-act="nudge-yesterday">补记昨天</button>
-            <button class="btn ghost" data-act="nudge-skip-yesterday">今天不补</button>
-          </div>`}
-      </div>` : ''}
 
     ${myInsights(3).length || insightHint(state) ? `
       <div class="card insight-card">
@@ -1579,7 +1579,8 @@ function drawDraft() {
     // 先给一句落在「记录」这件事上的反馈，再检查有没有解锁新徽章
     const t = targets();
     const msg = afterLogMessage(state, savedMeal, t?.proteinG || 60);
-    toast(msg.text, msg.icon);
+    // 补记昨天时，保存反馈要写清「记到昨天了」——不然用户不知道这一笔落在哪一天
+    toast(dateKey === todayKey() ? msg.text : `${msg.text}（记到${dayLabel(dateKey)}）`, msg.icon);
     checkNewAchievements();
   });
   $('#draftCancel', box)?.addEventListener('click', () => {
