@@ -332,7 +332,8 @@ async function main() {
   console.log('解析结果 →', JSON.stringify(parsed));
   const shotDraft = await client.send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync(path.join(outDir, 'shot-draft-sheet.png'), Buffer.from(shotDraft.data, 'base64'));
-  if (!parsed.方式.includes('AI 识别')) problems.push(`没有走 AI 直连，实际：${parsed.方式}`);
+  // v31 起界面文案是「这次是：AI 认出来的」（原文案「AI 识别」）
+  if (!parsed.方式.includes('AI 认出来的')) problems.push(`没有走 AI 直连，实际：${parsed.方式}`);
   /**
    * 关键断言：AI 说的三条必须**真的被记上**。
    *
@@ -388,7 +389,7 @@ async function main() {
   console.log(`   普通模式解析：${basicParse.条数} 条｜来源「${basicParse.方式}」｜新增请求 ${chatsInBasic} 次`);
   if (chatsInBasic !== 0) problems.push(`普通模式下还发了 ${chatsInBasic} 次请求（说好的不联网不花钱呢）`);
   if (!basicParse.条数) problems.push('普通模式下离线解析也没认出来（切模式不能把功能弄坏）');
-  if (/AI 识别/.test(basicParse.方式)) problems.push('普通模式下结果来源还被标成 AI 识别');
+  if (/AI 认出来的/.test(basicParse.方式)) problems.push('普通模式下结果来源还被标成 AI 认出来的');
   await evaluate(`document.querySelector('#draftCancel')?.click(); document.querySelector('#sheetClose')?.click(); true`);
   await sleep(300);
 
