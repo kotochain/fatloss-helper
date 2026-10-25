@@ -35,6 +35,10 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: 'kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9', to: 'kcal: 316, protein: 2.6, fat: 0.3, carb: 25.9', why: '熟米饭每 100 克 116 kcal' },
   { file: 'js/foods.js', from: 'if (/斤/.test(unit)) return round1(qty * 500);', to: 'if (/斤/.test(unit)) return round1(qty * 50);', why: '一斤 = 500 克' },
   { file: 'js/foods.js', from: 'const exact = pairs.find((x) => x.key === unit);', to: 'const exact = null;', why: '「一碗」必须精确命中而不是被「一小碗」抢走' },
+  // v36：「顺手做两件事」的三条硬规则（今天空着不出卡、最多两条、蛋白缺口要提）
+  { file: 'js/nextsteps.js', from: '  if (entriesOn(state, today).length === 0) return [];', to: '  if (false) return [];', why: '今天一笔都没记时不能重复催（交给接住卡）' },
+  { file: 'js/nextsteps.js', from: '  return candidates.slice(0, 2);', to: '  return candidates.slice(0, 3);', why: '今天页最多两条，多了就是骚扰' },
+  { file: 'js/nextsteps.js', from: '  if (remaining > 0 && gap > 10) {', to: '  if (remaining > 0 && gap > 100) {', why: '蛋白缺口明显时要给补蛋白的建议' },
   // v35：单源化与 #13（4/9/4 只有一处、没给份量不许丢、部分漏识别要提示、合计只有一份）
   { file: 'js/calc.js', from: 'export function macroKcal({ protein = 0, fat = 0, carb = 0 } = {}) {', to: 'export function macroKcal({ protein = 0, fat = 0, carb = 0 } = {) {', why: '4/9/4 折算只有一处实现（语法级破坏：改坏后测试会红）' },
   { file: 'js/ai-core.js', from: '      gramsMissing: !rounded && !portion,', to: '      gramsMissing: false,', why: 'AI 只给名字没给份量时必须标出来（否则又变成悄悄丢/悄悄估）' },

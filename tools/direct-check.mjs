@@ -570,6 +570,46 @@ async function main() {
   await evaluate(`document.querySelector('#sheetClose')?.click()`);
   await sleep(300);
 
+  console.log('\n=== 四·二、今天页「顺手做两件事」（v36，issue #14 A） ===');
+  await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);
+  await sleep(600);
+  const stepsUi = await evaluate(`(() => {
+    const card = document.querySelector('#app .card.steps');
+    const rows = [...document.querySelectorAll('#app .card.steps .step')];
+    return {
+      有卡片: !!card,
+      标题: card?.querySelector('.card-title')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+      条数: rows.length,
+      标题们: rows.map((r) => r.querySelector('b')?.textContent.trim() || ''),
+      有按钮: rows.filter((r) => r.querySelector('[data-act]')).length,
+      文案: rows.map((r) => r.textContent.replace(/\\s+/g, ' ').trim()).join(' | '),
+    };
+  })()`);
+  console.log('今天页两件事 →', JSON.stringify(stepsUi));
+  const shotSteps = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-today-steps.png'), Buffer.from(shotSteps.data, 'base64'));
+  if (!stepsUi.有卡片) problems.push('今天页没有「顺手做两件事」卡片（这轮的功能没出现）');
+  if (!(stepsUi.条数 >= 1 && stepsUi.条数 <= 2)) problems.push(`两件事卡片应当是 1~2 条，实际 ${stepsUi.条数} 条`);
+  if (!stepsUi.标题.includes('顺手做')) problems.push(`卡片标题不对：${stepsUi.标题}`);
+  if (/应该|必须|失败|差劲/.test(stepsUi.文案)) problems.push('两件事的文案在指责/施压');
+  const act = await evaluate(`(() => {
+    const btn = document.querySelector('#app .card.steps .step [data-act]');
+    if (!btn) return { 有按钮: false, act: null };
+    const a = btn.dataset.act;
+    btn.click();
+    return { 有按钮: true, act: a };
+  })()`);
+  await sleep(700);
+  const acted = await evaluate(`(() => ({
+    说一句入口: !!document.querySelector('#quickText'),
+    弹层开着: !document.querySelector('#sheetRoot').classList.contains('hidden'),
+    输入框字数: (document.querySelector('#quickText')?.value || '').length,
+  }))()`);
+  console.log(`   点第一条（${act.act}）→`, JSON.stringify(acted));
+  if (act.有按钮 && !acted.说一句入口 && !acted.弹层开着) problems.push(`点了「${act.act}」没有任何反应`);
+  await evaluate(`document.querySelector('#sheetClose')?.click(); document.querySelector('.tab[data-view="today"]')?.click(); true`);
+  await sleep(300);
+
   console.log('\n=== 五、日历与日期选择 ===');
   await evaluate(`document.querySelector('#dateLabel').click()`);
   await sleep(600);
@@ -734,7 +774,7 @@ async function main() {
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill(), () => fake.close(), () => staticServer.close()]);
 }
 
-armWatchdog('direct-check.mjs', 330);
+armWatchdog('direct-check.mjs', 360);
 
 // 失败路径也必须收尾：只设 exitCode 的话进程会一直挂着（被看门狗杀掉 → 退出码又变了）
 main().catch((err, cleanup) => {

@@ -38,6 +38,7 @@ import {
   normalizeCardioGoal, normalizeCardioMinutes,
 } from './cardio.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
+import { nextSteps, nextStepsTitle } from './nextsteps.js';
 import { insights, insightHint } from './insights.js';
 import { APP_VERSION, CHANGELOG } from './version.js';
 import { pendingUpdates, isNewerVersion } from './whatsnew.js';
@@ -493,7 +494,11 @@ function handleAction(act, data) {
       state.settings.recordTab = 'food';
       goView('log');
       const ta = $('#quickText');
-      if (ta) { ta.focus(); toast('在这里写一句，会自动记到你那一餐。'); }
+      if (ta) {
+        if (data.text) ta.value = data.text;
+        ta.focus();
+        toast(data.text ? '已经帮你填好了，点「解析这一句」就行。' : '在这里写一句，会自动记到你那一餐。');
+      }
       return;
     }
     case 'nudge-yesterday': {
@@ -836,7 +841,12 @@ function renderToday() {
   const cls = totals.kcal > budget * 1.05 ? 'over' : totals.kcal < budget * 0.8 ? 'under' : 'ok';
   const diff = diffAgainstTargets(totals, t);
   const split = macroSplit(totals);
-  const tip = suggestNext(totals, t, remaining);
+  /*
+   * v36（issue #14 A）：今天页的「顺手做两件事」。
+   * 只在「今天」这一页给（过去的日期给「现在可以做什么」没有意义）；
+   * 今天一笔都没记时不显示 —— 那时由上面的「接住」卡负责，避免同一句话说两遍。
+   */
+  const steps = dateKey === todayKey() ? nextSteps({ state, totals, targets: t, today: dateKey }) : [];
 
   const R = 78;                       // 圆环半径
   const CIRC = 2 * Math.PI * R;
@@ -941,7 +951,18 @@ function renderToday() {
       <span class="plant-go">看成长 ›</span>
     </button>
 
-    ${tip ? `<div class="warn info">${tip}</div>` : ''}
+    ${steps.length ? `
+      <div class="card steps">
+        <div class="card-title">${esc(nextStepsTitle(steps.length))}</div>
+        ${steps.map((st) => `
+          <div class="step" data-step="${esc(st.key)}">
+            <div class="step-body">
+              <b>${esc(st.title)}</b>
+              <p>${esc(st.text)}</p>
+            </div>
+            ${st.action ? `<button class="btn ghost step-go" data-act="${esc(st.action)}"${st.payload?.meal ? ` data-meal="${esc(st.payload.meal)}"` : ''}${st.payload?.text ? ` data-text="${esc(st.payload.text)}"` : ''}>${st.action === 'log-weight' ? '去记' : '记这笔'}</button>` : ''}
+          </div>`).join('')}
+      </div>` : ''}
 
     <button class="btn block big-log" data-act="go-log">
       <span class="big-log-plus">＋</span> 记一笔
@@ -990,24 +1011,6 @@ function renderToday() {
 }
 
 /** 根据已吃的，给一句「接下来怎么吃」 */
-function suggestNext(totals, t, remainingKcal) {
-  const proteinLeft = t.proteinG - totals.protein;
-  if (remainingKcal <= 0) {
-    if (proteinLeft > 20) return `热量已经吃满了，但蛋白质还差 ${Math.round(proteinLeft)} 克。明天把蛋白质提前安排（早餐加两个蛋、午餐主菜加大一点）。`;
-    return '今天的热量额度用完了。如果还饿，吃黄瓜、番茄、无糖酸奶这类几乎不占额度的东西。';
-  }
-  if (proteinLeft > 30) {
-    return `还差 ${Math.round(proteinLeft)} 克蛋白质，还有 ${remainingKcal} kcal 额度。建议：熟鸡胸肉 150 克（约 236 kcal，按熟重算）或 3 个鸡蛋（约 215 kcal）或一杯无糖希腊酸奶（135 kcal）。`;
-  }
-  if (proteinLeft > 10) {
-    return `蛋白质还差 ${Math.round(proteinLeft)} 克，可以来一杯无糖酸奶或两个鸡蛋，剩下 ${remainingKcal} kcal 留给主食和蔬菜。`;
-  }
-  if (remainingKcal > 400) {
-    return `蛋白质基本够了，还剩 ${remainingKcal} kcal。加一份主食（米饭 150 克约 175 kcal）和一份蔬菜，别让缺口太大，饿过头第二天容易报复性吃。`;
-  }
-  return `节奏不错，剩下 ${remainingKcal} kcal 用水果或酸奶收尾就行。`;
-}
-
 /* ── 记录页 ──────────────────────────────── */
 
 /**
