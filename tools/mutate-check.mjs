@@ -35,6 +35,11 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: 'kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9', to: 'kcal: 316, protein: 2.6, fat: 0.3, carb: 25.9', why: '熟米饭每 100 克 116 kcal' },
   { file: 'js/foods.js', from: 'if (/斤/.test(unit)) return round1(qty * 500);', to: 'if (/斤/.test(unit)) return round1(qty * 50);', why: '一斤 = 500 克' },
   { file: 'js/foods.js', from: 'const exact = pairs.find((x) => x.key === unit);', to: 'const exact = null;', why: '「一碗」必须精确命中而不是被「一小碗」抢走' },
+  // v35：单源化与 #13（4/9/4 只有一处、没给份量不许丢、部分漏识别要提示、合计只有一份）
+  { file: 'js/calc.js', from: 'export function macroKcal({ protein = 0, fat = 0, carb = 0 } = {}) {', to: 'export function macroKcal({ protein = 0, fat = 0, carb = 0 } = {) {', why: '4/9/4 折算只有一处实现（语法级破坏：改坏后测试会红）' },
+  { file: 'js/ai-core.js', from: '      gramsMissing: !rounded && !portion,', to: '      gramsMissing: false,', why: 'AI 只给名字没给份量时必须标出来（否则又变成悄悄丢/悄悄估）' },
+  { file: 'js/mealparse.js', from: "    if (leftover.length < 2) leftover = '';", to: "    leftover = '';", why: '部分漏识别要提示（认出一部分时不能一声不响）' },
+  { file: 'js/calc.js', from: '      acc.protein += f.protein;', to: '      acc.protein += 0;', why: '每日合计只有一份（改坏蛋白累加后，合计断言必须红）' },
   // v34：AI 归位相关的三条（估营养优先级 / 4-9-4 校验 / 省请求的保守判定）
   { file: 'js/mealparse.js', from: 'if (checked?.ok) {', to: 'if (false) {', why: 'AI 估的营养通过本地校验后必须真的用上（否则又退回「只给名字」的老路）' },
   { file: 'js/label.js', from: 'if (diffPct > 50) return { ok: false, reason: \'热量和营养素对不上（差超过 50%）\' };', to: 'if (false) return { ok: false, reason: \'热量和营养素对不上（差超过 50%）\' };', why: 'AI 数字自相矛盾（差 >50%）时必须退回本地均值' },
@@ -131,7 +136,7 @@ const MUTATIONS = [
   { file: 'js/version.js', from: "export const APP_VERSION = '", to: "export const APP_VERSION = 'v0", why: '版本号必须合法且和 CHANGELOG 最新一条、sw.js 一致（不一致手机上看版本会对不上）' },
   { file: 'js/whatsnew.js', from: '  return Number.isFinite(x) && Number.isFinite(y) && x > y;', to: '  return Number.isFinite(x) && Number.isFinite(y) && x < y;', why: '「服务端比本地新」的方向不能反（反了就会说「有新版本」其实没有）' },
   { file: 'js/whatsnew.js', from: "  if (!lastSeen) return changelog.slice(0, 1);", to: '  if (!lastSeen) return [];', why: '老用户升级到带更新说明的版本时，至少要看一次最新一版的更新' },
-  { file: 'js/app.js', from: "const STORAGE_KEY = 'fatloss.state.v2';", to: "const STORAGE_KEY = 'fatloss.state.v2'; // \u5979", why: '文案护栏：源码/文档里不许再出现第三人称（使用者是自己用的，只能叫「你」）' },
+  { file: 'js/app.js', from: "const STORAGE_KEY = STATE_KEY;", to: "const STORAGE_KEY = STATE_KEY; // \u5979", why: '文案护栏：源码/文档里不许再出现第三人称（使用者是自己用的，只能叫「你」）' },
   // ── 第十五轮：生重/熟重口径（v30）──
   { file: 'js/foods.js', from: "  const wantForm = preferForm || detectFoodForm(name) || 'cooked';", to: "  const wantForm = preferForm || detectFoodForm(name) || 'raw';", why: '没说生熟时默认按熟重（普通人称/估的是做熟后的重量；默认生重会少算 20%+）' },
   { file: 'js/foods.js', from: '    const formBonus = food.form ? (food.form === wantForm ? 8 : -8) : 0;', to: '    const formBonus = food.form ? (food.form === wantForm ? -8 : 8) : 0;', why: '生熟加分的正负不能反（反了「生鸡胸肉」会匹配成熟重）' },

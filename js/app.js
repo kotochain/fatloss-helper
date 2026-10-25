@@ -6,7 +6,7 @@
 import {
   calcTargets, calcEntry, calcExerciseKcal, diffAgainstTargets, macroSplit,
   defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, LIMITS, round,
-  isProfileUsable, validateProfile,
+  isProfileUsable, validateProfile, sumEntries, toPer100,
 } from './calc.js';
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount, kcalOnlyFood } from './foods.js';
 import { icon } from './icons.js';
@@ -31,6 +31,7 @@ import { PRESETS, findPreset } from './providers.js';
 import {
   achievements, plantState, weeklyReview, weeklyHighlight, afterLogMessage,
   markAchievementsSeen, shouldShowWeekly, nickname, greeting, hitMilestone, badgeLabel, dailyNudge,
+  currentStreak,
 } from './achievements.js';
 import {
   CARDIO, EQUIPMENT, GOALS, recommendCardio, substituteExercises, listEquipment, normalizeEquipment,
@@ -41,7 +42,7 @@ import { insights, insightHint } from './insights.js';
 import { APP_VERSION, CHANGELOG } from './version.js';
 import { pendingUpdates, isNewerVersion } from './whatsnew.js';
 import {
-  SCHEMA_VERSION, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
+  SCHEMA_VERSION, STATE_KEY, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
   readUnreadable,
 } from './schema.js';
 import {
@@ -50,7 +51,7 @@ import {
   demoProfile, demoEntries, frequentFoods, recordedDays, hasUserData,
 } from './store.js';
 
-const STORAGE_KEY = 'fatloss.state.v2';
+const STORAGE_KEY = STATE_KEY; // 键名只有一份定义（schema.js），别在两处写字面量
 const $ = (sel, root = document) => root.querySelector(sel);
 
 /**
@@ -806,14 +807,8 @@ function startDemo() {
 
 /** 某天吃进去的合计（只读：绝不因为「看了一眼」就新建空日子） */
 function totalsOfDay(day) {
-  return Object.values(day?.meals || {}).flat().reduce((acc, e) => {
-    const f = calcEntry(e.food, e.grams);
-    acc.kcal += f.kcal;
-    acc.protein += f.protein;
-    acc.fat += f.fat;
-    acc.carb += f.carb;
-    return acc;
-  }, { kcal: 0, protein: 0, fat: 0, carb: 0 });
+  // 合计逻辑只有一份（calc.js#sumEntries），这里只负责把当天的条目摊平
+  return sumEntries(Object.values(day?.meals || {}).flat());
 }
 
 function renderToday() {
@@ -848,7 +843,7 @@ function renderToday() {
   const ringPct = Math.max(0, Math.min(1, totals.kcal / budget));
   const offset = CIRC * (1 - ringPct);
   const settled = remaining < 0;      // 超了就把圆环走满
-  const streak = streakDays(state);
+  const streak = currentStreak(state);
   const exerciseMin = day.exercises.reduce((a, x) => a + x.minutes, 0);
   const plant = { state: plantState(state), ach: achievements(state, t.proteinG) };
   const greet = greeting(state);
@@ -1485,6 +1480,13 @@ async function runQuickParse(text, mealOverride = null) {
     if (local.unknown.length) {
       questions = questions.concat(local.unknown.map((u) => `「${u}」我不太确定是什么，能再说具体点吗？（或者用手动记一笔）`));
     }
+    /*
+     * v35（issue #13）：认出来一部分、还有没认出来的字 —— 以前不吭声，用户以为整句都记上了。
+     * 现在问一句（不拦着记，已认出的照样能保存）。
+     */
+    if (items.length && local.leftover) {
+      questions.push(`这句话里的「${local.leftover}」我没认出来 —— 要不要再补一条？（已认出的先记上也可以）`);
+    }
   }
 
   for (const it of items) {
@@ -1704,15 +1706,8 @@ function drawDraft() {
     draft = null;
     let cachedCount = 0;
     for (const it of items) {
-      // 每 100 克的数字：记录本身和「我的食物」都用它
-      const per100 = it.grams > 0
-        ? {
-          kcal: Math.round((it.kcal / it.grams) * 1000) / 10,
-          protein: Math.round((it.protein / it.grams) * 1000) / 10,
-          fat: Math.round((it.fat / it.grams) * 1000) / 10,
-          carb: Math.round((it.carb / it.grams) * 1000) / 10,
-        }
-        : null;
+      // 每 100 克的数字：记录本身和「我的食物」都用它（换算只有一份：calc#toPer100）
+      const per100 = it.grams > 0 ? toPer100(it, it.grams) : null;
       addFoodEntry(state, dateKey, savedMeal, {
         id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name: it.name,
@@ -3435,18 +3430,6 @@ export function dayStats(state, key) {
 }
 
 /** 连续记录天数（从今天往前数，允许今天还没记） */
-export function streakDays(state, today = todayKey()) {
-  let streak = 0;
-  let cursor = today;
-  if (dayStats(state, cursor).entries === 0) cursor = shiftDate(cursor, -1); // 今天还没记不算断
-  for (let i = 0; i < 400; i++) {
-    if (dayStats(state, cursor).entries === 0) break;
-    streak += 1;
-    cursor = shiftDate(cursor, -1);
-  }
-  return streak;
-}
-
 function openCalendarSheet() {
   let month = dateKey.slice(0, 7); // YYYY-MM
   const draw = () => {
@@ -3459,7 +3442,7 @@ function openCalendarSheet() {
     for (let i = 0; i < startWeekday; i++) cells.push(null);
     for (let d = 1; d <= daysInMonth; d++) cells.push(`${month}-${String(d).padStart(2, '0')}`);
 
-    const streak = streakDays(state);
+    const streak = currentStreak(state);
     const monthStats = cells.filter(Boolean).map((k) => dayStats(state, k));
     const logged = monthStats.filter((s) => s.entries > 0).length;
 

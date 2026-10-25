@@ -10,6 +10,8 @@
  * 这里只做换算和判断，不碰界面、不碰存档。
  */
 
+import { macroKcal, round } from './calc.js';
+
 /** 1 千卡 = 4.184 千焦（营养学通用换算） */
 export const KJ_PER_KCAL = 4.184;
 
@@ -39,15 +41,9 @@ export function energyToKcal(value, unit) {
   return null;
 }
 
-/** 按 4/9/4 从三大营养素反推热量（用于对账，也用于标签没印能量的情况） */
-export function macroKcal({ protein, fat, carb }) {
-  const p = Number(protein) || 0;
-  const f = Number(fat) || 0;
-  const c = Number(carb) || 0;
-  return p * 4 + f * 9 + c * 4;
-}
-
-const round1 = (n) => Math.round(n * 10) / 10;
+// 4/9/4 折算与四舍五入都只有一份实现（见 js/calc.js）；这里转出去给老调用方/测试用
+export { macroKcal };
+const round1 = (n) => round(n, 1);
 
 /**
  * 把「一份（或一份是多少克）」的营养数据换算成每 100 克。

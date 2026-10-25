@@ -191,7 +191,7 @@
   并断言「徽章 ≥48px、设置图标 23px / 图标块 ≥34px、徽章名一个都不空」；
 - 反向验证（`node tools/mutate-check.mjs`）故意把代码改坏，确认测试真的会红。
   **v27 修掉了这个工具从 v26 起的一个假绿灯**（临时沙箱漏了 `index.html` 等文件 → 基线本来就红 → 每条变异都算「抓到」），
-  并如实区分「测试守得住」和「改坏后行为不变的等价变异」：现在严格捕获 104/104，另有 2 条半敏感、4 条等价变异单独标注。
+  并如实区分「测试守得住」和「改坏后行为不变的等价变异」：现在严格捕获 108/108，另有 2 条半敏感、4 条等价变异单独标注。
 
 **可复现**：`npm test`、`node tools/browser-check.mjs`（截图在 `.selfcheck/shot-phone-*`）、
 `node tools/mutate-check.mjs`。
@@ -348,6 +348,31 @@ v34 把这条规格推翻，改成「**AI 估、本地核**」。
 
 ---
 
+## 〇·十一、清存量问题：两个漏洞 + 收敛重复 + 产品逻辑总账（2026-10-25，v35，issue #13/#16/#19）
+
+这轮不加新玩法，只把「欠的账」还掉。
+
+**两个记录漏洞（#13）**
+
+| 场景 | 以前 | 现在 |
+| --- | --- | --- |
+| AI 只回了菜名、没说克数/份量 | 静默丢掉（因为算不出热量）—— 用户看到「AI 都认出来了却记不上」 | 本地按「常见一份」估克数、标出份量是猜的（给档位可改），条目照样能记上 |
+| 一句话只认出一部分（「红烧肉和一份佛跳墙」） | 一声不响只记红烧肉，用户以为整句都记上了 | 认出的照样记，同时问一句「这句话里的『佛跳墙』我没认出来」，可补一条 |
+
+**同一规则只留一份（#16）**：4/9/4 折算、每日合计、连续记录、存档键、草稿的每 100 克换算、版本号——
+以前各有 2~4 份实现（改一处忘一处就会分叉），现在都只有唯一来源。行为没变，367 个测试和 108 条变异守着。
+
+**产品逻辑总账（#19）**：新增 [`docs/产品逻辑总账.md`](docs/产品逻辑总账.md) ——
+50 条使用者能感知的承诺，每条写「承诺 → 代码 → 测试 → 决策 → 状态」，覆盖 7 个领域；
+4 条**已知缺口**（跨午夜、推送提醒、真机、真模型）明确点名，不粉饰。
+配套测试 `tests/ledger.test.mjs` 会检查：引用的代码/测试**真的存在**（连关键词一起查）、
+没测试的规则必须在缺口里点名、文末统计数字不能手写漂移。
+
+**为什么值得花一轮做这个**：上上轮那个「AI 只许给名字」的错规则能活两轮，不是代码烂，
+是**没有一张账能让人一眼看到「这条规则由谁守、有没有测试」**。现在有了。
+
+---
+
 ---
 
 ## 待办（GitHub Issues）
@@ -359,13 +384,13 @@ v34 把这条规格推翻，改成「**AI 估、本地核**」。
 | [6](https://github.com/kotochain/fatloss-helper/issues/6) | 真机试用：把发现的问题记在这里 | 进行中 |
 | [1](https://github.com/kotochain/fatloss-helper/issues/1) | 会员制度：不用自己配 API，充值即用 | 日后 |
 | [12](https://github.com/kotochain/fatloss-helper/issues/12) | AI 直接估热量，认不出的菜存成「我的食物」（不再只当匹配器） | v34 已完成 |
-| [13](https://github.com/kotochain/fatloss-helper/issues/13) | 记录链路剩余漏洞：AI 只给名字会被丢 / 离线部分漏识别不提示 | 待做 |
+| [13](https://github.com/kotochain/fatloss-helper/issues/13) | 记录链路剩余漏洞：AI 只给名字会被丢 / 离线部分漏识别不提示 | v35 已修 |
 | [14](https://github.com/kotochain/fatloss-helper/issues/14) | 留存后续：A 今日两件事 / C 成长回顾 / 定时提醒（做不了，见说明） | 待做 |
 | [15](https://github.com/kotochain/fatloss-helper/issues/15) | 数据安全：演示/导入/多窗口三条会静默覆盖记录的路径 | v33 已修 |
-| [16](https://github.com/kotochain/fatloss-helper/issues/16) | 同一规则多份实现且已分叉（资料校验 3 套、4/9/4 换算 4 份） | 待做 |
+| [16](https://github.com/kotochain/fatloss-helper/issues/16) | 同一规则多份实现且已分叉（资料校验 3 套、4/9/4 换算 4 份） | v35 已修 |
 | [17](https://github.com/kotochain/fatloss-helper/issues/17) | app.js 4021 行：拆分方案与触发条件 | 押后 |
-| [18](https://github.com/kotochain/fatloss-helper/issues/18) | 测试守不住：空转断言 + 关键校验没测试 | 大部分已修 |
-| [19](https://github.com/kotochain/fatloss-helper/issues/19) | 产品逻辑总账：每条承诺 → 代码 → 测试 → 决策号 | 待做 |
+| [18](https://github.com/kotochain/fatloss-helper/issues/18) | 测试守不住：空转断言 + 关键校验没测试 | v34/v35 已修 |
+| [19](https://github.com/kotochain/fatloss-helper/issues/19) | 产品逻辑总账：每条承诺 → 代码 → 测试 → 决策号 | v35 已做 |
 
 已关闭：[#2 普通模式](https://github.com/kotochain/fatloss-helper/issues/2)、
 [#3 份量配对](https://github.com/kotochain/fatloss-helper/issues/3)、[#4 器械勾选](https://github.com/kotochain/fatloss-helper/issues/4)（v20）、
@@ -543,7 +568,7 @@ npm run check:full      # 全套 12 项（含全按钮清扫、AI 失败注入�
 npm run check:live      # 只测线上：文件逐字节一致 + 真打开线上网址跑一遍（需联网）
 
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
-npm test                       # 361 个自动化测试
+npm test                       # 367 个自动化测试
 node tools/mutate-check.mjs    # 反向验证：故意改坏 98 处代码，确认测试符合预期（在临时副本里做）
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程

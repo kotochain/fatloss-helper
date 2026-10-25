@@ -8,6 +8,36 @@
 
 export const KCAL_PER_G = { protein: 4, fat: 9, carb: 4 };
 
+/**
+ * 4/9/4 折算：蛋白×4 + 脂肪×9 + 碳水×4（kcal）。
+ *
+ * **全应用只有这一处公式**。以前在 calc / mealparse / foods / label 各写了一遍
+ * （数值一样，但改口径时得记得四处都改），现在统一走这里（v35，issue #16）。
+ */
+export function macroKcal({ protein = 0, fat = 0, carb = 0 } = {}) {
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  return num(protein) * KCAL_PER_G.protein + num(fat) * KCAL_PER_G.fat + num(carb) * KCAL_PER_G.carb;
+}
+
+/**
+ * 把「这一份（grams 克）的营养」换算成每 100 克。
+ *
+ * 用途：AI 估的条目、草稿保存时写进记录和「我的食物」，都存每 100 克 —— 这样改克数能直接重算。
+ * **只有这一处**（以前 app.js 草稿保存里手写了一遍换算，mealparse 又写了一遍）。
+ */
+export function toPer100(nutrition, grams) {
+  assertNumber(grams, '份量');
+  if (grams <= 0) throw new Error(`份量必须大于 0，收到了 ${grams}`);
+  const k = 100 / grams;
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  return {
+    kcal: round(num(nutrition?.kcal) * k, 1),
+    protein: round(num(nutrition?.protein) * k, 1),
+    fat: round(num(nutrition?.fat) * k, 1),
+    carb: round(num(nutrition?.carb) * k, 1),
+  };
+}
+
 /** 活动量系数表。文案刻意写得保守——大多数自称「中等活动」的人其实是久坐。 */
 export const ACTIVITY_LEVELS = [
   { key: 'sedentary', label: '久坐', hint: '整天坐着办公，几乎不运动', factor: 1.2 },
@@ -361,7 +391,7 @@ export function calcEntry(food, grams) {
     fat: round(fat, 1),
     carb: round(carb, 1),
     // 用 4/9/4 反算出来的热量，和食物表上的热量可能有出入，用来发现数据填错
-    kcalFromMacros: round(protein * 4 + fat * 9 + carb * 4, 1),
+    kcalFromMacros: round(macroKcal({ protein, fat, carb }), 1),
   };
 }
 

@@ -79,7 +79,7 @@ test('上游没返回内容时报错，而不是返回空结果让用户以为�
   );
 });
 
-test('收敛上游结果：脏数据被丢掉，形状固定', () => {
+test('收敛上游结果：脏数据被丢掉，形状固定；只给名字的留下并标「没给份量」', () => {
   const out = normalizeResult({
     meal: 'brunch', // 非法餐次
     items: [
@@ -93,7 +93,11 @@ test('收敛上游结果：脏数据被丢掉，形状固定', () => {
     questions: ['多大一碗？', '', 42, 'q2', 'q3'],
   });
   assert.equal(out.meal, null, '非法餐次应当被丢弃');
-  assert.deepEqual(out.items.map((i) => i.name), ['牛肉面', '空格']);
+  // v35（issue #13）：没给克数/份量说法的**不再直接丢**（那是用户看到的「AI 认出来了却记不上」）
+  assert.deepEqual(out.items.map((i) => i.name), ['牛肉面', '负数', '字符串份量', '空格']);
+  const missing = out.items.filter((i) => i.gramsMissing);
+  assert.deepEqual(missing.map((i) => i.name), ['负数', '字符串份量'], '没给可用份量的要标出来');
+  assert.ok(missing.every((i) => i.grams === null));
   assert.deepEqual(out.questions, ['多大一碗？', 'q2'], '追问最多留 2 个');
 });
 
@@ -421,4 +425,24 @@ test('v34：只用「我的食物」就能说清的句子，识别为「不用�
   assert.equal(cachedOnlyMatch('吃了某网红限定轻食碗和某牌蛋白棒', two), null);
   assert.equal(cachedOnlyMatch('随便吃了点', customFoods), null, '没有食物名就正常走 AI');
   assert.equal(cachedOnlyMatch('吃了某网红限定轻食碗', []), null, '没有「我的食物」不省请求');
+});
+
+
+/*
+ * v35（issue #13）：AI 只给名字、没给份量的条目，以前会被丢掉 ——
+ * 用户看到的是「AI 都认出来了，却一条都记不上」。现在按本地常见一份估克数并标出来。
+ */
+
+test('v35：AI 只给名字没给份量，本地按常见一份估，并说明份量是猜的', () => {
+  const raw = normalizeResult({ items: [{ name: '黄焖鸡米饭' }] });
+  assert.equal(raw.items[0].gramsMissing, true, '要先标出「没给份量」');
+
+  const out = normalizeAiItems(raw, 'lunch', { text: '中午吃了黄焖鸡米饭' });
+  assert.equal(out.items.length, 1, '不许再丢掉');
+  const it = out.items[0];
+  assert.equal(it.grams, 550, '按组合菜「一份 550 克」估');
+  assert.equal(it.foodId, 'huangmenji');
+  assert.equal(it.confidence, 'low', '份量是猜的，界面要给档位');
+  assert.ok(Array.isArray(it.portionChoices) && it.portionChoices.length >= 2);
+  assert.ok((it.note || '').includes('没给份量'), `要说清份量是本地估的：${it.note}`);
 });

@@ -317,3 +317,21 @@ test('v31：AI 只给「一碗」这种说法、或者干脆没给份量，也�
   });
   assert.deepEqual(r.items.map((x) => x.grams), [300, 500, 25], '一碗馄饨=一份 300，一碗酸菜鱼=500，寿司默认一贯 25');
 });
+
+
+/*
+ * v35（issue #13）：离线解析认出一部分、还有没认出来的字 —— 以前一声不响，用户以为整句都记上了。
+ * 现在把没认出来的部分带出来，界面会问一句（已认出的照样能保存）。
+ */
+
+test('v35：离线解析把「没认出来剩下的字」带出来，只认出一部分时不能一声不响', () => {
+  const part = parseDescription('中午吃了红烧肉和一份佛跳墙');
+  assert.ok(part.items.length >= 1, '红烧肉该认出来');
+  assert.equal(part.leftover, '佛跳墙', '没认出来的菜名要带出来');
+
+  const clean = parseDescription('中午吃了一碗牛肉面');
+  assert.equal(clean.leftover, '', '整句都认出来时不该乱提示');
+
+  const none = parseDescription('今天吃了点东西');
+  assert.equal(none.leftover, '', '一个都没认出来时由 unknown 负责，不重复提示');
+});

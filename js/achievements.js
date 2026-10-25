@@ -10,7 +10,7 @@
  *  4) **文案要具体、带一点幽默**，不要「加油你最棒」这种空话。
  */
 
-import { calcEntry, round } from './calc.js';
+import { calcEntry, round, sumEntries } from './calc.js';
 import { todayKey, shiftDate } from './store.js';
 
 /* ── 称呼 ───────────────────────────────── */
@@ -72,16 +72,9 @@ export function hasLog(state, key) {
   return dayEntries(state, key).length > 0;
 }
 
-/** 某天的营养合计 */
+/** 某天的营养合计（只读；合计逻辑见 calc.js#sumEntries，别再写一遍） */
 export function dayTotals(state, key) {
-  return dayEntries(state, key).reduce((acc, e) => {
-    const f = calcEntry(e.food, e.grams);
-    acc.kcal += f.kcal;
-    acc.protein += f.protein;
-    acc.fat += f.fat;
-    acc.carb += f.carb;
-    return acc;
-  }, { kcal: 0, protein: 0, fat: 0, carb: 0 });
+  return sumEntries(dayEntries(state, key));
 }
 
 /** 连续记录天数（今天还没记不算断） */

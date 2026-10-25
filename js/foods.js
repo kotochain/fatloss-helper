@@ -32,6 +32,8 @@ export const FOOD_CATEGORIES = [
 ];
 
 /** servings: [名称, 克数]，用来把「一碗」「一个」换算成克 */
+import { macroKcal, round } from './calc.js';
+
 export const FOODS = [
   // ── 主食 ──────────────────────────────────────────────
   { id: 'rice_cooked', name: '米饭（熟）', category: 'staple', kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9, servings: [['一小碗', 130], ['一碗', 180], ['一大碗', 250]] },
@@ -403,7 +405,7 @@ export function checkFoodData(foods = FOODS) {
       }
     }
     // 啤酒这类含酒精的饮品，酒精热量（7 kcal/g）不在碳蛋脂里，折算必然对不上，跳过
-    const macros = f.protein * 4 + f.fat * 9 + f.carb * 4;
+    const macros = macroKcal(f);
     if (f.kcal > 20 && macros > 0 && !f.alcohol) {
       const drift = Math.abs(macros - f.kcal) / f.kcal;
       if (drift > ROUNDING_TOLERANCE) {
@@ -415,9 +417,7 @@ export function checkFoodData(foods = FOODS) {
   return problems;
 }
 
-function round1(v) {
-  return Math.round(v * 10) / 10;
-}
+const round1 = (v) => round(v, 1);
 
 export function findFood(id) {
   return FOODS.find((f) => f.id === id) || null;

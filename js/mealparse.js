@@ -21,6 +21,7 @@
 import { FOODS, ALIASES, findFood, findMatchableFood, parseAmount, matchFoodByName, detectFoodForm, genericEstimateFor } from './foods.js';
 import { DISHES } from './dishes.js';
 import { validateNutritionEstimate } from './label.js';
+import { macroKcal } from './calc.js';
 
 // 老代码/测试从 mealparse 里取 DISHES，这里继续转出去，避免调用方改动
 export { DISHES };
@@ -743,7 +744,7 @@ export function parseDescription(raw, defaultMeal = null) {
       const foodForm = findFood(it.foodId)?.form;
       if (foodForm === 'cooked') continue; // 熟重数据已经包含做法，不能再按做法乘油量
       it.fat = Math.round(it.fat * style.oilFactor * 10) / 10;
-      it.kcal = Math.round(it.protein * 4 + it.fat * 9 + it.carb * 4);
+      it.kcal = Math.round(macroKcal(it));
       it.cookingStyle = style.note;
       // 注意别在这里动 confidence：那个字段专门表示「份量有多确定」。
       // 油量不确定走 needsConfirm/question，两件事混在一起界面就分不清该问哪一句了。
@@ -759,7 +760,24 @@ export function parseDescription(raw, defaultMeal = null) {
     if (cleaned.length >= 2) unknown.push(cleaned);
   }
 
-  return { items, meal, unknown, text };
+  /*
+   * v35（issue #13）：认出来一部分、但还有没认出来的字（比如「红烧肉和一份佛跳墙」只认出了红烧肉）。
+   * 以前这种情况**一声不响**，用户以为整句都记上了。现在把剩下的字带出去，界面会问一句。
+   * 去掉的只是份量/餐次/口语词；剩下的（真正的食物名）才会被提示。
+   */
+  let leftover = '';
+  if (items.length) {
+    const covered = markCovered(text, hits);
+    leftover = [...text]
+      .map((ch, i) => (covered[i] ? ' ' : ch))
+      .join('')
+      .replace(/[0-9０-９]+(\.[0-9]+)?/g, ' ')
+      .replace(LEFTOVER_NOISE, ' ')
+      .replace(/[\s，,。.、！!?？:：;；()（）【】]/g, '');
+    if (leftover.length < 2) leftover = '';
+  }
+
+  return { items, meal, unknown, leftover, text };
 }
 
 /**
@@ -808,11 +826,15 @@ export function normalizeAiItems(aiResult, defaultMeal = null, { text = '', cust
       grams = Math.min(Math.round(grams), 3000);
       const nut = scaleNutrition({ kcal: food.kcal, protein: food.protein, fat: food.fat, carb: food.carb }, grams, 100);
       const nameDiffers = normLoose(name) !== normLoose(food.name);
+      const gramsGuessed = Boolean(raw?.gramsMissing);
       out.items.push({
         name: name || food.name,
         grams,
         ...nut,
-        confidence: 'high',
+        // 份量是本地按常见一份猜的：标 low，界面会显示「份量是猜的」并给档位
+        confidence: gramsGuessed ? 'low' : 'high',
+        confidenceReason: gramsGuessed ? 'AI 没给份量，按这种食物常见的一份估的' : '',
+        portionChoices: gramsGuessed ? buildPortionChoices(food, grams) : undefined,
         needsConfirm: false,
         source: 'ai',
         foodId: food.id,
@@ -820,9 +842,10 @@ export function normalizeAiItems(aiResult, defaultMeal = null, { text = '', cust
         matchedCustom,
         // AI 说的名字和库里名字不一样时告诉用户对应到哪一个，避免用户以为记错了
         // 命中「我的食物」时永远标出来：数字是你自己存的（也是上次 AI 估的），不是这次又估的
-        note: matchedCustom
-          ? `按你之前存的「${food.name}」算的`
-          : (nameDiffers ? `按「${food.name}」算的（${matchedBy}）` : (raw.note || null)),
+        note: [
+          gramsGuessed ? `AI 没给份量，按常见一份 ${grams} 克算的（可以改）` : '',
+          matchedCustom ? `按你之前存的「${food.name}」算的` : (nameDiffers ? `按「${food.name}」算的（${matchedBy}）` : (raw.note || '')),
+        ].filter(Boolean).join('；') || null,
       });
       continue;
     }
@@ -931,6 +954,9 @@ export function cachedOnlyMatch(rawText, customFoods = []) {
   if (leftover.length >= 2) return null;
   return { food: hit, leftover };
 }
+
+/** 离线解析里「不算食物」的常见词：餐次、吃/喝、份量、口语、人称 */
+const LEFTOVER_NOISE = /(今天|昨天|前天|早上|上午|中午|下午|晚上|夜宵|早餐|午饭|晚饭|加餐|吃了|喝的|吃的|喝完|吃|喝|又|还|再|大概|大约|左右|差不多|一份|一碗|一个|一杯|半|几|些|点|了|的|我|你|它|我们|朋友|同事|一起|外面|家里|自己|然后|还有|加上|配|和|跟|腻|有点|挺|很|不|没|有|是|在|外面吃|外卖|食堂|公司|学校|克|g|ml|毫升|斤|两|个|碗|份|杯|瓶|盘|盒|袋|包|块|片|根|只|颗|粒|把|勺)/g;
 
 /** cachedOnlyMatch 允许出现的「非食物」文字：餐次、吃/喝、份量、口语 */
 const CACHED_ONLY_NOISE = /(今天|昨天|前天|早上|上午|中午|下午|晚上|夜宵|早餐|午饭|晚饭|加餐|吃了|喝的|吃的|喝完|吃|喝|又|还|再|大概|大约|左右|差不多|一份|一碗|一个|一杯|半|几|些|点|了|的|克|g|ml|毫升|斤|两|个|碗|份|杯|瓶|盘|盒|袋|包|块|片|根|只|颗|粒|把|勺)/g;

@@ -10,7 +10,7 @@
  * AI 只是把同一件事说得更像人话（issue #2 的原则）。
  */
 
-import { calcEntry, diffAgainstTargets } from './calc.js';
+import { calcEntry, diffAgainstTargets, sumEntries } from './calc.js';
 import { findFood } from './foods.js';
 import { shiftDate } from './store.js';
 
@@ -36,14 +36,7 @@ function dayEntries(day) {
 }
 
 function dayTotals(day) {
-  return dayEntries(day).reduce((acc, e) => {
-    const f = calcEntry(e.food, e.grams);
-    acc.kcal += f.kcal;
-    acc.protein += f.protein;
-    acc.fat += f.fat;
-    acc.carb += f.carb;
-    return acc;
-  }, { kcal: 0, protein: 0, fat: 0, carb: 0 });
+  return sumEntries(dayEntries(day));
 }
 
 /**

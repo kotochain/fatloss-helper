@@ -151,7 +151,6 @@ export function normalizeResult(raw) {
     const portionRaw = typeof it.portion === 'string' ? it.portion : (typeof gramsRaw === 'string' ? gramsRaw : '');
     // 只认真正的份量说法（「一碗」「两份」）；「很多」「一些」这种不算，否则等于没有克数
     const portion = portionRaw && PORTION_HINT.test(portionRaw) ? portionRaw.trim().slice(0, 20) : null;
-    if (!(grams > 0) && !portion) continue;
     if (grams > 5000) continue;
     const rounded = grams > 0 ? Math.round(grams) : null;
     items.push({
@@ -161,6 +160,12 @@ export function normalizeResult(raw) {
       note: typeof it.note === 'string' ? it.note.slice(0, 60) : null,
       // 营养是「这一份」的总量，所以必须知道这一份多少克，否则没法换算出每 100 克
       nutrition: rounded ? coerceNutrition(it) : null,
+      /*
+       * v35（issue #13）：AI 只给了名字、没给克数也没给「一碗」这种份量说法 ——
+       * 以前这里直接丢掉（用户于是看到「AI 都认出来了却记不上」）。现在留着，
+       * 由本地按常见一份估克数，并在条目上说明「份量是按常见一份估的」。
+       */
+      gramsMissing: !rounded && !portion,
     });
   }
 

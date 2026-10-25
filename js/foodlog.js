@@ -4,7 +4,7 @@
  */
 
 import { CATALOG_FOODS, aliasesOf } from './foods.js';
-import { calcEntry, round } from './calc.js';
+import { calcEntry, round, sumEntries } from './calc.js';
 
 export const MEAL_SLOTS = [
   { key: 'breakfast', label: '早餐' },
@@ -60,32 +60,12 @@ export function searchFoods(query, customFoods = [], limit = 30) {
 /** 该餐已经吃了多少 */
 export function mealTotals(entries, mealKey) {
   const list = entries.filter((e) => e.meal === mealKey);
-  return list.reduce(
-    (acc, e) => {
-      const f = calcEntry(e.food, e.grams);
-      acc.kcal += f.kcal;
-      acc.protein += f.protein;
-      acc.fat += f.fat;
-      acc.carb += f.carb;
-      acc.count += 1;
-      return acc;
-    },
-    { kcal: 0, protein: 0, fat: 0, carb: 0, count: 0 },
-  );
+  return { ...sumEntries(list), count: list.length };
 }
 
 export function calculateTotals(entries) {
-  const totals = entries.reduce(
-    (acc, e) => {
-      const f = calcEntry(e.food, e.grams);
-      acc.kcal += f.kcal;
-      acc.protein += f.protein;
-      acc.fat += f.fat;
-      acc.carb += f.carb;
-      return acc;
-    },
-    { kcal: 0, protein: 0, fat: 0, carb: 0 },
-  );
+  // 合计逻辑只有一份（calc.js#sumEntries）；这里只负责把结果四舍五入给界面用
+  const totals = sumEntries(entries);
   return {
     kcal: round(totals.kcal, 1),
     protein: round(totals.protein, 1),

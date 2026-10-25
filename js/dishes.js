@@ -11,6 +11,8 @@
  * 这两边都要用，所以不能锁在 mealparse.js 里（会形成循环引用）。
  */
 
+import { round } from './calc.js';
+
 export const DISHES = [
   // 面食类
   { id: 'beef_noodle', name: '牛肉面', baseGrams: 600, kcal: 630, protein: 33, fat: 16, carb: 81, aliases: ['牛肉面', '牛腩面', '拉面', '兰州拉面'], ask: '有没有加蛋或加肉？' },
@@ -42,7 +44,7 @@ export const DISHES = [
  */
 export function dishAsFood(dish) {
   const k = 100 / dish.baseGrams;
-  const round1 = (v) => Math.round(v * k * 10) / 10;
+  const round1 = (v) => round(v * k, 1);
   return {
     id: dish.id,
     name: dish.name,

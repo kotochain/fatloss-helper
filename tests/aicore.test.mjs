@@ -192,7 +192,9 @@ test('模型返回带 ```json 包裹也能解析', () => {
 test('normalizeResult 挡掉脏数据，但认得「份量说法」和中文餐次', () => {
   const r = normalizeResult({ meal: '夜宵', items: [{ name: '', grams: 1 }, { name: '面', grams: 0 }, { name: '饭', grams: 200 }], questions: ['q', 5, 'p', 'z'] });
   assert.equal(r.meal, 'snack', '中文「夜宵」要能认出来（v31 起），非法值才丢');
-  assert.deepEqual(r.items.map((i) => i.name), ['饭']);
+  // v35（issue #13）：克数无效（0）但名字有效的不再丢，标 gramsMissing 交给本地估份量
+  assert.deepEqual(r.items.map((i) => i.name), ['面', '饭']);
+  assert.equal(r.items[0].gramsMissing, true);
   assert.equal(r.questions.length, 2, '追问最多两个');
 
   // v31：模型给字符串克数、或者只给「一碗」这种说法，都不能再被当成脏数据丢掉
@@ -204,7 +206,9 @@ test('normalizeResult 挡掉脏数据，但认得「份量说法」和中文餐�
       { name: '一些', grams: '很多' },
     ],
   });
-  assert.deepEqual(tolerant.items.map((i) => i.name), ['黄焖鸡米饭', '馄饨'], '「很多」不是份量，要丢掉');
+  // v35（issue #13）：没给份量的「一些」不再丢掉，而是标 gramsMissing 交给本地估
+  assert.deepEqual(tolerant.items.map((i) => i.name), ['黄焖鸡米饭', '馄饨', '一些']);
+  assert.equal(tolerant.items[2].gramsMissing, true);
   assert.equal(tolerant.items[0].grams, 550);
   assert.equal(tolerant.items[1].grams, null);
   assert.equal(tolerant.items[1].portion, '一碗');

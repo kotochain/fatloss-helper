@@ -490,6 +490,22 @@ async function main() {
   if (chatsInBasic !== 0) problems.push(`普通模式下还发了 ${chatsInBasic} 次请求（说好的不联网不花钱呢）`);
   if (!basicParse.条数) problems.push('普通模式下离线解析也没认出来（切模式不能把功能弄坏）');
   if (/AI 认出来的/.test(basicParse.方式)) problems.push('普通模式下结果来源还被标成 AI 认出来的');
+
+  // v35（issue #13）：认出一部分、还有没认出来的字 —— 要提示，不能一声不响让用户以为整句都记上了
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '中午吃了红烧肉和一份佛跳墙';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#quickParse').click();
+  })()`);
+  await sleep(1200);
+  const partial = await evaluate(`(() => ({
+    条数: document.querySelectorAll('#draftHost .entry').length,
+    提示: [...document.querySelectorAll('#draftHost .warn')].map((w) => w.textContent.replace(/\\s+/g, ' ').trim()).join(' | '),
+  }))()`);
+  console.log(`   部分漏识别 → ${partial.条数} 条｜提示「${partial.提示.slice(0, 70)}」`);
+  if (partial.条数 < 1) problems.push('只认出一部分时，认出的那条也应该能记上');
+  if (!partial.提示.includes('佛跳墙')) problems.push('没认出来的「佛跳墙」没有被提示出来（会以为整句都记上了）');
   await evaluate(`document.querySelector('#draftCancel')?.click(); document.querySelector('#sheetClose')?.click(); true`);
   await sleep(300);
 
