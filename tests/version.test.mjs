@@ -114,3 +114,30 @@ test('界面文案里不许再出现第三人称「\u5979」—— 使用者是�
   }
   assert.deepEqual(hits, [], `这些地方还在用第三人称「\u5979」，请改成「你」或「使用者」：\n${hits.join('\n')}`);
 });
+
+test('发布脚本必须把根目录的页面都带上（update.html 漏发过一次）', () => {
+  // 真事故：v38 新加了「手机卡在旧版时的自救页」update.html，代码推上去了，
+  // Pages 也显示「发布成功」，但用户打开那个网址是 404 ——
+  // 因为 .github/workflows/pages.yml 里是写死的文件名清单，没人想到去补。
+  // 线上检查 tools/check-live.mjs 只比对「清单里的文件」，清单外的文件它根本不会问。
+  const pagesPath = path.join(root, '.github', 'workflows', 'pages.yml');
+  assert.ok(fs.existsSync(pagesPath), '发布脚本不见了：.github/workflows/pages.yml');
+  const pages = fs.readFileSync(pagesPath, 'utf8');
+  // 找 `cp -r … _site/` 那一行（忽略注释行）
+  const copyLine = pages.split('\n').find((l) => /^\s*cp\s+-r\s/.test(l) && l.includes('_site'));
+  assert.ok(copyLine, '发布脚本里找不到打包命令（cp -r … _site/）');
+
+  const pagesInRoot = fs.readdirSync(root).filter((f) => f.endsWith('.html')).sort();
+  assert.ok(pagesInRoot.includes('index.html') && pagesInRoot.includes('update.html'),
+    `根目录的页面不对：${pagesInRoot.join('、')}`);
+  // 两种写法都算过：显式列出每个 html，或者用通配符把根目录 html 全打进去。
+  // 通配符优先 —— 以后再加页面不用回来改发布脚本。
+  const wildcard = /\/\*\.html/.test(copyLine);
+  const missing = wildcard ? [] : pagesInRoot.filter((f) => !copyLine.includes(f));
+  assert.deepEqual(missing, [], `发布会漏掉这些页面（用户打开是 404）：${missing.join('、')}。改成 ./*.html 或补进发布脚本。`);
+
+  // 应用本体那几样也不能少
+  for (const f of ['sw.js', 'manifest.webmanifest', 'css', 'js', 'icons']) {
+    assert.ok(copyLine.includes(f), `发布脚本漏了 ${f}`);
+  }
+});

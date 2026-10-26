@@ -24,6 +24,11 @@ console.log(`检查 ${BASE}\n`);
 /** 会被部署、并且运行时会用到的文件（README / 测试 / 工具都不算） */
 function runtimeFiles() {
   const out = ['index.html', 'sw.js', 'manifest.webmanifest'];
+  // 根目录的其它 html 也算运行时文件（update.html 就漏发过一次：代码在仓库里、
+  // 发布脚本没带上，线上打开是 404，而这份检查只问清单里的文件，所以当时没发现）。
+  for (const f of fs.readdirSync(root)) {
+    if (f.endsWith('.html') && !out.includes(f)) out.push(f);
+  }
   const walk = (dir) => {
     for (const entry of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
       if (entry.name.startsWith('.')) continue;
@@ -75,7 +80,7 @@ else if (liveVersion !== localVersion) {
 
 /** 关键功能在线上代码里真的存在（防止推送漏文件或部署了半截） */
 const need = {};
-for (const f of ['index.html', 'js/app.js', 'sw.js', 'css/style.css', 'js/schema.js', 'js/insights.js', 'manifest.webmanifest']) {
+for (const f of ['index.html', 'update.html', 'js/app.js', 'sw.js', 'css/style.css', 'js/schema.js', 'js/insights.js', 'manifest.webmanifest']) {
   try {
     const res = await fetch(`${BASE}/${f}`, { cache: 'no-store' });
     need[f] = await res.text();
@@ -83,6 +88,9 @@ for (const f of ['index.html', 'js/app.js', 'sw.js', 'css/style.css', 'js/schema
 }
 const mustHave = [
   ['index.html', 'id="bootFail"', '启动失败的兜底界面（元素本身，不只是引用）'],
+  // 手机卡在旧版时唯一的自救入口。它必须真的在线上，否则用户照着说明打开只会看到 404。
+  ['update.html', 'fatloss.updatedTo', '自救更新页（清完旧缓存再带回应用）'],
+  ['update.html', "location.replace('./?fresh=", '自救更新页会跳回应用并带上 fresh 标记'],
   ['js/app.js', 'renderCrash', '渲染错误边界'],
   ['js/app.js', 'data-act="recover"', '找回记录入口'],
   ['js/app.js', 'openWipeSheet', '从头开始'],

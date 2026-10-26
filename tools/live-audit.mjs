@@ -622,6 +622,32 @@ async function main() {
     console.log(`   解除屏蔽后重新打开：${recovered ? '正常启动' : '仍然打不开'}`);
     if (!recovered) fail('启动失败兜底出现后，正常加载也无法恢复');
 
+    console.log('\n=== 六·二、手机卡在旧版时的自救页（update.html） ===');
+    // 用户手机上装的是很早的版本、自己升不动时，唯一出路是打开这个网址一次。
+    // 它必须真的发布到线上 —— 漏发过一次：代码在仓库里，但发布脚本是写死的文件名清单，
+    // 没带上它，线上打开是 404（Pages 还显示「发布成功」）。
+    await evaluate(client, `localStorage.setItem('fatloss.audit.marker', 'keep')`);
+    ERRORS = [];
+    await client.send('Page.navigate', { url: BASE + '/update.html?audit=' + Date.now() });
+    await sleep(3000);
+    // 跳转过程中执行上下文会被销毁，evaluate 会抛错：包一层当「还没好」，继续等
+    const safeEval = async (expr) => { try { return await evaluate(client, expr); } catch { return null; } };
+    const rescued = await waitFor(
+      () => safeEval(`window.__appReady === true && /[?&]fresh=/.test(location.search)`),
+      { what: '自救页清完缓存并跳回应用', timeoutMs: 45000 },
+    ).then(() => true).catch(() => false);
+    const rescueInfo = await safeEval(`({
+      网址: location.href.replace(/^https?:\\/\\/[^/]+/, ''),
+      记录还在: localStorage.getItem('fatloss.audit.marker') === 'keep',
+      页面: (document.querySelector('#app')?.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+    })`) || {};
+    console.log(`   自救页：跳转后网址 ${rescueInfo.网址 || '未知'}｜记录还在 ${rescueInfo.记录还在}｜页面「${rescueInfo.页面 || '空'}」`);
+    if (!rescued) fail('线上 /update.html 打不开或没有自动跳回应用（手机卡在旧版的用户没法自救）');
+    else if (rescueInfo.记录还在 !== true) fail('自救页把记录也清掉了 —— 它只能清临时缓存，绝对不能碰记录');
+    else pass('自救页能打开、清完缓存跳回应用、记录没丢');
+    await shot(client, '08-rescue.png');
+    await evaluate(client, `localStorage.removeItem('fatloss.audit.marker')`).catch(() => {});
+
     console.log('\n=== 七、全程控制台 ===');
     if (ERRORS.length) {
       const uniq = [...new Set(ERRORS)];

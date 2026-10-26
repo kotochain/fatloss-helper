@@ -646,7 +646,7 @@ npm run check:full      # 全套 12 项（含全按钮清扫、AI 失败注入�
 npm run check:live      # 只测线上：文件逐字节一致 + 真打开线上网址跑一遍（需联网）
 
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
-npm test                       # 386 个自动化测试
+npm test                       # 387 个自动化测试
 node tools/mutate-check.mjs    # 反向验证：故意改坏 98 处代码，确认测试符合预期（在临时副本里做）
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程
