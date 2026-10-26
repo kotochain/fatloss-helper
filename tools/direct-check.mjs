@@ -610,6 +610,55 @@ async function main() {
   await evaluate(`document.querySelector('#sheetClose')?.click(); document.querySelector('.tab[data-view="today"]')?.click(); true`);
   await sleep(300);
 
+  console.log('\n=== 四·三、最近 30 天回顾（v38，issue #14 C） ===');
+  // 先补几天历史（含体重），否则回顾只有「先记几天」；然后重开页面，走真实入口
+  await evaluate(`(async () => {
+    const store = await import('./js/store.js');
+    const foods = await import('./js/foods.js');
+    const s = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    for (let i = 1; i <= 6; i++) {
+      const key = store.shiftDate(store.todayKey(), -i);
+      store.addFoodEntry(s, key, 'lunch', foods.findFood('rice_cooked'), 150);
+      store.addFoodEntry(s, key, 'dinner', foods.findFood('chicken_breast_cooked'), 200);
+    }
+    store.addWeight(s, store.shiftDate(store.todayKey(), -20), 58.4);
+    store.addWeight(s, store.todayKey(), 57.8);
+    localStorage.setItem('fatloss.state.v2', JSON.stringify(s));
+    return true;
+  })()`);
+  await evaluate(`location.reload()`);
+  await sleep(2200);
+  await evaluate(`document.querySelector('[data-act="growth"]')?.click()`);
+  await sleep(500);
+  const growthHasRecap = await evaluate(`!!document.querySelector('#openRecap')`);
+  if (!growthHasRecap) problems.push('成长弹层里没有「看最近 30 天的回顾」入口');
+  await evaluate(`document.querySelector('#openRecap')?.click()`);
+  await sleep(500);
+  const recapUi = await evaluate(`(() => {
+    const body = document.querySelector('#sheetBody');
+    const tiles = [...body.querySelectorAll('.recap-tile b')].map((b) => b.textContent.trim());
+    return {
+      标题: document.querySelector('#sheetTitle')?.textContent.trim() || '',
+      统计: tiles,
+      格子数: body.querySelectorAll('.recap-dots span').length,
+      亮着的: body.querySelectorAll('.recap-dots span.on').length,
+      说明: [...body.querySelectorAll('.warn.info div')].map((d) => d.textContent.replace(/\\s+/g, ' ').trim()).join(' ｜ '),
+      常吃的: body.querySelectorAll('.set-note').length,
+    };
+  })()`);
+  console.log('回顾弹层 →', JSON.stringify(recapUi));
+  const shotRecap = await client.send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir, 'shot-recap.png'), Buffer.from(shotRecap.data, 'base64'));
+  if (!recapUi.标题.includes('回顾')) problems.push(`回顾弹层标题不对：${recapUi.标题}`);
+  if (recapUi.统计.length !== 4) problems.push(`回顾的统计块应当 4 个，实际 ${recapUi.统计.length} 个`);
+  if (!(Number((recapUi.统计[0] || '0').replace(/[^0-9]/g, '')) >= 7)) problems.push(`回顾里的记录天数不对：${recapUi.统计[0]}`);
+  if (recapUi.格子数 !== 30) problems.push(`30 天点亮条应当是 30 格，实际 ${recapUi.格子数} 格`);
+  if (!(recapUi.亮着的 >= 7)) problems.push(`点亮条至少该亮 7 天，实际 ${recapUi.亮着的} 天`);
+  if (!/这 30 天里.*记了/.test(recapUi.说明)) problems.push('回顾没有说清这段时间记了几天');
+  if (/应该|必须|失败|吃多了|自律|加油/.test(recapUi.说明)) problems.push('回顾文案在评判/施压');
+  await evaluate(`document.querySelector('#sheetClose')?.click(); document.querySelector('.tab[data-view="today"]')?.click(); true`);
+  await sleep(300);
+
   console.log('\n=== 五、日历与日期选择 ===');
   await evaluate(`document.querySelector('#dateLabel').click()`);
   await sleep(600);
@@ -774,7 +823,7 @@ async function main() {
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill(), () => fake.close(), () => staticServer.close()]);
 }
 
-armWatchdog('direct-check.mjs', 360);
+armWatchdog('direct-check.mjs', 400);
 
 // 失败路径也必须收尾：只设 exitCode 的话进程会一直挂着（被看门狗杀掉 → 退出码又变了）
 main().catch((err, cleanup) => {

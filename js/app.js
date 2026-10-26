@@ -39,6 +39,7 @@ import {
 } from './cardio.js';
 import { buildMealPlan, buildDailyTips } from './recommend.js';
 import { nextSteps, nextStepsTitle } from './nextsteps.js';
+import { buildRecap, recapLines } from './recap.js';
 import { insights, insightHint } from './insights.js';
 import { APP_VERSION, CHANGELOG } from './version.js';
 import { pendingUpdates, isNewerVersion } from './whatsnew.js';
@@ -3374,6 +3375,8 @@ function openGrowthSheet() {
         </div>
       </div>
 
+      <button class="btn block" id="openRecap" style="margin-top:12px">看最近 30 天的回顾</button>
+
       ${showWeekly ? `
         <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFCFC;border:1px solid var(--line)">
           <div class="card-title">这周的小结</div>
@@ -3402,6 +3405,7 @@ function openGrowthSheet() {
       ${recent.length ? `
         <div class="small muted" style="text-align:center;margin-top:10px">最近拿到：${recent.map((x) => icon(x.icon, { size: 18 }) + x.name).join('、')}</div>` : ''}`,
     onMount: (body) => {
+      $('#openRecap', body)?.addEventListener('click', openRecapSheet);
       body.querySelectorAll('[data-ach]').forEach((el) => {
         el.addEventListener('click', () => {
           const x = a.list.find((y) => y.id === el.dataset.ach);
@@ -3410,6 +3414,53 @@ function openGrowthSheet() {
         });
       });
     },
+  });
+}
+
+/**
+ * 「最近 30 天的回顾」（v38，issue #14 的 C）。
+ *
+ * 为什么单独一个弹层：一周小结只覆盖 7 天，看不到更长的变化；
+ * 这里把 30 天的记录、蛋白达标、体重趋势、最常吃的东西、运动放在一起。
+ * 只陈述事实，不评判；数据不够就直说「先记几天」。
+ */
+function openRecapSheet() {
+  const t = targets();
+  if (!t) return toast('先填一下资料，回顾才有目标可以对照。');
+  const recap = buildRecap({ state, targets: t, today: todayKey() });
+  const lines = recapLines(recap);
+  const dots = [];
+  for (let i = 0; i < recap.days; i++) {
+    const key = shiftDate(recap.from, i);
+    const day = state.days?.[key];
+    const logged = Boolean(day && (Object.values(day.meals || {}).flat().length || (day.exercises || []).length));
+    dots.push(`<span class="${logged ? 'on' : ''}" title="${esc(key)}"></span>`);
+  }
+  const tile = (label, value, unit = '') => `
+    <div class="recap-tile"><b>${value}${unit}</b><span>${label}</span></div>`;
+
+  openSheet({
+    title: '最近 30 天的回顾',
+    body: `
+      <div class="warn info" style="margin-top:0">${lines.map((l) => `<div style="margin:2px 0">· ${esc(l)}</div>`).join('')}</div>
+      <div class="recap-grid">
+        ${tile('记录天数', recap.loggedDays, ' 天')}
+        ${tile('最长连续', recap.longestStreak, ' 天')}
+        ${tile('蛋白达标', recap.proteinHitDays, ' 天')}
+        ${tile('运动', recap.exerciseMinutes, ' 分钟')}
+      </div>
+      <div class="set-note" style="margin-top:6px"><b>这 30 天</b><br>
+        <div class="week-dots recap-dots">${dots.join('')}</div>
+        <span class="tiny muted">亮起来的是有记录的日子；没亮的不用补，从今天接着记就行。</span>
+      </div>
+      ${recap.topFoods.length ? `
+        <hr class="sep">
+        <div class="set-note"><b>最常记的</b><br>
+          ${recap.topFoods.map((f, i) => `${i + 1}. ${esc(f.name)} · ${f.times} 次`).join('<br>')}
+        </div>` : ''}
+      <p class="tiny muted" style="margin:12px 0 0">
+        回顾只陈述记录里的事实，不带评价 —— 记录少的时候也不能说明什么，接着记就好。
+      </p>`,
   });
 }
 

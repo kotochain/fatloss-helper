@@ -35,6 +35,10 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: 'kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9', to: 'kcal: 316, protein: 2.6, fat: 0.3, carb: 25.9', why: '熟米饭每 100 克 116 kcal' },
   { file: 'js/foods.js', from: 'if (/斤/.test(unit)) return round1(qty * 500);', to: 'if (/斤/.test(unit)) return round1(qty * 50);', why: '一斤 = 500 克' },
   { file: 'js/foods.js', from: 'const exact = pairs.find((x) => x.key === unit);', to: 'const exact = null;', why: '「一碗」必须精确命中而不是被「一小碗」抢走' },
+  // v38：「最近 30 天回顾」的三条（窗口边界、数据不够直说、蛋白达标要真数）
+  { file: 'js/recap.js', from: '  for (let i = 0; i < span; i++) keys.push(shiftDate(from, i));', to: '  for (let i = 0; i < span; i++) keys.push(shiftDate(from, i + 1));', why: '回顾只算最近 30 天（窗口偏一天就会多/少算记录）' },
+  { file: 'js/recap.js', from: '    enough: loggedDays >= 3,', to: '    enough: true,', why: '数据不够时要直说「先记几天」，不能编回顾' },
+  { file: 'js/recap.js', from: '    ? dayRows.filter((r) => r.totals.protein >= proteinTarget).length', to: '    ? dayRows.filter(() => false).length', why: '蛋白达标天数必须是真数出来的' },
   // v36：「顺手做两件事」的三条硬规则（今天空着不出卡、最多两条、蛋白缺口要提）
   { file: 'js/nextsteps.js', from: '  if (entriesOn(state, today).length === 0) return [];', to: '  if (false) return [];', why: '今天一笔都没记时不能重复催（交给接住卡）' },
   { file: 'js/nextsteps.js', from: '  return candidates.slice(0, 2);', to: '  return candidates.slice(0, 3);', why: '今天页最多两条，多了就是骚扰' },

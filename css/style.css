@@ -309,6 +309,14 @@ body {
 
 /* ── 通用卡片 ───────────────────────────── */
 main { padding: 12px; }
+/* 「最近 30 天的回顾」（v38）：四块小统计 + 30 天点亮条 */
+.recap-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 12px 0 6px; }
+.recap-tile { background: #FFFCFC; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.recap-tile b { display: block; font-size: 20px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.recap-tile span { font-size: 12px; color: var(--ink-2); }
+.recap-dots { margin-top: 8px; row-gap: 4px; }
+.recap-dots span { height: 12px; border-radius: 4px; border: 1px solid rgba(240, 230, 232, 0.9); }
+
 /* 「顺手做两件事」卡片（v36）：轻量、可点、不评判。放成两行矮卡，不抢主数字的视线 */
 .card.steps { background: #FFFDFB; border: 1px solid #F3E3DA; padding: 14px 14px 6px; }
 .card.steps .card-title { margin-bottom: 6px; }
