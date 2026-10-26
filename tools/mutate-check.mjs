@@ -17,8 +17,12 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-mutate-'));
 // 沙箱必须和真实仓库一样「该有的都有」：以前只拷了 js/tests/tools/package.json，
 // 但 tests/icons.test.mjs 会读 index.html —— 沙箱里没有这个文件 → 测试直接 ENOENT 崩，
 // 于是每一条变异都被判「抓到了」，77/77 是假的（v27 由独立验证员发现）。
-// 文案护栏会扫 README / HANDOFF / docs / .github，沙箱里也要有，否则那条变异测不出来
-for (const entry of ['js', 'tests', 'tools', 'package.json', 'index.html', 'sw.js', 'css', 'icons', 'manifest.webmanifest', 'README.md', 'HANDOFF.md', 'docs', '.github']) {
+// 文案护栏会扫 README / HANDOFF / docs / .github，沙箱里也要有，否则那条变异测不出来。
+// 根目录的 html 全部拷过去（v38 就是这么又踩了一次：新加 update.html 没拷，
+// tests/version.test.mjs 的「发布脚本不漏页面」测试在沙箱里每条变异都红，
+// 把 4 条标注为「等价变异」的改坏也误判成抓到了 —— 假红也是假，必须让沙箱等于仓库）。
+const rootHtml = fs.readdirSync(source).filter((f) => f.endsWith('.html'));
+for (const entry of ['js', 'tests', 'tools', 'package.json', 'sw.js', 'css', 'icons', 'manifest.webmanifest', 'README.md', 'HANDOFF.md', 'docs', '.github', ...rootHtml]) {
   fs.cpSync(path.join(source, entry), path.join(sandbox, entry), { recursive: true });
 }
 const root = sandbox;
