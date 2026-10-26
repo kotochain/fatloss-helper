@@ -35,6 +35,10 @@ const MUTATIONS = [
   { file: 'js/foods.js', from: 'kcal: 116, protein: 2.6, fat: 0.3, carb: 25.9', to: 'kcal: 316, protein: 2.6, fat: 0.3, carb: 25.9', why: '熟米饭每 100 克 116 kcal' },
   { file: 'js/foods.js', from: 'if (/斤/.test(unit)) return round1(qty * 500);', to: 'if (/斤/.test(unit)) return round1(qty * 50);', why: '一斤 = 500 克' },
   { file: 'js/foods.js', from: 'const exact = pairs.find((x) => x.key === unit);', to: 'const exact = null;', why: '「一碗」必须精确命中而不是被「一小碗」抢走' },
+  // v38 更新机制的三条（版本比较、安全重载条件、横幅文案）
+  { file: 'js/update.js', from: '  return versionNumber(deployed) > versionNumber(current);', to: '  return versionNumber(deployed) >= versionNumber(current);', why: '版本相同不算更新（否则会反复重载）' },
+  { file: 'js/update.js', from: '  return !sheetOpen && !hasDraft && !typing;', to: '  return true;', why: '正在填东西时不能自动重载' },
+  { file: 'js/update.js', from: '  return `有新版本 ${latest}，点这里更新（记录不会丢）`;', to: '  return `有新版本 ${latest}`;', why: '更新横幅必须说清「点哪里」「记录不会丢」' },
   // v38：「最近 30 天回顾」的三条（窗口边界、数据不够直说、蛋白达标要真数）
   { file: 'js/recap.js', from: '  for (let i = 0; i < span; i++) keys.push(shiftDate(from, i));', to: '  for (let i = 0; i < span; i++) keys.push(shiftDate(from, i + 1));', why: '回顾只算最近 30 天（窗口偏一天就会多/少算记录）' },
   { file: 'js/recap.js', from: '    enough: loggedDays >= 3,', to: '    enough: true,', why: '数据不够时要直说「先记几天」，不能编回顾' },

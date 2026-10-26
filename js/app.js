@@ -42,7 +42,8 @@ import { nextSteps, nextStepsTitle } from './nextsteps.js';
 import { buildRecap, recapLines } from './recap.js';
 import { insights, insightHint } from './insights.js';
 import { APP_VERSION, CHANGELOG } from './version.js';
-import { pendingUpdates, isNewerVersion } from './whatsnew.js';
+import { pendingUpdates } from './whatsnew.js';
+import { hasNewerVersion, canRefreshNow, updateBannerText, AUTO_UPDATE_FLAG } from './update.js';
 import {
   SCHEMA_VERSION, STATE_KEY, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
   readUnreadable,
@@ -3210,7 +3211,12 @@ function openAboutSheet() {
       <div class="btn-row" style="margin-top:2px">
         <button class="btn ghost grow" id="openWhatsNew">更新说明</button>
         <button class="btn ghost grow" id="checkUpdate">检查更新</button>
-      </div>`,
+      </div>
+      <button class="btn ghost block" id="forceUpdate" style="margin-top:8px">强制更新到最新版</button>
+      <p class="tiny muted" style="margin:6px 0 0">
+        如果手机上显示的版本和更新说明对不上（卡在旧版本），点「强制更新」：只清临时缓存再重新加载，
+        记录、资料、AI 密钥都在这台手机里，不会丢。强制更新后还是旧版，把上面这行版本号截图发我。
+      </p>`,
     onMount: () => {
       const line = document.getElementById('swVersionLine');
       if (line) {
@@ -3219,6 +3225,11 @@ function openAboutSheet() {
       }
       $('#openWhatsNew')?.addEventListener('click', () => openWhatsNewSheet({ entries: CHANGELOG.slice(0, 3) }));
       $('#checkUpdate')?.addEventListener('click', manualCheckForUpdate);
+      $('#forceUpdate')?.addEventListener('click', () => {
+        if (!confirm('强制更新会清掉旧版本的临时缓存并重新加载。记录都在这台手机里，不会丢。继续？')) return;
+        closeSheet();
+        forceFresh();
+      });
     },
   });
 }
@@ -3287,6 +3298,64 @@ async function deployedVersion() {
   }
 }
 
+function sheetIsOpen() {
+  const root = $('#sheetRoot');
+  return Boolean(root && !root.classList.contains('hidden'));
+}
+
+function isTypingNow() {
+  const ae = document.activeElement;
+  return Boolean(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName) && String(ae.value || '').trim());
+}
+
+/**
+ * 「强制更新」：注销旧 Service Worker + 清掉临时缓存，然后重载。
+ *
+ * **不会碰 localStorage** —— 记录、资料、AI 密钥都还在本机，只是把「旧代码的缓存」扔掉。
+ * 这是给「手机一直卡在旧版本」准备的自救按钮（真事故：用户卡在很早的版本好几天）。
+ */
+async function forceFresh(latest = '') {
+  try { sessionStorage.setItem(AUTO_UPDATE_FLAG, '1'); } catch { /* 忽略 */ }
+  try { if (latest) sessionStorage.setItem('fatloss.updatedTo', latest); } catch { /* 忽略 */ }
+  toast('正在清理旧缓存并重新加载，记录不会丢…');
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch { /* 不支持就算了，下面照样重载 */ }
+  try {
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch { /* 同上 */ }
+  location.reload();
+}
+
+/**
+ * 常驻的更新横幅。
+ *
+ * 为什么不用弹层就算：弹层可以被「先不刷新」关掉，而卡在旧版本正是这次真事故的根因。
+ * 横幅会一直挂着，直到真的更新；点一下就是刷新（更新记录说明仍在弹层里）。
+ */
+let updateBanner = null;
+function showUpdateBanner(latest) {
+  if (updateBanner) return;
+  const el = document.createElement('div');
+  el.className = 'update-banner';
+  const text = document.createElement('span');
+  text.textContent = updateBannerText(latest);
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.textContent = '更新';
+  btn.addEventListener('click', () => openRefreshSheet(latest));
+  el.append(text, btn);
+  document.body.appendChild(el);
+  updateBanner = el;
+}
+function hideUpdateBanner() { if (updateBanner) { updateBanner.remove(); updateBanner = null; } }
+
 /** 打开「有新版本了」：一个刷新按钮 + 一个先不刷新 */
 function openRefreshSheet(latest) {
   // 弹过就算提醒过：右上角 ×、点背景关掉都算（否则同一次会话里过 5 分钟切回来还会再弹）
@@ -3302,6 +3371,7 @@ function openRefreshSheet(latest) {
         不刷新也能继续用，只是新功能和修复要等下次打开才生效。
       </p>`,
     foot: `<button class="btn block" id="reloadNow">刷新，用上新版</button>
+      <button class="btn ghost block" id="reloadForce" style="margin-top:8px">刷新后还是旧的？点这里强制更新</button>
       <button class="btn ghost block" id="reloadLater" style="margin-top:8px">先不刷新</button>`,
     onMount: (_body, foot) => {
       $('#reloadNow', foot).addEventListener('click', () => {
@@ -3309,6 +3379,10 @@ function openRefreshSheet(latest) {
         try { navigator.serviceWorker?.controller?.postMessage('skip-waiting'); } catch { /* 忽略 */ }
         closeSheet();
         location.reload();
+      });
+      $('#reloadForce', foot).addEventListener('click', () => {
+        closeSheet();
+        forceFresh(latest);
       });
       $('#reloadLater', foot).addEventListener('click', () => {
         closeSheet();
@@ -3331,23 +3405,43 @@ async function manualCheckForUpdate() {
     toast('现在连不上（可能离线）。下次打开应用时我会自动再检查。');
     return;
   }
-  if (!isNewerVersion(latest, APP_VERSION)) {
+  if (!hasNewerVersion(APP_VERSION, latest)) {
     toast(`已经是最新版本（${APP_VERSION}）。`);
     return;
   }
+  showUpdateBanner(latest);
   openRefreshSheet(latest);
 }
 
-/** 发现服务端版本比手机上跑的新 → 提醒刷新。同一版本次只提醒一次，别一直烦用户 */
+/**
+ * 发现线上版本比本机新时的处理（v38 加固）。
+ *
+ * 真事故：用户手机卡在很旧的版本好几天 —— 截图里还是早已修掉的「AI 说库里没有，一条都没记上」。
+ * 原因是早期版本连 sw.js 都被缓存，更新提醒永远弹不出来。现在：
+ *  1) 刚启动/切回前台、手头没事（没开弹层、没有草稿、没在输入）→ **自动更新一次**（重载，记录不丢）；
+ *  2) 不方便自动更新 → 顶部常驻横幅，直到真的更新（弹层可以被关掉，横幅不会）；
+ *  3) 自动更新只尝试一次/会话，网络或 CDN 不一致时不来回重载。
+ */
 async function checkForUpdate() {
   const latest = await deployedVersion();
-  if (!latest || !isNewerVersion(latest, APP_VERSION)) return false;
-  try {
-    if (sessionStorage.getItem('fatloss.updatePrompted') === latest) return false;
-  } catch { /* 忽略 */ }
-  // 别的弹层（引导、记一笔）开着的时候不叠上去，等下次机会
-  if ($('#sheetRoot') && !$('#sheetRoot').classList.contains('hidden')) return false;
-  openRefreshSheet(latest);
+  if (!hasNewerVersion(APP_VERSION, latest)) {
+    hideUpdateBanner();
+    try { sessionStorage.removeItem(AUTO_UPDATE_FLAG); } catch { /* 忽略 */ }
+    return false;
+  }
+  const idle = !userTouched && canRefreshNow({ sheetOpen: sheetIsOpen(), hasDraft: Boolean(draft), typing: isTypingNow() });
+  let autoTried = false;
+  try { autoTried = sessionStorage.getItem(AUTO_UPDATE_FLAG) === '1'; } catch { /* 忽略 */ }
+  if (idle && !autoTried) {
+    toast(`发现新版本 ${latest}，正在自动更新…`);
+    setTimeout(() => forceFresh(latest), 800);
+    return true;
+  }
+  // 不方便自动更新：横幅常驻 + 弹一次说明（弹层可关，横幅不会）
+  showUpdateBanner(latest);
+  let prompted = false;
+  try { prompted = sessionStorage.getItem('fatloss.updatePrompted') === latest; } catch { /* 忽略 */ }
+  if (idle && !prompted) openRefreshSheet(latest);
   return true;
 }
 
@@ -4158,6 +4252,21 @@ if (startupNotice) {
       toast(startupNotice.text);
     }
   }, 600);
+}
+
+// 刚刚通过「自动/强制更新」重载过：确认一句（只提示一次，免得每次打开都念）
+try {
+  const updatedTo = sessionStorage.getItem('fatloss.updatedTo');
+  if (updatedTo) {
+    sessionStorage.removeItem('fatloss.updatedTo');
+    setTimeout(() => toast(`已更新到 ${updatedTo}。`), 1200);
+  }
+} catch { /* 忽略 */ }
+
+// 用户已经动过手（点了/打字了）就不再自动重载，改成常驻横幅 + 手动更新
+let userTouched = false;
+for (const evt of ['pointerdown', 'keydown', 'touchstart']) {
+  document.addEventListener(evt, () => { userTouched = true; }, { once: true, passive: true });
 }
 
 // 更新提示要在界面渲染完之后再弹，避免和「数据迁移提示 / 读不出来的记录」抢同一个弹层。

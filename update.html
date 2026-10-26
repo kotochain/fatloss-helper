@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FFF9F7">
+<title>更新到最新版 · 减脂小助手</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #FFF9F7; color: #3A2E33; font: 15px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; padding: 20px; box-sizing: border-box; }
+  .card { width: 100%; max-width: 420px; background: #fff; border-radius: 18px; box-shadow: 0 8px 24px rgba(90, 50, 60, 0.12); padding: 22px 18px; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; color: #7A6770; font-size: 14px; }
+  b { color: #3A2E33; }
+  button { width: 100%; border: 0; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600; color: #fff;
+    background: linear-gradient(135deg, #FF9E7A, #E86A82); margin-top: 6px; }
+  .tiny { font-size: 12px; color: #A08C94; margin-top: 12px; }
+  .ok { color: #2E7D5B; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 id="title">正在更新到最新版…</h1>
+  <p id="msg">只会清掉旧版本的<b>临时缓存</b>，手机里的记录、资料、AI 密钥都不会丢。</p>
+  <button id="go">立即更新</button>
+  <p class="tiny" id="hint">如果这里一直没反应，回到应用：「我的 → 关于 → 强制更新」。</p>
+</div>
+<script>
+(async () => {
+  const title = document.getElementById('title');
+  const msg = document.getElementById('msg');
+  try {
+    // 1) 注销旧的 Service Worker（旧版本会把整套旧代码缓存住）
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    // 2) 清掉旧缓存（Cache Storage；不碰 localStorage，记录还在）
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    try { sessionStorage.setItem('fatloss.updatedTo', '最新版'); } catch (e) {}
+    title.textContent = '更新完成，正在打开…';
+    msg.innerHTML = '旧缓存已经清掉了，<b>记录都还在</b>。';
+    title.className = 'ok';
+    location.replace('./?fresh=' + Date.now());
+  } catch (err) {
+    title.textContent = '自动更新没成功';
+    msg.textContent = '可以点下面的按钮再试一次；还不行就回到应用里用「我的 → 关于 → 强制更新」。';
+    console.warn(err);
+  }
+})();
+document.getElementById('go').addEventListener('click', () => {
+  location.replace('./?fresh=' + Date.now());
+});
+</script>
+</body>
+</html>

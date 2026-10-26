@@ -103,21 +103,33 @@ function startFakeProvider() {
         }
         // v34：这一句故意让假上游按「新格式」回营养估算（本地库里没有的菜）
         const isEstimateCase = userText.includes('某网红限定轻食碗');
+        // v38 回归：用户真机上说的那句（本地库里没有的奶茶品牌/口味），必须能估、能记
+        const isMilkTeaCase = userText.includes('苦巧');
         const estimateGrams = userText.includes('200') ? 200 : 300;
         const per100 = { kcal: 140, protein: 7.3, fat: 4, carb: 17.3 };
         const at = (v) => Math.round((v * estimateGrams) / 100 * 10) / 10;
         const content = isPing
           ? '可以'
-          : isEstimateCase
+          : isMilkTeaCase
             ? JSON.stringify({
-              meal: 'lunch',
+              meal: 'breakfast',
               items: [{
-                name: '某网红限定轻食碗',
-                grams: estimateGrams,
-                kcal: at(per100.kcal), protein: at(per100.protein), fat: at(per100.fat), carb: at(per100.carb),
+                name: '喜茶苦巧咸酪碎银子奶茶',
+                grams: 500,
+                kcal: 330, protein: 5, fat: 11, carb: 52,
               }],
               questions: [],
             })
+            : isEstimateCase
+              ? JSON.stringify({
+                meal: 'lunch',
+                items: [{
+                  name: '某网红限定轻食碗',
+                  grams: estimateGrams,
+                  kcal: at(per100.kcal), protein: at(per100.protein), fat: at(per100.fat), carb: at(per100.carb),
+                }],
+                questions: [],
+              })
             : JSON.stringify({
               meal: 'dinner',
               // 故意用离线解析认不出来的说法：如果 AI 的结果被丢掉、退回离线解析，
@@ -458,6 +470,48 @@ async function main() {
   if (cachedChats !== 0) problems.push(`只涉及之前存过的菜，却又发了 ${cachedChats} 次 AI 请求（说好的省请求呢）`);
   await evaluate(`document.querySelector('#draftCancel')?.click(); true`);
   await sleep(300);
+
+  console.log('\n=== 三·四、真机回归：库里没有的奶茶也要能记上（用户截图里的原句）===');
+  // 用户手机截图里出现过「认出来了，但本地库里没有 → 一条都没记上」——那是旧版本的行为。
+  // 这条用同一句话把现在的行为钉住：AI 估营养 → 本地核对 → 记上 → 存进「我的食物」。
+  await evaluate(`document.querySelector('.tab[data-view="log"]')?.click()`);
+  await sleep(400);
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '早饭 喜茶苦巧咸酪碎银子少少甜';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#quickParse').click();
+  })()`);
+  await sleep(2500);
+  const milkTea = await evaluate(`(() => {
+    const rows = [...document.querySelectorAll('#draftHost .draft-entry')];
+    const all = [...document.querySelectorAll('#draftHost .warn')].map((w) => w.textContent.replace(/\\s+/g, ' ').trim()).join(' ｜ ');
+    return {
+      条数: rows.length,
+      标签: rows[0]?.querySelector('.tag.amber')?.textContent.trim() || '',
+      热量: rows[0]?.querySelector('[data-kcal]')?.textContent || '',
+      旧版文案: all.includes('一条都没记上') || all.includes('所以一条都没记上'),
+      文案: all.slice(0, 160),
+    };
+  })()`);
+  console.log('奶茶原句 →', JSON.stringify(milkTea));
+  if (milkTea.旧版文案) problems.push('还出现了旧版「一条都没记上」的文案（用户看到的正是这个）');
+  if (milkTea.条数 !== 1) problems.push(`本地库里没有的奶茶应当记上 1 条，实际 ${milkTea.条数} 条`);
+  if (milkTea.标签 !== 'AI 估的') problems.push(`应当标「AI 估的」，实际「${milkTea.标签}」`);
+  if (!/33[0-9]/.test(milkTea.热量)) problems.push(`热量应当是 AI 估的 330 kcal 左右，实际「${milkTea.热量}」`);
+  await evaluate(`document.querySelector('#draftSave').click()`);
+  await sleep(700);
+  const milkSaved = await evaluate(`(() => {
+    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
+    const cf = (st.customFoods || []).find((f) => String(f.name).includes('苦巧'));
+    const toastText = [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' | ');
+    return { 存进我的食物: !!cf, 反馈: toastText.includes('我的食物') };
+  })()`);
+  console.log('奶茶保存 →', JSON.stringify(milkSaved));
+  if (!milkSaved.存进我的食物) problems.push('AI 估的奶茶保存后没有存进「我的食物」');
+  if (!milkSaved.反馈) problems.push('保存反馈没有说明已存进「我的食物」');
+  // 下一节（三·二）要在记录页上切模式，这里留在记录页，别切走
+  await sleep(200);
 
   console.log('\n=== 三·二、切到普通模式后，真的不再发请求（「不花钱」得由代码兑现）===');
   // 这条守的是真事故级问题：模式以前只改文案，配过密钥后切到普通模式照样调 AI。
@@ -823,7 +877,7 @@ async function main() {
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill(), () => fake.close(), () => staticServer.close()]);
 }
 
-armWatchdog('direct-check.mjs', 400);
+armWatchdog('direct-check.mjs', 440);
 
 // 失败路径也必须收尾：只设 exitCode 的话进程会一直挂着（被看门狗杀掉 → 退出码又变了）
 main().catch((err, cleanup) => {

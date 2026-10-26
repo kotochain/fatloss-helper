@@ -26,6 +26,7 @@ const ASSETS = [
   './js/recommend.js',
   './js/nextsteps.js',
   './js/recap.js',
+  './js/update.js',
   './js/store.js',
   './js/schema.js',
   './js/insights.js',

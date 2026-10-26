@@ -595,11 +595,25 @@ async function main() {
       }
     });
     await evaluate(client, 'location.reload()');
-    await sleep(7000); // 启动 900ms + 更新检查 4s + 网络余量
+    /*
+     * v38 起更新策略变了：启动发现新版时会「自动更新一次」（重载，记录不丢）。
+     * 这一节要测的是「不方便自动更新时」的常驻横幅 + 弹层，所以先在页面里模拟一次用户操作
+     * （在更新检查的 4 秒前 dispatch 一个 pointerdown），让自动更新让路。
+     */
+    await sleep(1200);
+    await evaluate(client, `document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
+    await sleep(6000); // 等过 4 秒的更新检查
+    const banner = await evaluate(client, `(() => {
+      const el = document.querySelector('.update-banner');
+      return { 有横幅: !!el, 文字: el?.textContent.replace(/\\s+/g, ' ').trim() || '' };
+    })()`);
+    await evaluate(client, `document.querySelector('.update-banner .btn')?.click()`);
+    await sleep(500);
     const refresh = await evaluate(client, `(() => ({
       标题: document.querySelector('#sheetTitle')?.textContent || '',
       正文: (document.querySelector('#sheetBody')?.innerText || '').replace(/\\s+/g, ' ').slice(0, 160),
       按钮: [...document.querySelectorAll('#sheetFoot .btn')].map((b) => b.textContent.trim()),
+      横幅: ${JSON.stringify(banner)},
       假版本: ${JSON.stringify(fakeVer)},
     }))()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-9-refresh.png`));
@@ -682,7 +696,7 @@ function printReport(report) {
     console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜图标 ${r.settings.图标尺寸}px / 图标块 ${r.settings.图标块最小}px（要求 ≥22 / ≥34）｜兜底 ${r.settings.兜底} 个`);
     console.log(`  关于页检查更新：按钮 ${r.aboutCheck.有按钮 ? '有' : '缺'}｜版本行 ${r.aboutCheck.版本行 || '（空）'}｜提示「${r.aboutCheck.提示}」`);
     console.log(`  更新弹窗：标题「${r.update.标题}」｜${r.update.版本}｜条目 ${r.update.条目数} 条｜按钮 ${r.update.有按钮 ? '有' : '缺'}`);
-    console.log(`  刷新弹窗：标题「${r.refresh.标题}」｜假版本 ${r.refresh.假版本}｜按钮 ${JSON.stringify(r.refresh.按钮)}`);
+    console.log(`  刷新弹窗：标题「${r.refresh.标题}」｜假版本 ${r.refresh.假版本}｜按钮 ${JSON.stringify(r.refresh.按钮)}｜横幅「${r.refresh.横幅.文字}」`);
     console.log(`  资料页预览：${r.profilePreview}`);
     console.log(`  PWA 清单：${r.manifest.name}｜display=${r.manifest.display}｜start_url=${r.manifest.start_url}｜图标 ${r.manifest.icons.join(' ')}`);
     console.log(`  控制台报错：${s.consoleErrors.length ? s.consoleErrors.join(' | ') : '无'}`);
@@ -711,7 +725,9 @@ function printReport(report) {
       || !r.skipYesterday.卡片没了 || !r.skipYesterday.记了跳过
       || !r.aboutCheck.有按钮 || !/最新版本/.test(r.aboutCheck.提示)
       || r.refresh.标题 !== '有新版本了' || !r.refresh.按钮.includes('刷新，用上新版')
-      || !r.refresh.按钮.includes('先不刷新') || !r.refresh.正文.includes(r.refresh.假版本);
+      || !r.refresh.按钮.some((x) => x.includes('强制更新')) || !r.refresh.按钮.includes('先不刷新')
+      || !r.refresh.正文.includes(r.refresh.假版本)
+      || !r.refresh.横幅.有横幅 || !r.refresh.横幅.文字.includes(r.refresh.假版本);
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
       || uiIconBad) problems += 1;

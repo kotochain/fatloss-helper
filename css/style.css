@@ -117,7 +117,31 @@ body {
   border-radius: 14px;
   box-shadow: 0 8px 20px rgba(120, 82, 40, 0.14);
 }
-.sync-banner span { flex: 1; }
+/* 常驻更新横幅（v38）：比弹层更硬 —— 弹层可以「先不刷新」，这条会一直挂着直到真的更新 */
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 82;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 440px;
+  width: calc(100% - 28px);
+  background: #FFF0F3;
+  border: 1px solid #F3C6D2;
+  color: #3A2E33;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px 8px 14px;
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(120, 60, 80, 0.16);
+}
+.update-banner span { flex: 1; }
+.update-banner .btn { padding: 6px 12px; font-size: 13px; flex: 0 0 auto; }
+
+.sync-banner span { flex: 1; }.sync-banner span { flex: 1; }
 .sync-banner .btn { padding: 6px 12px; font-size: 13px; flex: 0 0 auto; }
 
 /* 内联图标 */
