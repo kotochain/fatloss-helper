@@ -1,9 +1,10 @@
 /**
- * 新功能的真浏览器自检：「说一句就记上」+「按器械换有氧动作」
+ * 新功能的真浏览器自检：「说一句就记上」（没配 AI 时）+「按器械换有氧动作」
  *
  * 用法：先 node tools/serve.mjs 4173，再 node tools/quicklog-check.mjs
- * 覆盖：输入一句话 → 解析出可改的清单 → 改份量 → 换餐次 → 记入记录；
- *      有氧卡片选器械、目标、时长，以及「想做的机器没空」的替代流程。
+ * 覆盖：没配 AI 时「说一句」不假装解析、指路 AI 设置；手动记一笔；周洞察；
+ *      教练本地版；有氧卡片选器械、目标、时长，以及「想做的机器没空」的替代流程。
+ * AI 真解析（含追问、份量档位）在 tools/direct-check.mjs 里用假服务商覆盖。
  */
 
 import { spawn } from 'node:child_process';
@@ -313,17 +314,24 @@ async function main() {
   })()`);
   await evaluate(`(async () => {
     for (let i = 0; i < 30; i++) {
-      if (document.querySelector('[data-pick]')) return true;
+      if (document.querySelector('#obSkip')) return true;
       await new Promise((r) => setTimeout(r, 100));
     }
     return false;
   })()`);
-  const ob3 = await evaluate(`({ 标题: document.querySelector('#sheetTitle')?.textContent, 选项: [...document.querySelectorAll('[data-pick]')].map((e) => e.querySelector('b').textContent.trim()) })`);
-  console.log(`✅ 第 3 步「${ob3.标题}」：${ob3.选项.join(' / ')}`);
-  if (!ob3.选项.includes('普通模式') || !ob3.选项.includes('AI 模式')) problems.push('引导里没有让用户选模式');
-  if (ob3.选项[0] !== '普通模式') problems.push('普通模式应当排在前面（大多数人不会配 API）');
+  const ob3 = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    文本: (document.querySelector('#sheetBody')?.textContent || '').replace(/\\s+/g, ' '),
+    去配置: document.querySelector('#obAi')?.textContent.trim() || '',
+    跳过: document.querySelector('#obSkip')?.textContent.trim() || '',
+    有模式选项: !!document.querySelector('[data-pick]'),
+  }))()`);
+  console.log(`✅ 第 3 步「${ob3.标题}」：${ob3.去配置} / ${ob3.跳过}`);
+  if (!ob3.文本.includes('5 分钟教程')) problems.push('引导第 3 步没提「填密钥的地方有 5 分钟教程」');
+  if (ob3.有模式选项) problems.push('引导里还让用户选普通模式（v42 起只有 AI 一种模式）');
 
-  await evaluate(`document.querySelector('[data-pick="basic"]')?.click()`);
+  // 没配密钥的用户走「先跳过，手动记」：一样能完成引导
+  await evaluate(`document.querySelector('#obSkip')?.click()`);
   await evaluate(`(async () => {
     for (let i = 0; i < 30; i++) {
       if (document.querySelector('#obGo')) return true;
@@ -336,172 +344,54 @@ async function main() {
   await evaluate(`document.querySelector('#obGo')?.click()`);
   await sleep(1200);
   const obDone = await evaluate(`({ 标签: document.querySelector('.tab.active')?.textContent.trim(), 模式: JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}')?.settings?.mode, 引导完成: JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}')?.settings?.onboarded })`);
-  console.log(`✅ 引导结束 → 落在「${obDone.标签}」页，模式存为 ${obDone.模式}，引导标记 ${obDone.引导完成}`);
-  if (obDone.模式 !== 'basic') problems.push('引导里选了普通模式，存档里却不是');
+  console.log(`✅ 引导结束 → 落在「${obDone.标签}」页，存档里不再写模式（${obDone.模式}），引导标记 ${obDone.引导完成}`);
   if (obDone.引导完成 !== true) problems.push('引导完成后没有记录标记（下次打开会重复引导）');
+  if (obDone.模式 !== undefined) problems.push(`引导还在往存档里写使用模式（${obDone.模式}），v42 起已经没有这个概念`);
 
-  console.log('\n=== 一、「说一句就记上」 ===');
+  console.log('\n=== 一、没配 AI 时说一句：明说没解析，不造假条目 ===');
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
   await sleep(400);
   const hasBox = await evaluate(`!!document.querySelector('#quickText')`);
   console.log(hasBox ? '✅ 记录页有「说一句」输入框' : '❌ 没有输入框');
   if (!hasBox) problems.push('记录页缺少说一句输入框');
 
-  // 输入一句话并解析（这里服务端没配 AI 密钥，会走离线解析）
   await evaluate(`(() => {
     const ta = document.querySelector('#quickText');
     ta.value = '今天中午在食堂吃了碗牛肉面，加了个蛋';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('#quickParse').click();
   })()`);
-  await waitFor(() => evaluate(`document.querySelectorAll('#draftHost .entry').length || null`), { what: '解析结果出现（弹层）' });
+  await waitFor(() => evaluate(`document.querySelector('#draftHost .warn') ? true : null`), { what: '没配 AI 的说明出现（弹层）' });
   const inSheet = await evaluate(`!document.querySelector('#sheetRoot').classList.contains('hidden')`);
-  const draft = await evaluate(`(() => {
-    const rows = [...document.querySelectorAll('#draftHost .entry')];
-    return {
-      弹层标题: document.querySelector('#sheetTitle')?.textContent || null,
-      条数: rows.length,
-      条目: rows.map((r) => r.querySelector('.name').textContent.trim().replace(/\\s+/g, ' ')),
-      合计: document.querySelector('#draftHost .row.between b')?.textContent || null,
-      有餐次选择: !!document.querySelector('#draftMeal'),
-      有确认按钮: !!document.querySelector('#draftSave'),
-    };
-  })()`);
-  console.log(inSheet ? '✅ 解析结果用弹层展示（不用往下滚去找）' : '❌ 解析结果没在弹层里');
-  console.log(`   弹层标题：「${draft.弹层标题}」`);
-  console.log(`✅ 解析出 ${draft.条数} 条：${draft.条目.join('、')}｜合计 ${draft.合计} kcal｜可改份量/餐次 ${draft.有餐次选择}`);
-  if (draft.条数 === 0) problems.push('一句话没解析出任何条目');
-  if (!draft.有确认按钮) problems.push('缺少「记上」按钮');
-
-  console.log('\n=== 一·二、份量不确定时反问用户 ===');
-  // 这段必须放在「改成 800 克」之前：用户一旦自己填了数字，追问就会收起来（设计如此）。
-  const guess = await evaluate(`(() => {
-    const block = document.querySelector('#draftHost [data-guess]');
-    if (!block) return null;
-    const chips = [...block.querySelectorAll('.chip')];
-    return {
-      条目: block.previousElementSibling?.querySelector('.name')?.textContent.trim().replace(/\\s+/g, ' ') || null,
-      标注: block.querySelector('.guess-tag')?.textContent || null,
-      理由: block.querySelector('.guess-why')?.textContent || null,
-      档位: chips.map((c) => c.textContent.trim()),
-      追问块数: document.querySelectorAll('#draftHost [data-guess]').length,
-      合计: document.querySelector('#draftHost .row.between b').textContent,
-      索引: block.dataset.guess,
-    };
-  })()`);
-  if (!guess) {
-    console.log('❌ 「一碗牛肉面」这种说不准的份量，界面没有反问用户');
-    problems.push('份量说不准时没有反问用户（缺档位按钮）');
-  } else {
-    console.log(`✅ 反问用户一句：「${guess.标注}」${guess.理由}`);
-    console.log(`   档位：${guess.档位.join(' / ')}（共 ${guess.追问块数} 条在问）`);
-    if (!(guess.标注 || '').includes('猜的')) problems.push('低置信度条目没有标出「这个份量我是猜的」');
-    if (guess.档位.length < 2) problems.push(`份量档位只有 ${guess.档位.length} 个，等于没法选`);
-    // 留一张图，方便人直接看这块长什么样（截图在 .selfcheck/，不进版本库）
-    const shotGuess = await client.send('Page.captureScreenshot', { format: 'png' });
-    fs.writeFileSync(path.join(outDir, 'shot-portion.png'), Buffer.from(shotGuess.data, 'base64'));
-  }
-
-  // 点最大的那一档：克数、行内热量、合计都要跟着变，问过的就别再挂着
-  const beforePick = guess ? guess.合计 : await evaluate(`document.querySelector('#draftHost .row.between b').textContent`);
-  const clicked = await evaluate(`(() => {
-    const block = document.querySelector('#draftHost [data-guess]');
-    if (!block) return null;
-    const chips = [...block.querySelectorAll('.chip')];
-    const target = chips[chips.length - 1];
-    target.click();
-    return { 档位: target.textContent.trim(), 索引: block.dataset.guess };
-  })()`);
-  await sleep(250);
-  if (!clicked) {
-    console.log('（没有可点的档位，跳过改份量检查）');
-  } else {
-    const picked = await evaluate(`(() => {
-      const idx = ${clicked.索引};
-      return {
-        克数: document.querySelectorAll('#draftHost .draft-grams')[idx]?.value || null,
-        行内热量: document.querySelector('#draftHost [data-kcal="' + idx + '"]')?.textContent || null,
-        合计: document.querySelector('#draftHost .row.between b').textContent,
-        追问还在: !!document.querySelector('#draftHost [data-guess="' + idx + '"]'),
-      };
-    })()`);
-    const tierGrams = Number((clicked.档位.match(/(\d+)\s*克/) || [])[1]);
-    console.log(`✅ 点档位「${clicked.档位}」→ 第 ${clicked.索引} 条变成 ${picked.克数} 克（${picked.行内热量}），合计 ${beforePick} → ${picked.合计} kcal`);
-    if (Number(picked.克数) !== tierGrams) problems.push(`点档位没有把克数改成档位上的数（点了 ${tierGrams}，实际 ${picked.克数}）`);
-    if (beforePick === picked.合计) problems.push('换档位后合计热量没有跟着变');
-    if (picked.追问还在) problems.push('选完档位追问没有收起来（会一直问用户同一句）');
-  }
-
-  // 改份量：把第一条改成 800 克，看合计有没有跟着变
-  const before = await evaluate(`document.querySelector('#draftHost .row.between b')?.textContent`);
-  const changeRes = await evaluate(`(() => {
-    const inp = document.querySelector('#draftHost .draft-grams');
-    if (!inp) {
-      // 报出真实 DOM，方便判断是结构变了还是元素真没了
-      return { ok: false, html: (document.querySelector('#draftHost')?.innerHTML || '').replace(/\s+/g, ' ').slice(0, 200) };
-    }
-    inp.value = '800';
-    inp.dispatchEvent(new Event('input', { bubbles: true }));
-    return { ok: true };
-  })()`);
-  if (!changeRes.ok) {
-    console.log('   ❌ 找不到份量输入框，弹层实际内容：', changeRes.html);
-    problems.push('弹层里找不到份量输入框（.draft-grams）');
-  }
-  await sleep(200);
-  const after = await evaluate(`document.querySelector('#draftHost .row.between b')?.textContent || '(没找到合计)'`);
-  console.log(`✅ 改份量后合计从 ${before} 变成 ${after} kcal`);
-  if (before === after) problems.push('改份量没有重算热量');
-
-  // 换餐次并记入
-  await evaluate(`document.querySelector('#draftMeal [data-meal="dinner"]').click()`);
-  await evaluate(`document.querySelector('#draftSave').click()`);
-  await sleep(500);
-  const saved = await evaluate(`(() => {
-    const st = JSON.parse(localStorage.getItem('fatloss.state.v2'));
-    const day = st.days[Object.keys(st.days)[0]];
-    const dinner = day.meals.dinner || [];
-    return {
-      餐次: 'dinner',
-      条数: dinner.length,
-      条目: dinner.map((e) => e.food.name + ' ' + e.grams + 'g'),
-      今天的总条数: Object.values(day.meals).flat().length,
-    };
-  })()`);
-  console.log(`✅ 记入晚餐：${saved.条目.join('、')}`);
-  if (saved.条数 === 0) problems.push('点「记上」之后没有写进记录');
-
-  const shot1 = await client.send('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(path.join(outDir, 'shot-quicklog.png'), Buffer.from(shot1.data, 'base64'));
-
-  // 再看「今天」页有没有正确汇总
-  await evaluate(`document.querySelector('.tab[data-view="today"]').click()`);
-  await sleep(400);
-  const todayInfo = await evaluate(`(() => ({
-    已吃: document.querySelector('.hero .sub')?.textContent || null,
-    晚餐行: [...document.querySelectorAll('.card')].find((c) => c.textContent.includes('晚餐'))?.textContent.replace(/\\s+/g, ' ').slice(0, 60) || null,
-  }))()`);
-  console.log(`✅ 今天页：${todayInfo.已吃}`);
-  if (!todayInfo.晚餐行 || !todayInfo.晚餐行.includes('牛肉面')) problems.push('「今天」页没有显示刚记的晚餐');
-
-  // 反过来：份量说得清清楚楚时，界面不许因为这次改动多出任何东西（不能变啰嗦）
-  await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
-  await sleep(400);
-  await evaluate(`(() => {
-    const ta = document.querySelector('#quickText');
-    ta.value = '中午吃了200克米饭和两个鸡蛋';
-    document.querySelector('#quickParse').click();
-  })()`);
-  await waitFor(() => evaluate(`document.querySelectorAll('#draftHost .entry').length || null`), { what: '第二次解析结果（都说清了的例句）' });
-  const noNoise = await evaluate(`(() => ({
+  const draft = await evaluate(`(() => ({
+    弹层标题: document.querySelector('#sheetTitle')?.textContent || null,
     条数: document.querySelectorAll('#draftHost .entry').length,
-    追问块: document.querySelectorAll('#draftHost [data-guess]').length,
-    猜的标记: [...document.querySelectorAll('#draftHost .entry .tag')].filter((t) => t.textContent.includes('猜的')).length,
+    说明: (document.querySelector('#draftHost .warn')?.textContent || '').replace(/\\s+/g, ' ').trim(),
+    重试按钮: document.querySelector('#draftRetryAi')?.textContent.trim() || '',
+    有确认按钮: !!document.querySelector('#draftSave'),
+    有手动入口: !!document.querySelector('#draftManual'),
+    有例句: document.querySelectorAll('#draftExamples [data-example]').length,
   }))()`);
-  console.log(noNoise.追问块 === 0
-    ? `✅ 都说清了（200克米饭 + 两个鸡蛋）就不问：${noNoise.条数} 条，一个追问都没有`
-    : `❌ 说清楚了还要问：${noNoise.追问块} 条`);
-  if (noNoise.追问块 !== 0 || noNoise.猜的标记 !== 0) problems.push('份量说得清楚时不该反问用户（多出了追问）');
+  console.log(inSheet ? '✅ 没配 AI 时也用弹层说清楚' : '❌ 说明没在弹层里');
+  console.log(`   弹层标题：「${draft.弹层标题}」`);
+  console.log(`   说明：${draft.说明}`);
+  console.log(`   按钮：「${draft.重试按钮}」｜手动记 ${draft.有手动入口}｜例句 ${draft.有例句} 条`);
+  if (!draft.说明.includes('还没配置 AI')) problems.push('没配 AI 时没说清是「还没配置 AI」');
+  if (draft.条数 !== 0) problems.push(`没配 AI 却解析出了 ${draft.条数} 条（不能假装解析）`);
+  if (draft.有确认按钮) problems.push('没配 AI 却给了「记上」按钮（0 条也能记 = 假记录）');
+  if (draft.重试按钮 !== '去配 AI') problems.push(`没配 AI 时按钮应当指路配置，实际「${draft.重试按钮}」`);
+  if (!draft.有手动入口) problems.push('没配 AI 时没有「手动搜食物记一笔」的退路');
+
+  // 点「去配 AI」：应当直接打开 AI 设置（带 5 分钟教程）
+  await evaluate(`document.querySelector('#draftRetryAi')?.click()`);
+  await sleep(500);
+  const aiSheet = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    有教程: !!document.querySelector('#aiKeyGuide'),
+  }))()`);
+  console.log(`✅ 点「去配 AI」→「${aiSheet.标题}」（教程 ${aiSheet.有教程}）`);
+  if (aiSheet.标题 !== 'AI 设置') problems.push('点「去配 AI」没有打开 AI 设置');
+  if (!aiSheet.有教程) problems.push('AI 设置里没有 5 分钟教程');
   await evaluate(`document.querySelector('#sheetClose')?.click()`);
   await sleep(300);
 
@@ -578,16 +468,19 @@ async function main() {
   await sleep(300);
 
   // 记一笔，看有没有「记完的反馈」提示条
+  // 没配 AI 时「说一句」不会产出条目，这里走真人也用的手动路径：加一笔 → 只填热量
   // 注意：必须显式回到「记录」页并等输入框出现 —— 上面几步把页面切到了今天页，
   // 而记录页现在还有「吃的/练的」分段，不能假设输入框一定在（踩过：脚本自己报了空指针）
   await ensureOnLogPage(evaluate);
+  await evaluate(`[...document.querySelectorAll('[data-act="add-food"]')].find((b) => b.dataset.meal === 'lunch')?.click()`);
+  await sleep(500);
+  await evaluate(`document.querySelector('#foodPaneChips [data-pane="kcal"]')?.click()`);
+  await sleep(300);
   await evaluate(`(() => {
-    const ta = document.querySelector('#quickText');
-    ta.value = '中午吃了一碗米饭';
-    document.querySelector('#quickParse').click();
+    document.querySelector('#kcalName').value = '一小碗米饭';
+    document.querySelector('#kcalValue').value = '200';
+    document.querySelector('#kcalSave').click();
   })()`);
-  await sleep(1200);
-  await evaluate(`document.querySelector('#draftSave')?.click()`);
   await sleep(800);
   const afterSave = await evaluate(`(() => {
     const all = [...document.querySelectorAll('.toast')];
@@ -631,13 +524,12 @@ async function main() {
   const settings = await evaluate(`(() => ({
     标题: document.querySelector('#sheetTitle')?.textContent || '',
     条目: [...document.querySelectorAll('.set-row .set-main b')].map((e) => e.textContent.trim()),
+    文本: document.querySelector('#sheetBody')?.textContent || '',
+    有模式切换: !!document.querySelector('.mode-chip, .mode-switch, [data-usage-mode]'),
   }))()`);
-  const modes = await evaluate(`[...document.querySelectorAll('.mode-chip')].map((e) => e.querySelector('b').textContent.trim() + (e.classList.contains('on') ? '(当前)' : ''))`);
   console.log(`✅ 设置页：「${settings.标题}」包含 ${settings.条目.join('、')}`);
-  console.log(`   使用模式：${modes.join(' / ')}`);
-  if (!modes.some((m) => m.includes('普通模式'))) problems.push('设置页没有「普通模式」选项');
-  if (!modes.some((m) => m.includes('AI 模式'))) problems.push('设置页没有「AI 模式」选项');
-  if (!modes.some((m) => m.includes('当前') && m.includes('普通'))) problems.push('默认应当是普通模式（大多数人不会配 API）');
+  if (settings.有模式切换) problems.push('设置里还残留模式切换');
+  if (/普通模式/.test(settings.文本)) problems.push('设置里还能看到「普通模式」字样');
   for (const must of ['AI 设置', '数据与备份', '你的资料', '关于']) {
     if (!settings.条目.includes(must)) problems.push(`设置页缺少「${must}」`);
   }
@@ -701,7 +593,7 @@ async function main() {
   await evaluate(`document.querySelector('#sheetClose')?.click()`);
   await sleep(300);
 
-  console.log('\n=== 一·八、教练（普通模式，没配 AI） ===');
+  console.log('\n=== 一·八、教练（没配 AI，给本地建议） ===');
   const coachEntry = await evaluate(`(() => {
     const btn = document.querySelector('[data-act="coach"]');
     return { 有入口: !!btn, 文案: btn ? btn.textContent.trim() : '' };
@@ -763,35 +655,31 @@ async function main() {
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     document.querySelector('#foodSayParse').click();
   })()`);
-  await waitFor(() => evaluate(`document.querySelectorAll('#draftHost .entry').length || null`), { what: '说一句的解析结果出现' });
+  await waitFor(() => evaluate(`document.querySelector('#draftHost .warn') ? true : null`), { what: '说一句的「还没配 AI」说明' });
   const sayDraft = await evaluate(`(() => ({
     标题: document.querySelector('#sheetTitle')?.textContent || '',
     条数: document.querySelectorAll('#draftHost .entry').length,
-    餐次: [...document.querySelectorAll('#draftMeal .chip.on')].map((b) => b.dataset.meal).join(','),
+    说明: (document.querySelector('#draftHost .warn')?.textContent || '').replace(/\\s+/g, ' ').trim(),
+    重试按钮: document.querySelector('#draftRetryAi')?.textContent.trim() || '',
+    有记上: !!document.querySelector('#draftSave'),
   }))()`);
-  console.log(`✅ 解析结果：${sayDraft.条数} 条｜默认餐次 ${sayDraft.餐次}`);
-  // 关键：从「加到午餐」说出来，默认就该是午餐，不用用户再选一次
-  if (sayDraft.餐次 !== 'lunch') problems.push(`从「加到午餐」进来说一句，默认餐次却是「${sayDraft.餐次}」`);
+  console.log(`✅ 说一句（没配 AI）：${sayDraft.条数} 条｜「${sayDraft.重试按钮}」｜${sayDraft.说明}`);
+  if (sayDraft.条数 !== 0) problems.push(`没配 AI 却解析出 ${sayDraft.条数} 条`);
+  if (sayDraft.有记上) problems.push('没配 AI 却给了「记上」按钮');
+  if (!sayDraft.说明.includes('还没配置 AI')) problems.push('加食物弹层里的「说一句」没说明还没配 AI');
+  if (sayDraft.重试按钮 !== '去配 AI') problems.push('加食物弹层里的「说一句」没有指路 AI 设置');
 
-  await evaluate(`document.querySelector('#draftSave').click()`);
-  await sleep(600);
-  const lunchSaved = await evaluate(`(() => {
-    const st = JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}');
-    const key = new Date().toLocaleDateString('sv-SE');
-    const meals = st.days?.[key]?.meals || {};
-    return {
-      午餐: (meals.lunch || []).length,
-      其他: Object.entries(meals).filter(([k]) => k !== 'lunch').map(([k, v]) => k + ':' + v.length).join(','),
-    };
-  })()`);
-  console.log(`✅ 落库：午餐 ${lunchSaved.午餐} 条｜其他餐 ${lunchSaved.其他 || '（没有）'}`);
-  if (lunchSaved.午餐 < 2) problems.push(`说一句记到午餐失败：午餐只有 ${lunchSaved.午餐} 条`);
-  // 关掉可能还开着的庆祝层
-  for (let i = 0; i < 6; i++) {
-    const n = await evaluate(`(() => { const bs = [...document.querySelectorAll('#celebrateOk')]; bs.forEach((b) => b.click()); return bs.length; })()`);
-    if (!n) break;
-    await sleep(300);
-  }
+  // 这个入口也要能一键去配：点完应当打开 AI 设置（带教程）
+  await evaluate(`document.querySelector('#draftRetryAi')?.click()`);
+  await sleep(500);
+  const sayAiSheet = await evaluate(`(() => ({
+    标题: document.querySelector('#sheetTitle')?.textContent || '',
+    有教程: !!document.querySelector('#aiKeyGuide'),
+  }))()`);
+  console.log(`✅ 点「去配 AI」→「${sayAiSheet.标题}」（教程 ${sayAiSheet.有教程}）`);
+  if (sayAiSheet.标题 !== 'AI 设置') problems.push('从加食物弹层点「去配 AI」没有打开 AI 设置');
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(300);
 
   console.log('\n=== 一·九·二、只填热量：外面吃的、没包装的那一顿 ===');
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
@@ -833,7 +721,7 @@ async function main() {
     const st = JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}');
     const key = new Date().toLocaleDateString('sv-SE');
     const items = (st.days?.[key]?.meals?.lunch) || [];
-    const hit = items.find((e) => e.food && e.food.kcalOnly);
+    const hit = items.find((e) => e.food && e.food.name === '楼下的牛肉面');
     return hit ? { 名称: hit.food.name, 千卡: hit.food.kcal, 蛋白: hit.food.protein, 克数: hit.grams } : null;
   })()`);
   console.log(`✅ 落库：${kcalSaved ? `${kcalSaved.名称} ${kcalSaved.千卡} kcal / 蛋白 ${kcalSaved.蛋白} g（内部克数 ${kcalSaved.克数}）` : '没找到'}`);
@@ -860,42 +748,47 @@ async function main() {
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
   await sleep(400);
 
-  console.log('\n=== 一·十、模式切换不再藏在设置里（issue #8）===');
+  console.log('\n=== 一·十、不用再切模式：记录页胶囊直接进 AI 设置（v42）===');
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);
   await sleep(450);
   const pill = await evaluate(`(() => {
     const b = document.querySelector('#usageModeBtn');
-    return { 有胶囊: !!b, 文案: b ? b.textContent.replace(/\s+/g, '').trim() : '' };
+    return {
+      有胶囊: !!b,
+      文案: b ? b.textContent.replace(/\s+/g, '').trim() : '',
+      有旧模式入口: !!document.querySelector('[data-act="usage-mode"], [data-usage-mode]'),
+    };
   })()`);
   console.log(`   记录页胶囊：「${pill.文案}」`);
-  if (!pill.有胶囊) problems.push('记录页没有模式胶囊');
-  if (!/普通模式|AI 模式/.test(pill.文案)) problems.push(`模式胶囊没说清当前是哪种模式：${pill.文案}`);
+  if (!pill.有胶囊) problems.push('记录页没有 AI 状态胶囊');
+  if (!/AI 已开启|还没配 AI/.test(pill.文案)) problems.push(`胶囊没说清 AI 状态：${pill.文案}`);
+  if (pill.有旧模式入口) problems.push('记录页还残留旧的模式切换入口');
 
   await evaluate(`document.querySelector('#usageModeBtn')?.click()`);
-  await sleep(400);
-  const modeSheet = await evaluate(`(() => ({
+  await sleep(500);
+  const aiSettingsSheet = await evaluate(`(() => ({
     标题: document.querySelector('#sheetTitle')?.textContent || '',
-    选项: [...document.querySelectorAll('#usageModeChips [data-usage-mode]')].map((b) => b.dataset.usageMode + (b.classList.contains('on') ? '(选中)' : '')),
+    有教程: !!document.querySelector('#aiKeyGuide'),
   }))()`);
-  console.log(`   模式弹层：「${modeSheet.标题}」｜${modeSheet.选项.join(' / ')}`);
-  if (!modeSheet.标题.includes('模式')) problems.push('点模式胶囊没有打开模式弹层');
-  if (modeSheet.选项.length !== 2) problems.push('模式弹层没有两个选项');
-  const shotMode = await client.send('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(path.join(outDir, 'shot-mode-sheet.png'), Buffer.from(shotMode.data, 'base64'));
-  await evaluate(`document.querySelector('#usageModeClose')?.click()`);
-  await sleep(250);
+  console.log(`   点胶囊 →「${aiSettingsSheet.标题}」（教程 ${aiSettingsSheet.有教程}）`);
+  if (aiSettingsSheet.标题 !== 'AI 设置') problems.push('点状态胶囊没有打开 AI 设置');
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(300);
 
-  // 「我」页顶部也要有这张卡
+  // 「我」页顶部就是 AI 设置入口，没有模式卡片
   await evaluate(`document.querySelector('.tab[data-view="progress"]').click()`);
   await sleep(500);
   const meCard = await evaluate(`(() => {
-    const row = document.querySelector('[data-act="usage-mode"]');
-    return { 有卡: !!row, 文案: row ? row.textContent.replace(/\s+/g, ' ').trim() : '' };
+    const row = document.querySelector('[data-act="ai-settings"]');
+    return {
+      有卡: !!row,
+      文案: row ? row.textContent.replace(/\s+/g, ' ').trim() : '',
+      有旧模式卡: !!document.querySelector('[data-act="usage-mode"]'),
+    };
   })()`);
-  console.log(`   「我的」页顶部：${meCard.有卡 ? `「${meCard.文案}」` : '没有模式卡'}`);
-  const shotMe = await client.send('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(path.join(outDir, 'shot-me-mode.png'), Buffer.from(shotMe.data, 'base64'));
-  if (!meCard.有卡) problems.push('「我的」页顶部没有使用模式卡');
+  console.log(`   「我的」页顶部：${meCard.有卡 ? `「${meCard.文案}」` : '没有 AI 设置卡'}`);
+  if (!meCard.有卡) problems.push('「我的」页顶部没有 AI 设置入口');
+  if (meCard.有旧模式卡) problems.push('「我的」页还残留模式卡');
   await evaluate(`document.querySelector('.tab[data-view="today"]').click()`);
   await sleep(350);
 
@@ -1259,9 +1152,9 @@ async function main() {
     for (const p of problems) console.log('  -', p);
     process.exitCode = 1;
   } else {
-    console.log('✅ 说一句记录 + 按器械换动作 + 运动记录（含「额度不许变」的红线），三条流程都跑通');
+    console.log('✅ 没配 AI 的提示 + 手动记一笔 + 按器械换动作 + 运动记录（含「额度不许变」的红线），几条流程都跑通');
   }
-  console.log(`截图：${outDir}/shot-quicklog.png、shot-portion.png（份量反问那块）、shot-cardio.png、shot-training.png（练的那一半）`);
+  console.log(`截图：${outDir}/shot-quicklog.png、shot-cardio.png、shot-training.png（练的那一半）`);
   void errors;
   finishAndExit(process.exitCode || 0, [() => client.close(), () => chrome.kill()]);
 }

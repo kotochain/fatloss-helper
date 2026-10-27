@@ -17,7 +17,7 @@ import {
   resolveTrainingAction, logTraining, describeTraining, estimateTrainingKcal,
 } from './exercise.js';
 import {
-  parseDescription, normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
+  normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
   gramsFromText, portionGrams, cachedOnlyMatch, findPortion, gramsForPortion,
 } from './mealparse.js';
 import {
@@ -478,7 +478,7 @@ function handleAction(act, data) {
     case 'growth': return openGrowthSheet();
     case 'insights': return openInsightsSheet();
     case 'coach': return openCoachSheet();
-    case 'usage-mode': return openModeSheet();
+    case 'ai-settings': return openAiSettingsSheet();
     case 'crash-retry': view = view || 'today'; return render();
     case 'crash-other': return goView('today');
     case 'crash-export': return exportData();
@@ -565,8 +565,8 @@ function handleAction(act, data) {
    引导要解决三件事，一件都不能少：
      1) 让用户知道「这工具是干嘛的、数据在哪」（信任）
      2) 拿到算目标需要的几个数字（不然什么都算不出来）
-     3) **让用户选模式**（普通 / AI）—— 这是产品决定：模式在开始就选，
-        不要藏在设置的角落里。默认普通模式，因为大多数人不会去配 API。
+     3) **让用户知道要配 AI**（以及不配也能手动记）—— 配置入口在开始就给，
+        不要藏在设置的角落里。
    最后一定要让用户**记下第一笔**再结束 —— 空着的应用用户不会再打开第二次。
    ─────────────────────────────────────────── */
 
@@ -620,44 +620,36 @@ function onboardIntro(review = false) {
 
 function onboardMode(t, review = false) {
   const kcal = t ? Math.round(t.targetCalories / 10) * 10 : null;
+  const cfg = currentAiConfig();
   openSheet({
-    title: '选一个模式',
+    title: '用 AI 帮你记',
     body: `
       <div class="onboard-step">3 / 4</div>
-      ${kcal ? `<div class="warn info">你每天的目标大约是 <b>${kcal} kcal</b>。下面两种模式都能用这个目标。</div>` : ''}
-      ${review ? `<p class="tiny muted">现在是<b>${useMode() === 'ai' ? 'AI 模式' : '普通模式'}</b>，想换就点另一个。</p>` : ''}
-      <button class="mode-chip big" data-pick="basic">
-        <b>普通模式</b>
-        <em>不用配任何东西，打开就能用。
-          说一句话照样记得上、餐单和运动方案照样给、每天还能看到你自己的规律。
-          全部在这台手机上算，断网也能用。</em>
-        <span class="mode-tag">推荐先用这个</span>
-      </button>
-      <button class="mode-chip big" data-pick="ai">
-        <b>AI 模式</b>
-        <em>多一个 AI 帮你听懂更随意的说法（「随便吃了点」这种），教练建议也更具体。
-          需要你自己去申请一个 API 密钥填进来（设置里有 5 分钟教程，照着点就行）。
-          数字还是本地算 —— AI 只负责怎么说话。</em>
-        <span class="mode-tag ghost">要多一步设置</span>
-      </button>
-      <p class="tiny muted" style="margin-top:10px">
-        随时可以在「我的 → 设置」里换，不会丢数据。
-      </p>`,
-    onMount: (body) => {
-      body.querySelectorAll('[data-pick]').forEach((el) => {
-        el.addEventListener('click', () => {
-          const pick = el.dataset.pick;
-          state.settings = { ...(state.settings || {}), mode: pick };
-          save();
-          if (pick === 'ai') {
-            // 选 AI 就直接带用户去配密钥，别让用户自己找
-            closeSheet();
-            openAiSettingsSheet({ then: () => onboard({ step: 'first', review }) });
-          } else {
-            onboard({ step: 'first', review });
-          }
-        });
+      ${kcal ? `<div class="warn info">你每天的目标大约是 <b>${kcal} kcal</b>。</div>` : ''}
+      <div class="onboard-h">
+        <b>说一句，AI 帮你听懂</b>
+        <p>「中午在食堂吃了碗牛肉面，加了个蛋」—— 说人话就行。份量含糊时 AI 会问一句，
+        你也可以直接说「我也不知道」，它会按常见份量估。</p>
+      </div>
+      <div class="onboard-h">
+        <b>需要一个 API 密钥</b>
+        <p>AI 由你自己选的服务商提供（推荐 DeepSeek，便宜、国内直连）。
+        填密钥的地方有 <b>5 分钟教程</b>，从注册到粘贴一步一步写好了，不用懂技术。</p>
+      </div>
+      <div class="onboard-h">
+        <b>没配好也能手动记</b>
+        <p>搜食物、只填热量、照包装营养成分表，都不需要 AI。配好之后「说一句」才可用。</p>
+      </div>`,
+    foot: `
+      <button class="btn block" id="obAi">${cfg.configured ? '已经配好了，继续' : '去配置 AI（有教程）'}</button>
+      <button class="btn ghost block" style="margin-top:8px" id="obSkip">先跳过，手动记</button>`,
+    onMount: (_b, foot) => {
+      $('#obAi', foot).addEventListener('click', () => {
+        closeSheet();
+        if (cfg.configured) onboard({ step: 'first', review });
+        else openAiSettingsSheet({ then: () => onboard({ step: 'first', review }) });
       });
+      $('#obSkip', foot).addEventListener('click', () => onboard({ step: 'first', review }));
     },
   });
 }
@@ -1059,9 +1051,8 @@ function renderFoodPane() {
   return `
     <div class="card">
       <div class="card-title">说一句就记上
-        <!-- 这里是「模式」不是「AI 配置」：用户每天可能都想换一句谁来听，不该藏在设置里 -->
-        <button class="mode-pill" id="usageModeBtn" title="切换使用模式">
-          ${useMode() === 'ai' ? 'AI 模式' : '普通模式'}<span class="mode-pill-go">›</span>
+        <button class="mode-pill" id="usageModeBtn" title="AI 设置">
+          ${ai.configured ? 'AI 已开启' : '还没配 AI'}<span class="mode-pill-go">›</span>
         </button>
       </div>
       <textarea id="quickText" rows="3" placeholder="今天吃了什么？例如：中午吃了碗牛肉面，加了个蛋"></textarea>
@@ -1130,7 +1121,7 @@ function bindFoodPane() {
   $('#customFoodBtn').addEventListener('click', () => openLabelSheet());
   bindQuickLog();
   // 模式胶囊在「说一句」卡片右上角：点它就是切模式（不是跳 AI 配置，那是两件事）
-  $('#usageModeBtn')?.addEventListener('click', openModeSheet);
+  $('#usageModeBtn')?.addEventListener('click', () => openAiSettingsSheet());
   app.querySelectorAll('[data-act="quick-add"]').forEach((el) => {
     el.addEventListener('click', () => {
       const food = [...state.customFoods, ...FOODS].find((f) => f.id === el.dataset.id);
@@ -1374,7 +1365,7 @@ function bindTrainingPane() {
 }
 
 /* ── 「说一句就记上」流程 ─────────────────────
-   流程：用户说一句话 → 解析（AI 优先，失败退回离线）→ 展示条目让用户确认/改 → 记进当天
+   流程：用户说一句话 → AI 解析 → 展示条目让用户确认/改 → 记进当天
    关键原则：解析结果永远先给用户看，不直接记账；AI 只负责听懂，热量由本地食物库算。
    ─────────────────────────────────────────── */
 
@@ -1390,7 +1381,7 @@ function bindQuickLog() {
     const text = input.value.trim();
     if (!text) return toast('先写一句你吃了什么。');
     btn.disabled = true;
-    btn.textContent = aiOn() ? 'AI 正在解析…' : '正在解析…';
+    btn.textContent = 'AI 正在解析…';
     try {
       await runQuickParse(text);
     } finally {
@@ -1414,7 +1405,7 @@ function openDraftSheet() {
   });
 }
 
-async function runQuickParse(text, mealOverride = null, { forceAi = false } = {}) {
+async function runQuickParse(text, mealOverride = null) {
   // 餐次优先级：调用方指定（「加到午餐」里说的）> 今天页那个按钮带的提示 > 按时钟猜
   const meal = mealOverride || quickMealHint || guessMeal();
   let items = [];
@@ -1422,42 +1413,60 @@ async function runQuickParse(text, mealOverride = null, { forceAi = false } = {}
   // AI 的追问和本地「份量没说清」的问题分开存：前者可以答「不知道」让 AI 自己估，
   // 后者直接就是本地估算的档位按钮，两件事混在一起界面会分不清该给哪种操作。
   let aiQuestions = [];
-  let leftover = '';
-  let source = 'offline';
+  let source = 'ai';
   let aiError = null;
   let aiNote = null;
   let unmatchedItems = [];
   let normEstimated = [];
   let normAiEstimated = [];
 
-  if (forceAi || aiOn()) {
-    /*
-     * v34：这句话如果只涉及「你之前存过的菜」（上次 AI 估过、已经存成我的食物），
-     * 本地就能说清，不再花一次 AI 请求 —— 这是「下次同名直接命中」的兑现方式。
-     * 判定很保守：除了名字只剩份量/餐次/口语词才走这里；有别的吃的就照常问 AI（见 cachedOnlyMatch）。
-     */
-    // 点「用 AI 重新解析」必须真的走 AI：命中「我的食物」就停下来的话，点重试等于没点
-    const cached = forceAi ? null : cachedOnlyMatch(text, state.customFoods);
-    if (cached) {
-      const food = cached.food;
-      const portion = findPortion(text);
-      let grams = (portion && gramsForPortion(food, portion)) || food.servings?.[0]?.[1] || 100;
-      grams = Math.max(1, Math.min(Math.round(grams), 3000));
-      const nut = calcEntry(food, grams);
-      items = [{
-        name: food.name,
-        grams,
-        kcal: nut.kcal, protein: nut.protein, fat: nut.fat, carb: nut.carb,
-        confidence: 'high',
-        needsConfirm: false,
-        source: 'my-food',
-        foodId: food.id,
-        note: '按你之前存的算的（这次没花 AI 请求）',
-      }];
-      source = 'cache';
-    } else {
-      const res = await askAi(text, { meal });
-      if (res.ok && res.items.length) {
+  // 产品只有 AI 一种模式：没配密钥就明说，并把「去配置」放在最前面。
+  // 不静默退回本地词表 —— 用户看到「没认出来」会以为是 AI 不行。
+  if (!aiOn()) {
+    draft = {
+      text,
+      meal,
+      items: [],
+      questions: [],
+      aiQuestions: [],
+      source: 'offline',
+      aiError: null,
+      noAi: true,
+      note: null,
+      unmatchedItems: [],
+      estimated: [],
+      aiEstimated: [],
+    };
+    openDraftSheet();
+    return;
+  }
+
+  /*
+   * v34：这句话如果只涉及「你之前存过的菜」（上次 AI 估过、已经存成我的食物），
+   * 本地就能说清，不再花一次 AI 请求 —— 这是「下次同名直接命中」的兑现方式。
+   * 判定很保守：除了名字只剩份量/餐次/口语词才走这里；有别的吃的就照常问 AI（见 cachedOnlyMatch）。
+   */
+  const cached = cachedOnlyMatch(text, state.customFoods);
+  if (cached) {
+    const food = cached.food;
+    const portion = findPortion(text);
+    let grams = (portion && gramsForPortion(food, portion)) || food.servings?.[0]?.[1] || 100;
+    grams = Math.max(1, Math.min(Math.round(grams), 3000));
+    const nut = calcEntry(food, grams);
+    items = [{
+      name: food.name,
+      grams,
+      kcal: nut.kcal, protein: nut.protein, fat: nut.fat, carb: nut.carb,
+      confidence: 'high',
+      needsConfirm: false,
+      source: 'my-food',
+      foodId: food.id,
+      note: '按你之前存的算的（这次没花 AI 请求）',
+    }];
+    source = 'cache';
+  } else {
+    const res = await askAi(text, { meal });
+    if (res.ok && res.items.length) {
       const norm = normalizeAiItems(
         { meal: res.meal || meal, items: res.items, questions: res.questions },
         meal,
@@ -1471,32 +1480,12 @@ async function runQuickParse(text, mealOverride = null, { forceAi = false } = {}
       if (norm.items.length) {
         items = norm.items;
         aiQuestions = norm.questions;
-        // **只有真的有条目落到本地库，才算「AI 识别」。**
-        // 以前这里先写 source='ai' 再判断：AI 返回的名字一个都匹配不上时，
-        // 下面会走离线兜底，于是离线解析出来的条目被标成「AI 识别」—— 来源造假。
         source = 'ai';
         if (res.note) aiNote = res.note;
       }
-      } else {
-        aiError = res.error || 'AI 没解析出内容';
-      }
+    } else {
+      aiError = res.error || 'AI 没解析出内容';
     }
-  }
-
-  if (!items.length) {
-    // 离线兜底（AI 没开、或者 AI 没解析出东西时都走这里）
-    const local = parseDescription(text, meal);
-    items = local.items;
-    if (local.unknown.length) {
-      questions = questions.concat(local.unknown.map((u) => `「${u}」不在本地清单里；用 AI 重新解析，任何食物都能估。`));
-    }
-    /*
-     * v35（issue #13）：认出来一部分、还有没认出来的字 —— 以前不吭声，用户以为整句都记上了。
-     * 现在问一句（不拦着记，已认出的照样能保存）。
-     */
-    // 本地清单认不全时把没覆盖的片段带出去。注意这不是「AI 没认出来」：
-    // AI 正常工作时走不到这里，只有普通模式或 AI 请求失败才会用本地清单。
-    if (items.length && local.leftover) leftover = local.leftover;
   }
 
   for (const it of items) {
@@ -1509,7 +1498,6 @@ async function runQuickParse(text, mealOverride = null, { forceAi = false } = {}
     items,
     questions: [...new Set(questions)].slice(0, 4),
     aiQuestions: [...new Set(aiQuestions)].slice(0, 2),
-    leftover,
     source,
     aiError,
     note: aiNote,
@@ -1552,23 +1540,20 @@ function applyDraftGrams(box, idx, grams) {
 /**
  * 「用 AI 重新解析这一句」。
  *
- * 只会出现在两种「本地清单兜底」的情况：普通模式，或者 AI 这次没连上。
- * 普通模式下点它要先确认一次 —— 普通模式承诺「不联网、不花钱」，不能因为用户点了
- * 一个按钮就偷偷发请求；用户明确同意才走。
+ * 只在「AI 没连上」时出现；没配 AI 时按钮变成「去配 AI」。
  */
 async function retryWithAi() {
   if (!draft) return;
   const meal = draft.meal;
   const original = draft.text;
-  if (!ai.configured) {
+  if (!aiOn()) {
     closeSheet();
     openAiSettingsSheet();
     return;
   }
-  if (!aiOn() && !confirm('这一步会用 AI 重新解析这一句，会发一次请求（可能产生费用）。继续吗？')) return;
   draft = null;
   closeSheet();
-  await runQuickParse(original, meal, { forceAi: true });
+  await runQuickParse(original, meal);
 }
 
 /** 把解析结果画成「可以改的清单」 */
@@ -1585,9 +1570,11 @@ function drawDraft() {
     const canRetry = Boolean(ai.configured);
     box.innerHTML = `
       <div class="warn" style="margin-top:10px">
-        ${draft.aiError
-          ? `这句没能记上：AI 没连上（${esc(draft.aiError)}），本地清单里也没有认得的食物。`
-          : '这句没能记上：普通模式只认本地清单，里面没有认得的食物。'}
+        ${draft.noAi
+          ? '还没配置 AI，所以这句话还没解析。配好后说一句话就能记；也可以先手动记一笔。'
+          : (draft.aiError
+            ? `这句没能记上：AI 没连上（${esc(draft.aiError)}）。检查网络或密钥后再试一次。`
+            : '这句没能记上：AI 这次没解析出食物。可以换个说法再试，或者手动记一笔。')}
       </div>
       <p class="tiny muted" style="margin:0 0 8px">
         ${canRetry
@@ -1636,12 +1623,8 @@ function drawDraft() {
     <div class="warn ${draft.source === 'ai' ? 'info' : ''}" style="margin-top:10px">
       这次是：${draft.source === 'ai'
         ? 'AI 认出来的'
-        : (draft.source === 'cache' ? '用的是你之前存过的食物（没花 AI 请求）' : '离线认出来的（常见说法）')}
-      ${draft.aiError
-        ? (draft.source === 'ai'
-          ? `｜AI 这次没成功：${esc(draft.aiError)}`
-          : `｜AI 没接上：${esc(draft.aiError)}。这次先用离线识别记上了，常见说法离线也能认。`)
-        : ''}
+        : (draft.source === 'cache' ? '用的是你之前存过的食物（没花 AI 请求）' : '本地记的')}
+      ${draft.aiError ? `｜AI 这次没成功：${esc(draft.aiError)}` : ''}
       ${draft.note ? `<br>${esc(draft.note)}` : ''}
     </div>
     ${(draft.aiEstimated || []).length ? `<div class="warn" style="margin-bottom:6px">
@@ -1662,11 +1645,6 @@ function drawDraft() {
           <button class="chip" type="button" data-aiq-skip="${i}">我也不知道，你按常见的估</button>
         </div>
       </div>`).join('')}
-    ${draft.leftover ? `<div class="warn info" style="margin-bottom:6px">
-      ${draft.aiError ? '本地清单里没有' : '普通模式只用了本地清单，里面没有'}「<b>${esc(draft.leftover)}</b>」。
-      ${ai.configured ? '用 AI 重新解析这一句，AI 能估任何食物。' : '配好 AI 之后，任何食物都能估。'}
-    </div>
-    <button class="btn ghost block" style="margin-bottom:8px" id="draftRetryAi">${ai.configured ? '用 AI 重新解析这一句' : '去配 AI'}</button>` : ''}
     ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
     <div style="margin-top:8px">
       ${draft.items.map((it, i) => `
@@ -1708,8 +1686,6 @@ function drawDraft() {
     </div>
     ${needsCheck ? '<p class="tiny muted" style="margin:8px 0 0">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
 
-  // 本地清单没覆盖到的东西：一键把原句重新交给 AI，用户在普通模式下会先被问一句
-  $('#draftRetryAi', box)?.addEventListener('click', retryWithAi);
   // AI 追问：补一句就带着原句重新估；点「不知道」就按现有估算记，问题当场消失。
   // 「不知道」只有用户有资格说 —— 点了之后 AI 不再追问，数字用它已经估好的那份。
   box.querySelectorAll('[data-aiq-send]').forEach((btn) => {
@@ -1724,7 +1700,7 @@ function drawDraft() {
       const merged = `${draft.text}（补充说明：${q}${answer}）`;
       draft = null;
       closeSheet();
-      await runQuickParse(merged, meal, { forceAi: true });
+      await runQuickParse(merged, meal);
     });
   });
   box.querySelectorAll('[data-aiq-skip]').forEach((btn) => {
@@ -2113,16 +2089,16 @@ function renderProgress() {
   const max = Math.max(...list.map((w) => w.kg), 1);
   const min = Math.min(...list.map((w) => w.kg), max - 1);
 
-  const mode = useMode();
+  const aiCfg = currentAiConfig();
   app.innerHTML = `
-    <button class="set-row" data-act="usage-mode">
+    <button class="set-row" data-act="ai-settings">
       <span class="set-main">
-        <b>使用模式</b>
-        <em>${mode === 'ai'
-          ? 'AI 模式：说一句由模型听懂（要联网、要密钥）'
-          : '普通模式：内置规则算，不联网也能用'}</em>
+        <b>AI 设置</b>
+        <em>${aiCfg.configured
+          ? `说一句由 AI 听懂：${esc(aiCfg.model || '已配置')}`
+          : '还没配 AI —— 点这里配置，有 5 分钟教程'}</em>
       </span>
-      <span class="mode-pill">${mode === 'ai' ? 'AI 模式' : '普通模式'}<span class="mode-pill-go">›</span></span>
+      <span class="mode-pill">${aiCfg.configured ? '已开启' : '去配置'}<span class="mode-pill-go">›</span></span>
     </button>
 
     ${t ? `
@@ -2330,7 +2306,7 @@ function openFoodSheet(mealKey, initialSay = '') {
         const text = body.querySelector('#foodSayText').value.trim();
         if (!text) return toast('先写一句你吃了什么。');
         sayBtn.disabled = true;
-        sayBtn.textContent = aiOn() ? 'AI 正在解析…' : '正在解析…';
+        sayBtn.textContent = 'AI 正在解析…';
         closeSheet(); // 草稿弹层要占同一个位置，先收起这个
         try {
           await runQuickParse(text, slot.key);
@@ -2721,89 +2697,13 @@ function myInsights(limit) {
   }
 }
 
-/**
- * 使用模式：普通 / AI。
- *
- * 这是产品层面的划分，不是「功能阉割」：普通模式自己就能算、能记、能配餐、能给运动方案，
- * 只是说话方式和自由度不如 AI 模式。默认普通模式 —— 大多数人不会去配 API。
- */
-function useMode() {
-  return state?.settings?.mode === 'ai' ? 'ai' : 'basic';
-}
-
-/**
- * 现在会不会真的去调 AI = 模式是 AI **且** 密钥配好了。
- *
- * 为什么要有这个函数：以前全站只判断 ai.configured，模式只改了几个字 ——
- * 用户切到「普通模式」后，只要配过密钥，点解析照样发请求（也照样花钱）。
- * 「普通模式：不联网、不花钱」这句承诺，得由代码兑现，不能只写在文案里。
- */
+/** 现在会不会真的去调 AI = 密钥配好了。产品只有一种模式，不再有「普通模式」开关。 */
 function aiOn() {
-  return useMode() === 'ai' && Boolean(ai.configured);
-}
-
-function setMode(next) {
-  state.settings = { ...(state.settings || {}), mode: next === 'ai' ? 'ai' : 'basic' };
-  // 切回普通模式时把没确认的 AI 解析草稿丢掉：那份草稿带着 AI 的追问，
-  // 模式都关了还留着它，下次点开会莫名其妙。这里曾经写成调用 clearDraft()，
-  // 而那个函数**根本不存在** —— 点「普通模式」直接抛 ReferenceError，切不回去。
-  if (next !== 'ai') draft = null;
-  save();
-  render();
-}
-
-/**
- * 弹层：使用模式（普通 / AI）。
- *
- * 为什么要单独一个弹层：这个开关是「今天想不想花额度」级别的日常决定，
- * 藏在「我 → 设置」里等于没有。入口两处：记录页「说一句」卡片右上角、以及「我」页顶部。
- * 切换后立刻重绘（卡片胶囊、按钮文案都跟着变），不静默。
- */
-function openModeSheet() {
-  const current = useMode();
-  const cfg = currentAiConfig();
-  openSheet({
-    title: '使用模式',
-    body: `
-      <div class="mode-chips" id="usageModeChips">
-        <button class="mode-chip ${current === 'basic' ? 'on' : ''}" data-usage-mode="basic">
-          <b>普通模式</b>
-          <em>内置规则算，不联网、不花钱</em>
-        </button>
-        <button class="mode-chip ${current === 'ai' ? 'on' : ''}" data-usage-mode="ai">
-          <b>AI 模式</b>
-          <em>${cfg.configured ? '已配好，说一句更好懂' : '还没填密钥，点它会先带你去配'}</em>
-        </button>
-      </div>
-      <p class="tiny muted" style="margin:12px 0 0">
-        两种模式记下来的东西完全一样（同一份记录、同一套算法、同一个目标），
-        换的只是「这句话谁来听懂」。随时可以切，不会丢任何记录。
-      </p>`,
-    foot: '<button class="btn ghost block" id="usageModeClose">知道了</button>',
-    onMount: (body, foot) => {
-      foot.querySelector('#usageModeClose').addEventListener('click', closeSheet);
-      body.querySelectorAll('[data-usage-mode]').forEach((b) => {
-        b.addEventListener('click', () => {
-          const next = b.dataset.usageMode;
-          // 没配密钥就想去 AI 模式：直接带用户去配，别只弹一句「请先配置」
-          if (next === 'ai' && !cfg.configured) {
-            closeSheet();
-            openAiSettingsSheet({ then: () => openModeSheet() });
-            return;
-          }
-          if (next === current) { closeSheet(); return; }
-          setMode(next);
-          closeSheet();
-          toast(next === 'ai' ? '已切到 AI 模式：点「解析这一句」时才发请求' : '已切到普通模式：不联网也能记。');
-        });
-      });
-    },
-  });
+  return Boolean(ai.configured);
 }
 
 function openSettingsSheet() {
   const t = targets();
-  const current = useMode();
   const aiCfg = currentAiConfig();
   const plant = plantState(state);
   const a = achievements(state, t?.proteinG || 60);
@@ -2818,23 +2718,9 @@ function openSettingsSheet() {
         <span class="set-go">›</span>
       </button>
 
-      <div class="mode-switch">
-        <div class="mode-head">使用模式</div>
-        <div class="mode-chips">
-          <button class="mode-chip ${current === 'basic' ? 'on' : ''}" data-mode="basic">
-            <b>普通模式</b>
-            <em>内置规则算，不用配任何东西</em>
-          </button>
-          <button class="mode-chip ${current === 'ai' ? 'on' : ''}" data-mode="ai">
-            <b>AI 模式</b>
-            <em>${aiCfg.configured ? '已开启' : '需要填一次 API 密钥'}</em>
-          </button>
-        </div>
-      </div>
-
       <button class="set-row" data-set="ai">
         <span class="set-ico" data-tone="gold">${icon('sparkles', { size: 23 })}</span>
-        <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（普通模式不需要）'}</em></span>
+        <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（点这里，有 5 分钟教程）'}</em></span>
         <span class="set-go">›</span>
       </button>
 
@@ -2858,7 +2744,7 @@ function openSettingsSheet() {
 
       <button class="set-row" data-set="guide">
         <span class="set-ico" data-tone="mauve">${icon('play', { size: 23 })}</span>
-        <span class="set-main"><b>重看新手引导</b><em>忘了怎么用、想换模式，都从这里（不会动你的记录）</em></span>
+        <span class="set-main"><b>重看新手引导</b><em>忘了怎么用，从这里（不会动你的记录）</em></span>
         <span class="set-go">›</span>
       </button>
 
@@ -2872,19 +2758,6 @@ function openSettingsSheet() {
         所有记录只存在这台手机上，不上传。<br>换手机或清缓存前，记得导出备份。
       </p>`,
     onMount: (body) => {
-      body.querySelectorAll('[data-mode]').forEach((el) => {
-        el.addEventListener('click', () => {
-          if (el.dataset.mode === 'ai' && !aiCfg.configured) {
-            // 想切到 AI 模式但还没配：直接带用户去配，别只弹一句「请先配置」
-            closeSheet();
-            openAiSettingsSheet();
-            return;
-          }
-          setMode(el.dataset.mode);
-          toast(el.dataset.mode === 'ai' ? '已切到 AI 模式。' : '已切到普通模式。');
-          openSettingsSheet();
-        });
-      });
       body.querySelectorAll('[data-set]').forEach((el) => {
         el.addEventListener('click', () => {
           const which = el.dataset.set;
@@ -3172,7 +3045,7 @@ function openCoachSheet() {
     brief,
     local: localCoachAdvice(brief),
     aiText: null,
-    note: aiOn() ? null : 'AI 版要先在设置里配一个模型、并切到 AI 模式；上面这份是本地算的，不配也够用。',
+    note: aiOn() ? null : 'AI 版要先在设置里配一个模型；上面这份是本地算的，不配也够用。',
     loading: false,
   };
   paintCoach();
@@ -3960,19 +3833,14 @@ function drawAiSettings(cfg, relay, then = null) {
     show('已保存，正在测试连通…', 'info');
     const t = await testConnection();
     if (t.ok) {
-      show(`${icon('check', { size: 15 })} 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>已经切到 AI 模式：现在你怎么写都能听懂了。`, 'info');
+      show(`${icon('check', { size: 15 })} 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>现在「说一句」就能用了。`, 'info');
       ai = { configured: true, checked: true, mode: currentAiConfig().mode };
       // 保存完把输入框清空，只留占位提示：密钥不该一直明文摊在屏幕上，
       // 也让「留空则不改」这句话在同一个弹层里就变成真的
       $('#aiKey').value = '';
       $('#aiKey').placeholder = keyPlaceholder(findPreset(findPresetId()));
-      // 刚配好密钥就自动进 AI 模式 —— 不然用户配完发现「还是没反应」（普通模式本来就不调 AI）
-      if (useMode() !== 'ai') {
-        state.settings = { ...(state.settings || {}), mode: 'ai' };
-        save();
-      }
     } else {
-      show(`设置已保存，但连通测试失败：<b>${esc(t.error)}</b><br>修好之前会用离线识别记录（常见说法也能认）。`, '');
+      show(`设置已保存，但连通测试失败：<b>${esc(t.error)}</b><br>修好之前「说一句」还用不了；搜食物、只填热量、照包装都能正常记。`, '');
       ai = { configured: false, checked: true, reason: t.error };
     }
     render();
@@ -3986,12 +3854,12 @@ function drawAiSettings(cfg, relay, then = null) {
   });
 
   $('#aiClear')?.addEventListener('click', () => {
-    if (!confirm('清除这台手机上保存的 AI 密钥？清除后会退回离线识别，随时可以重新填。')) return;
+    if (!confirm('清除这台手机上保存的 AI 密钥？清除后「说一句」会提示先去配置；手动记一笔不受影响。')) return;
     clearAiConfig();
     ai = { configured: false, checked: true };
     closeSheet();
     render();
-    toast('已清除。现在走离线识别。');
+    toast('已清除。说一句话前要重新配置；手动记一笔不受影响。');
   });
 }
 
@@ -4299,7 +4167,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   else window.addEventListener('load', register);
 }
 
-// 问一次服务端「AI 配好了没」。没配也不影响使用，只是走离线解析。
+// 问一次服务端「AI 配好了没」。没配也能手动记，只是「说一句」用不了。
 aiStatus().then((st) => {
   ai = { ...st, checked: true };
   syncTestState();
@@ -4395,8 +4263,7 @@ document.addEventListener('visibilitychange', () => {
  */
 function syncTestState() {
   window.__appState = {
-    mode: useMode(),
-    aiConfigured: Boolean(ai.configured),
+    aiConfigured: aiOn(),
     aiChecked: Boolean(ai.checked),
   };
 }

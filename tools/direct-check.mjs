@@ -561,93 +561,23 @@ async function main() {
   console.log('奶茶保存 →', JSON.stringify(milkSaved));
   if (!milkSaved.存进我的食物) problems.push('AI 估的奶茶保存后没有存进「我的食物」');
   if (!milkSaved.反馈) problems.push('保存反馈没有说明已存进「我的食物」');
-  // 下一节（三·二）要在记录页上切模式，这里留在记录页，别切走
-  await sleep(200);
-
-  console.log('\n=== 三·二、切到普通模式后，真的不再发请求（「不花钱」得由代码兑现）===');
-  // 这条守的是真事故级问题：模式以前只改文案，配过密钥后切到普通模式照样调 AI。
-  const beforeChats = hits.chat;
-  const modeStateBefore = await evaluate(`window.__appState || null`);
-  if (!modeStateBefore || modeStateBefore.mode !== 'ai') problems.push(`配好密钥后应当自动进 AI 模式，实际 ${JSON.stringify(modeStateBefore)}`);
-
-  await evaluate(`document.querySelector('#usageModeBtn')?.click()`);
-  await sleep(350);
-  await evaluate(`document.querySelector('#usageModeChips [data-usage-mode="basic"]')?.click()`);
+  console.log('\n=== 三·二、产品只有 AI 模式：没有「普通模式」入口（v42）===');
+  // 打开设置页，确认「普通模式」这整套模式切换已经删干净
+  await evaluate(`document.querySelector('.tab[data-view="me"]')?.click()`);
+  await sleep(400);
+  await evaluate(`document.querySelector('#profileBtn')?.click()`);
   await sleep(500);
-  const afterSwitch = await evaluate(`window.__appState || null`);
-  console.log(`   切到普通模式 → mode=${afterSwitch?.mode}｜aiConfigured=${afterSwitch?.aiConfigured}`);
-  if (afterSwitch?.mode !== 'basic') problems.push('点了「普通模式」但状态没变');
-
-  // 再解析一句（离线认识的说法），应当完全不发请求
-  await evaluate(`(() => {
-    const ta = document.querySelector('#quickText');
-    ta.value = '中午吃了碗牛肉面';
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelector('#quickParse').click();
-  })()`);
-  await sleep(2500);
-  const basicParse = await evaluate(`(() => ({
-    方式: document.querySelector('#draftHost .warn')?.textContent.replace(/\s+/g, ' ').trim().slice(0, 24) || '',
-    条数: document.querySelectorAll('#draftHost .entry').length,
+  const modeUi = await evaluate(`(() => ({
+    设置页文本: (document.querySelector('#sheetBody')?.innerText || '').replace(/\\s+/g, ' '),
+    有模式按钮: Boolean(document.querySelector('[data-mode="basic"]') || document.querySelector('[data-usage-mode="basic"]')),
+    状态: window.__appState || null,
   }))()`);
-  const chatsInBasic = hits.chat - beforeChats;
-  console.log(`   普通模式解析：${basicParse.条数} 条｜来源「${basicParse.方式}」｜新增请求 ${chatsInBasic} 次`);
-  if (chatsInBasic !== 0) problems.push(`普通模式下还发了 ${chatsInBasic} 次请求（说好的不联网不花钱呢）`);
-  if (!basicParse.条数) problems.push('普通模式下离线解析也没认出来（切模式不能把功能弄坏）');
-  if (/AI 认出来的/.test(basicParse.方式)) problems.push('普通模式下结果来源还被标成 AI 认出来的');
-
-  // v35（issue #13）：认出一部分、还有没认出来的字 —— 要提示，不能一声不响让用户以为整句都记上了
-  await evaluate(`(() => {
-    const ta = document.querySelector('#quickText');
-    ta.value = '中午吃了红烧肉和一份佛跳墙';
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelector('#quickParse').click();
-  })()`);
-  await sleep(1200);
-  const partial = await evaluate(`(() => ({
-    条数: document.querySelectorAll('#draftHost .entry').length,
-    提示: [...document.querySelectorAll('#draftHost .warn')].map((w) => w.textContent.replace(/\\s+/g, ' ').trim()).join(' | '),
-  }))()`);
-  console.log(`   部分漏识别 → ${partial.条数} 条｜提示「${partial.提示.slice(0, 70)}」`);
-  if (partial.条数 < 1) problems.push('只认出一部分时，认出的那条也应该能记上');
-  if (!partial.提示.includes('佛跳墙')) problems.push('没覆盖的「佛跳墙」没有被提示出来（会以为整句都记上了）');
-  // v39：这段文案不能再像「AI 不行」——只有普通模式/请求失败才会走本地清单
-  if (/没认出来|没认出/.test(partial.提示)) problems.push('还在用「没认出来」的说法，用户会以为是 AI 不行');
-  if (!partial.提示.includes('本地清单')) problems.push('没说明是「本地清单」里没有，用户会以为是 AI 认不出来');
-
-  const retryUi = await evaluate(`(() => ({
-    有按钮: Boolean(document.querySelector('#draftRetryAi')),
-    文案: document.querySelector('#draftRetryAi')?.textContent.trim() || '',
-  }))()`);
-  console.log(`   用 AI 重试的入口 →「${retryUi.文案}」`);
-  if (!retryUi.有按钮) problems.push('本地清单没覆盖的东西没有「用 AI 重新解析」入口');
-  if (!retryUi.文案.includes('用 AI')) problems.push(`重试按钮文案不对：${retryUi.文案}`);
-
-  // 点重试：普通模式会先 confirm（自检里自动确定），然后必须真的走 AI、把佛跳墙估出来
-  const beforeRetryChats = hits.chat;
-  await evaluate(`document.querySelector('#draftRetryAi').click()`);
-  await sleep(2600);
-  const retried = await evaluate(`(() => ({
-    条数: document.querySelectorAll('#draftHost .entry').length,
-    名字: [...document.querySelectorAll('#draftHost .entry .name')].map((n) => n.textContent.replace(/\\s+/g, ' ').trim()),
-    方式: document.querySelector('#draftHost .warn')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 30) || '',
-    还在说本地清单: (document.querySelector('#draftHost')?.innerText || '').includes('本地清单'),
-  }))()`);
-  const retryChats = hits.chat - beforeRetryChats;
-  console.log(`   用 AI 重新解析 → ${retried.条数} 条｜${JSON.stringify(retried.名字)}｜新增请求 ${retryChats} 次`);
-  if (retryChats !== 1) problems.push(`点「用 AI 重新解析」应当只发 1 次请求，实际 ${retryChats} 次`);
-  if (!retried.名字.some((n) => n.includes('佛跳墙'))) problems.push(`重试后应当出现佛跳墙，实际 ${JSON.stringify(retried.名字)}`);
-  if (retried.还在说本地清单) problems.push('重试成功后还在说「本地清单」');
-  await evaluate(`document.querySelector('#draftCancel')?.click(); document.querySelector('#sheetClose')?.click(); true`);
+  console.log(`   设置页模式区块 → 有切换按钮 ${modeUi.有模式按钮 ? '是' : '否'}｜aiConfigured=${modeUi.状态?.aiConfigured}`);
+  if (modeUi.有模式按钮) problems.push('设置里还有普通模式切换按钮');
+  if (/普通模式/.test(modeUi.设置页文本)) problems.push('设置里还能看到「普通模式」字样');
+  if (!modeUi.状态 || modeUi.状态.aiConfigured !== true) problems.push(`__appState.aiConfigured 应为 true，实际 ${JSON.stringify(modeUi.状态)}`);
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
   await sleep(300);
-
-  // 切回 AI 模式，后面的教练用例还要用
-  await evaluate(`document.querySelector('#usageModeBtn')?.click()`);
-  await sleep(350);
-  await evaluate(`document.querySelector('#usageModeChips [data-usage-mode="ai"]')?.click()`);
-  await sleep(450);
-  const backToAi = await evaluate(`window.__appState?.mode || null`);
-  if (backToAi !== 'ai') problems.push('切不回 AI 模式');
 
   console.log('\n=== 三·五、模型只给名字：按同类估算记上，不能丢（v39）===');
   await evaluate(`document.querySelector('.tab[data-view="log"]')?.click()`);

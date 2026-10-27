@@ -225,11 +225,17 @@ async function main() {
       const a = document.querySelector('#pAge'); if (a) { a.value = '26'; a.dispatchEvent(new Event('input',{bubbles:true})); }
       document.querySelector('#pSave').click();
     })()`);
-    await waitFor(() => evaluate(client, `!!document.querySelector('[data-pick]')`), { what: '模式选择' });
-    const modes = await evaluate(client, `[...document.querySelectorAll('[data-pick]')].map((e) => e.textContent.trim())`);
-    console.log(`   模式选项：${modes.join(' / ')}`);
-    if (!modes.some((m) => m.includes('普通模式'))) fail('线上引导里没有普通模式可选');
-    await evaluate(client, `document.querySelector('[data-pick="basic"]').click()`);
+    await waitFor(() => evaluate(client, `!!document.querySelector('#obSkip')`), { what: '引导第 3 步' });
+    const obMode = await evaluate(client, `(() => ({
+      标题: document.querySelector('#sheetTitle')?.textContent || '',
+      有模式选项: !!document.querySelector('[data-pick]'),
+      去配置: document.querySelector('#obAi')?.textContent.trim() || '',
+      跳过: document.querySelector('#obSkip')?.textContent.trim() || '',
+    }))()`);
+    console.log(`   第 3 步「${obMode.标题}」：${obMode.去配置} / ${obMode.跳过}`);
+    if (obMode.有模式选项) fail('线上引导里还让用户选普通模式（v42 起只有 AI 一种模式）');
+    if (!obMode.跳过) fail('线上引导第 3 步没有「先跳过，手动记」');
+    await evaluate(client, `document.querySelector('#obSkip').click()`);
     await waitFor(() => evaluate(client, `!!document.querySelector('#obGo')`), { what: '引导最后一步' });
     await evaluate(client, `document.querySelector('#obGo').click()`);
     await sleep(1200);
@@ -245,14 +251,15 @@ async function main() {
         目标,
       };
     })()`);
-    console.log(`   引导完成 → 落在「${ob.标签}」，模式 ${ob.模式}，资料 ${ob.身高}cm/${ob.体重}kg/${ob.年龄}岁，目标热量 ${ob.目标} kcal`);
+    console.log(`   引导完成 → 落在「${ob.标签}」，资料 ${ob.身高}cm/${ob.体重}kg/${ob.年龄}岁，目标热量 ${ob.目标} kcal`);
     if (ob.完成 !== true) fail('线上引导走完没有落标记（下次打开会重复引导）');
+    if (ob.模式 !== undefined) fail(`线上引导还在往存档里写使用模式（${ob.模式}）`);
     if (ob.身高 !== 163 || ob.体重 !== 58 || ob.年龄 !== 26) fail(`线上资料没存对：${ob.身高}cm/${ob.体重}kg/${ob.年龄}岁`);
     // 163cm/58kg/26 岁、轻度活动 → 约 1479 kcal（这是算出来的，不是抄的）
     if (typeof ob.目标 !== 'number' || Math.abs(ob.目标 - 1479) > 60) fail(`线上算出的目标热量不对：${ob.目标} kcal（预期约 1479）`);
     await shot(client, '02-onboarded.png');
 
-    // 记一笔
+    // 记一笔：线上没有 AI 密钥，先确认「说一句」明说还没配 AI（不造假条目）
     await evaluate(client, `document.querySelector('.tab[data-view="log"]').click()`);
     await sleep(400);
     await evaluate(client, `(() => {
@@ -262,24 +269,36 @@ async function main() {
       document.querySelector('#quickParse').click();
       return true;
     })()`);
-    await waitFor(() => evaluate(client, `document.querySelectorAll('#draftHost .entry').length ? true : (document.querySelector('#draftHost')?.textContent || '').includes('认出了') ? true : null`), { what: '解析结果' });
+    await waitFor(() => evaluate(client, `document.querySelector('#draftHost .warn') ? true : null`), { what: '没配 AI 的说明' });
     const draft = await evaluate(client, `({
       条数: document.querySelectorAll('#draftHost .entry').length,
-      合计: document.querySelector('#draftHost .row.between b')?.textContent || null,
+      说明: (document.querySelector('#draftHost .warn')?.textContent || '').replace(/\\s+/g, ' ').trim(),
+      重试: document.querySelector('#draftRetryAi')?.textContent.trim() || '',
       有记上: !!document.querySelector('#draftSave'),
     })`);
-    console.log(`   解析：${draft.条数} 条，合计 ${draft.合计}，有记上按钮 ${draft.有记上}`);
-    if (!draft.条数) fail('线上「说一句」解析不出任何条目');
-    if (draft.条数 && !draft.有记上) fail('线上解析出条目却没有「记上」按钮');
-    if (!draft.条数 && draft.有记上) fail('线上 0 条却允许记上（会留下 0 卡的假记录）');
-    if (draft.有记上) {
-      await evaluate(client, `document.querySelector('#draftSave').click()`);
-      await sleep(600);
-      const saved = await evaluate(client, `(() => { const s = JSON.parse(localStorage.getItem('fatloss.state.v2')||'{}'); const d = s.days?.[Object.keys(s.days||{})[0]]; return { 条数: d ? Object.values(d.meals||{}).flat().length : 0, kcal: d ? Object.values(d.meals||{}).flat().reduce((a,e)=>a + (e.food?.kcal||0) * (e.grams||0) / 100, 0) : 0 }; })()`);
-      console.log(`   记上后：${saved.条数} 条，约 ${Math.round(saved.kcal)} kcal`);
-      if (!saved.条数) fail('线上点了「记上」但存档里没有记录');
-      if (saved.条数 && saved.kcal <= 0) fail('线上记上的条目热量为 0');
-    }
+    console.log(`   没配 AI 时说一句：${draft.条数} 条｜「${draft.重试}」｜${draft.说明}`);
+    if (draft.条数) fail('线上没配 AI 却解析出了条目（不能假装解析）');
+    if (draft.有记上) fail('线上没配 AI 却允许记上（会留下假记录）');
+    if (!draft.说明.includes('还没配置 AI')) fail('线上没配 AI 时没说清原因');
+    if (draft.重试 !== '去配 AI') fail(`线上没配 AI 时按钮没有指路配置：${draft.重试}`);
+    await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+
+    // 再用真人不配 AI 也能用的路径记一笔（后面的重开、离线检查靠这条记录）
+    await evaluate(client, `[...document.querySelectorAll('[data-act="add-food"]')].find((b) => b.dataset.meal === 'lunch')?.click()`);
+    await sleep(500);
+    await evaluate(client, `document.querySelector('#foodPaneChips [data-pane="kcal"]')?.click()`);
+    await sleep(300);
+    await evaluate(client, `(() => {
+      document.querySelector('#kcalName').value = '楼下的牛肉面';
+      document.querySelector('#kcalValue').value = '650';
+      document.querySelector('#kcalSave').click();
+    })()`);
+    await sleep(700);
+    const saved = await evaluate(client, `(() => { const s = JSON.parse(localStorage.getItem('fatloss.state.v2')||'{}'); const d = s.days?.[Object.keys(s.days||{})[0]]; const list = d ? Object.values(d.meals||{}).flat() : []; return { 条数: list.length, 名称: list[0]?.food?.name || null, kcal: list[0]?.food?.kcal || 0 }; })()`);
+    console.log(`   手动记一笔：${saved.条数} 条（${saved.名称}，${saved.kcal} kcal/100g）`);
+    if (!saved.条数) fail('线上手动记一笔没有写进存档');
+    if (saved.kcal <= 0) fail('线上手动记的条目热量为 0');
     await shot(client, '03-logged.png');
 
     // 重开一次：真用户每天都会做的事
@@ -366,7 +385,7 @@ async function main() {
       },
       {
         name: '资料残缺（缺体重字段）',
-        seed: JSON.stringify({ schemaVersion: 4, profile: { sex: 'female', heightCm: 163, age: 26 }, settings: { onboarded: true, mode: 'basic', lastSeenVersion: appVersion() }, days: { '2026-10-10': { meals: { lunch: [{ id: 'e1', food: { id: 'rice_cooked', name: '米饭', kcal: 116 }, grams: 200 }] } } } }),
+        seed: JSON.stringify({ schemaVersion: 4, profile: { sex: 'female', heightCm: 163, age: 26 }, settings: { onboarded: true, lastSeenVersion: appVersion() }, days: { '2026-10-10': { meals: { lunch: [{ id: 'e1', food: { id: 'rice_cooked', name: '米饭', kcal: 116 }, grams: 200 }] } } } }),
         expect: (r) => r.启动 && r.不崩溃 && r.可操作 && r.记录天数 >= 1,
         detail: '不能让今天页崩，应提示补资料且记录还在',
       },

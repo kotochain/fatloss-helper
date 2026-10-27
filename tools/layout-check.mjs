@@ -72,7 +72,7 @@ const INTERFACE_ORDER = [
   ['sheet-recover', '弹层·找回记录（恢复）'],
   ['onboard-1', '引导 1/4·先说三件事'],
   ['onboard-2', '引导 2/4·填资料'],
-  ['onboard-3', '引导 3/4·选模式'],
+  ['onboard-3', '引导 3/4·用 AI 帮你记'],
   ['onboard-4', '引导 4/4·最后一步'],
   ['tab-today', '标签·今天'],
   ['tab-log-food', '标签·记录（吃的）'],
@@ -81,7 +81,7 @@ const INTERFACE_ORDER = [
   ['tab-progress', '标签·我的'],
   ['sheet-food-search', '弹层·加食物搜索'],
   ['sheet-food-amount', '弹层·份量'],
-  ['sheet-quick-draft', '弹层·解析结果草稿'],
+  ['sheet-quick-draft', '弹层·说一句（没配 AI）'],
   ['sheet-add-exercise', '弹层·加运动'],
   ['sheet-weight', '弹层·记体重'],
   ['sheet-growth', '弹层·我的成长'],
@@ -876,8 +876,8 @@ async function runPass(size, { passId, passLabel, scale, captureAll }) {
   // ── 新手引导 4 步 ──
   await runStep('onboard-1', '引导 1/4·先说三件事', 'sheet', () => openSheetByClick(`(() => { const b = document.querySelector('[data-act="onboard"]'); if (!b) return false; b.click(); return true; })()`, '先说三件事'));
   await runStep('onboard-2', '引导 2/4·填资料', 'sheet', async () => { await click('#obNext'); await waitSheetEl('#pHeight'); });
-  await runStep('onboard-3', '引导 3/4·选模式', 'sheet', async () => { await click('#pSave'); await waitSheetEl('.mode-chip.big'); });
-  await runStep('onboard-4', '引导 4/4·最后一步', 'sheet', async () => { await click('[data-pick="basic"]'); await waitSheetEl('#obGo'); });
+  await runStep('onboard-3', '引导 3/4·用 AI 帮你记', 'sheet', async () => { await click('#pSave'); await waitSheetEl('#obSkip'); });
+  await runStep('onboard-4', '引导 4/4·最后一步', 'sheet', async () => { await click('#obSkip'); await waitSheetEl('#obGo'); });
   await clickExpr(`(() => { const b = document.querySelector('#obLater'); if (!b) return false; b.click(); return true; })()`, '我先随便看看');
   await waitForNode(`document.querySelector('.big-log') !== null`, '引导结束回到今天页', 12000);
 
@@ -909,8 +909,8 @@ async function runPass(size, { passId, passLabel, scale, captureAll }) {
   });
   await closeSheetNow();
 
-  // ── 弹层 2：解析结果草稿（说一句话 → 解析）──
-  await runStep('sheet-quick-draft', '弹层·解析结果草稿', 'sheet', async () => {
+  // ── 弹层 2：「说一句」没配 AI 的说明（本地自检没有密钥，只能走这条）──
+  await runStep('sheet-quick-draft', '弹层·说一句（没配 AI）', 'sheet', async () => {
     await goLogFood();
     const ok = await evaluate(`(() => {
       const ta = document.querySelector('#quickText');
@@ -921,7 +921,7 @@ async function runPass(size, { passId, passLabel, scale, captureAll }) {
       return true;
     })()`);
     if (!ok) throw new Error('记录页没有 #quickText');
-    await waitForNode(`(() => { const r = document.querySelector('#sheetRoot'); if (!r || r.classList.contains('hidden')) return false; return !!document.querySelector('#draftHost .entry'); })()`, '解析结果草稿弹层', 15000);
+    await waitForNode(`(() => { const r = document.querySelector('#sheetRoot'); if (!r || r.classList.contains('hidden')) return false; return !!document.querySelector('#draftHost .warn'); })()`, '没配 AI 的说明弹层', 15000);
   });
   await closeSheetNow();
 

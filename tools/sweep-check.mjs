@@ -265,7 +265,7 @@ const PAGE_PRELUDE = String.raw`
     if (t.indexOf('加到') === 0) return 'food-picker';
     if (t.indexOf('→') >= 0) return 'amount';
     if (t === '新增自定义食物') return 'custom-food';
-    if (t === '这样记对吗？') return 'draft';
+    if (t === '这样记对吗？' || t === '这句没能解析') return 'draft';
     if (t === 'AI 设置') return 'ai-settings';
     if (t === '设置') return 'settings';
     if (t === '找回记录') return 'recover';
@@ -276,7 +276,7 @@ const PAGE_PRELUDE = String.raw`
     if (t === '记体重') return 'weight';
     if (t === '加运动') return 'exercise';
     if (t === '先说三件事') return 'onboard-intro';
-    if (t === '选一个模式') return 'onboard-mode';
+    if (t === '选一个模式' || t === '用 AI 帮你记') return 'onboard-mode';
     if (t === '最后一步') return 'onboard-first';
     if (t.indexOf('资料') >= 0 || t === '你的基础数据' || t === '填写资料') return 'profile';
     if (/做不了？$/.test(t)) return 'substitute';
@@ -938,7 +938,7 @@ const KIND_LABEL = {
   'calendar': '日历弹层',
   'substitute': '运动替代方案弹层',
   'onboard-intro': '引导第 1 步「先说三件事」',
-  'onboard-mode': '引导第 3 步「选一个模式」',
+  'onboard-mode': '引导第 3 步「用 AI 帮你记」',
   'onboard-first': '引导第 4 步「最后一步」',
 };
 

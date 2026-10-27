@@ -437,8 +437,8 @@ async function persistViaRecordTab() {
 async function waitAiReady() {
   return await waitFor(async () => {
     const st = await evalJs(`window.__appState || null`);
-    return Boolean(st && st.aiConfigured && st.mode === 'ai');
-  }, 8000, 120, 'AI 配置生效（__appState.aiConfigured === true 且模式是 ai）');
+    return Boolean(st && st.aiConfigured);
+  }, 8000, 120, 'AI 配置生效（__appState.aiConfigured === true）');
 }
 
 async function openLogTab() {
@@ -474,6 +474,25 @@ async function clickSaveDraft() {
   return true;
 }
 
+/**
+ * 不用 AI，也不经过「说一句」：手动记一笔（加食物 → 只填热量）。
+ * v42 起没配 AI 的用户也能用这条路径，存储类场景用它造数据最稳。
+ */
+async function addKcalEntry({ meal = 'lunch', name, kcal }) {
+  await openLogTab();
+  await evalJs(`[...document.querySelectorAll('[data-act="add-food"]')].find((b) => b.dataset.meal === ${JSON.stringify(meal)})?.click(); true`);
+  await waitFor(async () => await evalJs(`!!document.querySelector('#foodPaneChips [data-pane="kcal"]')`), 5000, 120, '加食物弹层');
+  await evalJs(`document.querySelector('#foodPaneChips [data-pane="kcal"]').click(); true`);
+  await waitFor(async () => await evalJs(`!!document.querySelector('#kcalName') && !document.querySelector('#paneKcal')?.classList.contains('hidden')`), 5000, 120, '只填热量面板');
+  await evalJs(`(() => {
+    document.querySelector('#kcalName').value = ${JSON.stringify(name)};
+    document.querySelector('#kcalValue').value = ${JSON.stringify(String(kcal))};
+    document.querySelector('#kcalSave').click();
+    return true;
+  })()`);
+  await sleep(400);
+}
+
 async function readDraftDom() {
   return await evalJs(`(() => ({
     sheetOpen: !!document.querySelector('#sheetRoot') && !document.querySelector('#sheetRoot').classList.contains('hidden'),
@@ -487,6 +506,8 @@ async function readDraftDom() {
     total: (document.querySelector('#draftHost .row.between b')?.textContent || '').trim(),
     saveBtn: !!document.querySelector('#draftSave'),
     saveBtnText: (document.querySelector('#draftSave')?.textContent || '').trim(),
+    retryBtn: !!document.querySelector('#draftRetryAi'),
+    retryBtnText: (document.querySelector('#draftRetryAi')?.textContent || '').trim(),
     parseBtnDisabled: !!document.querySelector('#quickParse')?.disabled,
     parseBtnText: (document.querySelector('#quickParse')?.textContent || '').trim(),
     inputValue: document.querySelector('#quickText')?.value || '',
@@ -717,20 +738,15 @@ async function scenarioAiFailure(group, id, title, {
   const promptOk = promptPatterns.some((re) => re.test(visibleText));
   chk(sc, '明确提示 AI 失败原因', promptOk, expectText, `弹层全文「${clip(r.dom.draftText, 200)}」`, '严重');
   chk(sc, '不显示「AI 识别」', !/AI 识别/.test(r.dom.warnText), '弹层里没有「AI 识别 / 已用 AI」之类的成功字样', `弹层提示「${clip(r.dom.warnText, 150) || '（无）'}」`, '事故级');
-  if (offlineUnknown) {
-    chk(sc, '不显示「记上」按钮', !r.dom.saveBtn, '一条都没解析出来时不显示 #draftSave', r.dom.saveBtn ? `有（${r.dom.saveBtnText}）` : '没有', '严重');
-    chk(sc, '没有 0 kcal 草稿', r.dom.entries.length === 0 && !/0\s*kcal/.test(r.dom.draftText), '不出现条目/0 kcal 草稿', `条目 ${r.dom.entries.length} 条`);
-  } else {
-    chk(sc, '离线兜底如实标成离线', /离线认出来的/.test(r.dom.warnText), '弹层显示「这次是：离线认出来的（常见说法）」', clip(r.dom.warnText, 150), '事故级');
-  }
+  chk(sc, '不显示「记上」按钮', !r.dom.saveBtn, '一条都没解析出来时不显示 #draftSave', r.dom.saveBtn ? `有（${r.dom.saveBtnText}）` : '没有', '严重');
+  chk(sc, '没有 0 kcal 草稿', r.dom.entries.length === 0 && !/0\s*kcal/.test(r.dom.draftText), '不出现条目/0 kcal 草稿', `条目 ${r.dom.entries.length} 条`);
+  chk(sc, '有「重试 / 去配 AI」的入口', r.dom.retryBtn, '存在 #draftRetryAi', r.dom.retryBtn ? `有（${r.dom.retryBtnText}）` : '没有', '严重');
   chk(sc, '保留用户输入的文字', r.dom.inputValue === text, `输入框仍是「${text}」`, `输入框是「${clip(r.dom.inputValue, 80)}」`, '一般');
   sc.shots.push(await shot(`${shotPrefix}-sheet`));
   const st = await closeAndReadState();
   chk(sc, '没有创建记录', st.entries.length === 0, '存档里 0 条食物记录', `${st.entries.length} 条${st.entries.length ? `：${st.entries.map((e) => e.name).join('、')}` : ''}`, '事故级');
 
-  const actual = offlineUnknown
-    ? `弹层只显示「${clip(r.dom.draftText, 110)}」，${promptOk ? '能看到失败原因' : '完全看不到密钥/服务商/超时/解析相关的任何提示'}；未创建记录`
-    : `弹层提示「${clip(r.dom.warnText, 130)}」；条目来自离线兜底；未创建记录`;
+  const actual = `弹层只显示「${clip(r.dom.draftText, 110)}」，${promptOk ? '能看到失败原因' : '完全看不到密钥/服务商/超时/解析相关的任何提示'}；未创建记录`;
   endScenario(sc, actual);
   return sc;
 }
@@ -1147,15 +1163,7 @@ async function scenarioStorageQuota(group) {
     });
     return true;
   })()`);
-  await evalJs(`(() => {
-    const ta = document.querySelector('#quickText');
-    ta.value = '两个鸡蛋';
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelector('#quickParse').click();
-    return true;
-  })()`);
-  await waitFor(async () => await evalJs(`!!document.querySelector('#draftSave')`), 8000, 120, '离线解析结果');
-  await clickSaveDraft();
+  await addKcalEntry({ meal: 'lunch', name: '鸡蛋', kcal: 72 });
   await sleep(150);
   const toasts = await readToasts();
   sc.shots.push(await shot('storage-quota-toasts'));
@@ -1217,16 +1225,7 @@ async function scenarioStorageSnapshotRoundtrip(group) {
   await closeSheet();
   await dismissCelebrate();
   // 改动：再记一条苹果
-  await openLogTab();
-  await evalJs(`(() => {
-    const ta = document.querySelector('#quickText');
-    ta.value = '一个苹果';
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    document.querySelector('#quickParse').click();
-    return true;
-  })()`);
-  await waitFor(async () => await evalJs(`!!document.querySelector('#draftSave')`), 8000, 120, '离线解析结果');
-  await clickSaveDraft();
+  await addKcalEntry({ meal: 'lunch', name: '苹果', kcal: 52 });
   await dismissCelebrate();
   const modified = await readMainState();
   chk(sc, '改动确实生效（对照组）', modified.entries.length === baseline.entries.length + 1,
@@ -1382,33 +1381,22 @@ async function scenarioStorageWipeGuard(group) {
  * 这是一个真实用户会碰到的路径：配过 AI 之后想切回普通模式，点了没反应。
  */
 async function scenarioExtraModeSwitch(group) {
-  const sc = beginScenario(group, 'E-1', '设置里从 AI 模式切回「普通模式」',
-    '点了「普通模式」后模式真的切换、保存到本机、有明确反馈（不报错）');
+  const sc = beginScenario(group, 'E-1', '产品只有 AI 模式：设置里没有「普通模式」切换',
+    '设置页没有普通模式按钮、没有「普通模式」字样；不会因为删模式报错');
   const fixture = JSON.stringify(JSON.stringify(makeCurrentState({ mode: 'ai' })));
   await setupStorage(`localStorage.setItem('fatloss.state.v2', ${fixture});`);
   await openSettings();
-  const before = await evalJs(`(() => {
-    let mode = null;
-    try { mode = (JSON.parse(localStorage.getItem('fatloss.state.v2'))?.settings || {}).mode ?? null; } catch {}
-    return { mode, aiChipOn: !!document.querySelector('[data-mode="ai"]') && document.querySelector('[data-mode="ai"]').classList.contains('on') };
-  })()`);
-  await evalJs(`document.querySelector('[data-mode="basic"]')?.click(); true`);
-  await sleep(600);
-  const after = await evalJs(`(() => {
-    let mode = null;
-    try { mode = (JSON.parse(localStorage.getItem('fatloss.state.v2'))?.settings || {}).mode ?? null; } catch {}
-    return {
-      storedMode: mode,
-      toasts: [...document.querySelectorAll('.toast')].map((t) => t.textContent.trim()),
-      errors: (window.__auditErrors || []).slice(),
-    };
-  })()`);
-  chk(sc, '切换不报错', after.errors.length === 0, '没有未捕获异常', JSON.stringify(after.errors).slice(0, 240), '严重');
-  chk(sc, '模式真的切换并保存', after.storedMode === 'basic', "localStorage 里 settings.mode === 'basic'", `settings.mode=${after.storedMode}（点击前是 ${before.mode}）`, '严重');
-  chk(sc, '有明确反馈', after.toasts.some((t) => /普通模式/.test(t)), '出现「已切到普通模式」提示', `toast：${JSON.stringify(after.toasts)}`, '一般');
+  const r = await evalJs(`(() => ({
+    有普通按钮: Boolean(document.querySelector('[data-mode="basic"]') || document.querySelector('[data-usage-mode="basic"]')),
+    设置文本: (document.querySelector('#sheetBody')?.innerText || '').replace(/\\s+/g, ' '),
+    错误: (window.__auditErrors || []).slice(),
+  }))()`);
+  chk(sc, '没有普通模式按钮', !r.有普通按钮, '找不到 [data-mode="basic"]', r.有普通按钮 ? '还在' : '已删除', '事故级');
+  chk(sc, '没有「普通模式」字样', !/普通模式/.test(r.设置文本), '设置页文案里没有「普通模式」', clip(r.设置文本, 160), '严重');
+  chk(sc, '不报错', r.错误.length === 0, '没有未捕获异常', JSON.stringify(r.错误).slice(0, 240), '严重');
   sc.shots.push(await shot('extra-mode-switch'));
   await closeSheet();
-  endScenario(sc, `点击「普通模式」后：${after.errors.length ? `抛出「${clip(after.errors.join('；'), 120)}」` : '没报错'}；localStorage 里 mode 仍为 ${after.storedMode}；${after.toasts.length ? `toast：${JSON.stringify(after.toasts)}` : '没有任何提示'}`);
+  endScenario(sc, `设置页${r.有普通按钮 ? '仍有普通模式按钮' : '没有任何普通模式入口'}`);
   return sc;
 }
 
