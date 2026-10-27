@@ -636,7 +636,7 @@ function onboardMode(t, review = false) {
       <button class="mode-chip big" data-pick="ai">
         <b>AI 模式</b>
         <em>多一个 AI 帮你听懂更随意的说法（「随便吃了点」这种），教练建议也更具体。
-          需要你自己去申请一个 API 密钥填进来（我会一步步带你填，不用懂技术）。
+          需要你自己去申请一个 API 密钥填进来（设置里有 5 分钟教程，照着点就行）。
           数字还是本地算 —— AI 只负责怎么说话。</em>
         <span class="mode-tag ghost">要多一步设置</span>
       </button>
@@ -3783,6 +3783,32 @@ function drawAiSettings(cfg, relay, then = null) {
     <label class="field"><span>密钥（只存在这台手机上）</span>
       <input type="text" id="aiKey" placeholder="${cfg.keyMasked ? `已保存：${esc(cfg.keyMasked)}（留空则不改）` : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
     </label>
+    <details id="aiKeyGuide" style="margin:-4px 0 12px">
+      <summary style="cursor:pointer;color:var(--rose);font-size:13px">不知道怎么获取密钥？看 5 分钟教程</summary>
+      <div class="tiny" style="margin-top:8px;line-height:1.75">
+        <p style="margin:0 0 6px">以 DeepSeek 为例，照着做就行。需要：手机号 + 支付宝/微信（充值用）。</p>
+        <ol style="margin:0 0 8px 18px;padding:0">
+          <li><b>打开开放平台</b>：在浏览器打开
+            <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>，
+            用手机号注册并登录。<br>
+            <span class="tiny muted">这是给程序用的「开放平台」，不是你平时聊天的 DeepSeek。</span></li>
+          <li><b>充一点钱</b>：登录后点左侧「充值 / Top up」，充 10 元就够用很久
+            （按一天记三顿算，一次解析大约几厘钱；具体以官方价格为准）。</li>
+          <li><b>创建密钥</b>：点左侧「API Keys」→「创建 API Key / Create new API key」，
+            名字随便写（例如「减脂小助手」）→ 创建。<br>
+            复制那一长串 <code>sk-</code> 开头的字符，<b>它只显示这一次</b>，关掉就看不到了。</li>
+          <li><b>回来粘贴</b>：把密钥粘贴到上面的「密钥」输入框，点下面的「保存并测试连通」。
+            显示成功就能用了。</li>
+          <li><b>密钥安全</b>：只存在这台手机上，不上传、不经过我们的服务器。
+            换手机或清缓存前，在「数据与备份」里导出。</li>
+        </ol>
+        <p style="margin:0 0 4px"><b>常见问题</b></p>
+        <p style="margin:0">· 提示「密钥无效」：检查是不是复制全了、前后有没有空格。<br>
+          · 提示「余额不足」：回开放平台充值。<br>
+          · 提示「model not found」：模型名填 <code>deepseek-flash</code>。<br>
+          · 提示「连不上」：换 WiFi / 流量再试；公司网络可能挡了 API。</p>
+      </div>
+    </details>
 
     <label class="field"><span>用哪种方式连接</span>
       <div class="chips" id="modeChips">

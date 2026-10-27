@@ -288,6 +288,23 @@ async function main() {
   await sleep(500);
   await evaluate(`document.querySelector('[data-set="ai"]').click()`);
   await sleep(900);
+  // v41：零基础教程必须在 AI 设置里，照着点就能拿到密钥（issue #25）
+  const keyGuide = await evaluate(`(() => {
+    const d = document.querySelector('#aiKeyGuide');
+    return {
+      存在: Boolean(d),
+      摘要: d?.querySelector('summary')?.textContent.trim() || '',
+      步骤数: d?.querySelectorAll('ol li').length || 0,
+      有创建密钥: (d?.textContent || '').includes('创建 API Key'),
+      有平台链接: Boolean(d?.querySelector('a[href*="platform.deepseek.com"]')),
+    };
+  })()`);
+  console.log('密钥教程 →', JSON.stringify(keyGuide));
+  if (!keyGuide.存在) problems.push('AI 设置里没有「怎么获取密钥」的教程');
+  if (!keyGuide.摘要.includes('教程')) problems.push(`教程入口文案不对：${keyGuide.摘要}`);
+  if (keyGuide.步骤数 < 5) problems.push(`教程步骤太少（${keyGuide.步骤数} 步）`);
+  if (!keyGuide.有创建密钥) problems.push('教程没写怎么创建密钥');
+  if (!keyGuide.有平台链接) problems.push('教程没有开放平台链接');
   await evaluate(`document.querySelector('#presetChips [data-preset="custom"]').click()`);
   await sleep(200);
   await evaluate(`(() => {
