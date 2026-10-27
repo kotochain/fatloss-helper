@@ -481,6 +481,10 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 给 `serve.mjs` 传绝对路径时，它内部的 `isMain` 判断（`path.resolve(argv[1]) === fileURLToPath`）会失败，
 进程**以退出码 0 悄悄退出、什么都不打印**，看起来像「服务起不来」。临时目录必须先 `realpathSync`。
 
+**发布记录**：提交 `5c8870e`；CI 4 个 job 全绿（[run 40513892312](https://github.com/kotochain/fatloss-helper/actions/runs/40513892312)），
+Pages 发布成功（[run 40513892309](https://github.com/kotochain/fatloss-helper/actions/runs/40513892309)）；
+`check-live` 线上 v45、34 个文件逐字节一致、缓存名 `fatloss-v45`；`live-audit` 0 个阻断问题。
+
 ---
 
 ## 〇·二十、新手引导改成「必须配好 AI」（2026-10-27，v44）
