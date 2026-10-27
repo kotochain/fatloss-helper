@@ -469,6 +469,10 @@ v42 删掉普通模式后，那套「靠关键词猜整句话」的解析器就�
 **为什么要专门发一版**：删代码不改行为，但把「食物库到底还负责什么」写死在账上 ——
 以后想加「离线也能听懂」的功能，得先改总账，不会顺手把一套废弃的猜测逻辑复活。
 
+**发布记录**：提交 `3afa3ad`；CI 4 个 job 全绿（[run 40486941609](https://github.com/kotochain/fatloss-helper/actions/runs/40486941609)），
+Pages 发布成功（[run 40486941630](https://github.com/kotochain/fatloss-helper/actions/runs/40486941630)）；
+`check-live` 线上 v43、34 个文件逐字节一致、缓存名 `fatloss-v43`；`live-audit` 0 个阻断问题。
+
 ---
 
 ## 〇·十八、删掉普通模式，只保留 AI（2026-10-27，v42，issue #23）

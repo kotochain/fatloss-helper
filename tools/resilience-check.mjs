@@ -712,9 +712,8 @@ async function scenarioAiSuccess(group, id, title, { model, text, shotPrefix }) 
 
 /**
  * 失败路径：AI 返回失败（401/500/超时/非法 JSON/连不上）。
- * 分两种输入文本：
- *   · offlineUnknown = true  → 离线也认不出（AI 的错误提示是用户唯一能看到的信号）
- *   · offlineUnknown = false → 离线能认出（对照组：确认错误在「离线兜底有条目」时确实会显示）
+ * 调用处仍传 offlineUnknown（区分「输入本身本地能不能认出」），但 v43 删除离线解析后
+ * 它已不影响行为：失败时用户能看到的只有 AI 的错误提示。
  */
 async function scenarioAiFailure(group, id, title, {
   model, text, expectText, promptPatterns, offlineUnknown, waitMs = 12000, shotPrefix, baseUrl,
@@ -1576,7 +1575,7 @@ function buildReport() {
   lines.push('- 假服务商**不实现** `/models` 与中转接口；静态服务也不实现 `/api/*`，所以应用不会退回电脑中转，失败路径只会走离线兜底或直接报错。');
   lines.push('- 存档场景通过 `localStorage` 预置真实形状的存档（坏 JSON / v999 / v1 / v2 / 存储满），再走真实界面按钮（设置、数据与备份、从头开始、找回记录）。');
   lines.push('- `window.confirm` 被注入脚本替换为「总是确定」（测试环境没有人点确认框）；这只影响「回滚快照」的确认，**清除数据仍然要求输入「清除」二字**，没有被绕过。');
-  lines.push('- 「离线也认不出」输入用「吃了两份宇宙能量块」，「离线能认出」输入用「中午吃了一碗牛肉面」（已用离线解析器实测确认）。成功场景用「随便对付了一口」——离线解析器对它**什么都认不出**，所以能证明条目真的来自 AI。');
+  lines.push('- 「离线也认不出」输入用「吃了两份宇宙能量块」，「本地能认出」输入用「中午吃了一碗牛肉面」（v43 前用离线解析器实测确认过；解析器已删，该参数不再影响行为）。成功场景用「随便对付了一口」——离线解析器对它**什么都认不出**，所以能证明条目真的来自 AI。');
   lines.push('- **并行修改说明**：审计期间工作区有其他任务在同时改代码（未提交）。S-2b（未来版本存档被欢迎页按钮覆盖）和 E-1（切回普通模式抛 ReferenceError）在本次审计早期的两轮运行里都是失败的；最后一次运行时工作区已有修复（原始内容另存 `fatloss.state.unreadable` + 欢迎页常驻提示；`clearDraft` 改为 `draft = null`），因此这两个场景本报告判定通过，并保留为回归检查。');
   lines.push('');
   lines.push('## 一、AI 失败与畸形返回');
