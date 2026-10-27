@@ -451,6 +451,34 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 
 ---
 
+## 〇·十五、AI 不再说「我没认出来」（2026-10-27，v39，issue #20）
+
+做 #20 时先给的方案是「离线漏识别 → 给补记入口，让用户自己填热量」，用户当场否了：
+**「AI 就是用来估热量的，为什么会有手动环节？」**
+
+真正的问题不在「补记」，在文案和兜底逻辑：AI 请求失败/普通模式时，代码静默退回本地词表，
+再弹一句「这句话里的『佛跳墙』我没认出来」—— 用户看到的是「AI 是个弱智」，而不是「AI 没连上」。
+
+现在钉死三条（已进《产品逻辑总账》R55/R56）：
+
+1. **AI 永远不说「不知道 / 没认出来」**：不确定就追问，但必须先给一版估算；
+2. **用户可以回答「我也不知道」**：AI 必须自己按常见份量估，不能把问题再推回给用户；
+3. **只有普通模式/请求失败才用本地清单**：文案要说清是「本地清单里没有」，并给「用 AI 重新解析」的出口。
+
+| 以前 | 现在 |
+| --- | --- |
+| 本地清单没认出的东西，只弹一句「我没认出来」，点不了 | 说明「本地清单里没有「X」」+ 原因（普通模式 / AI 没连上），旁边就是「用 AI 重新解析这一句」 |
+| AI 的追问只能看，没法回答 | 可以补一句重新估；也可以点「我也不知道，你按常见的估」，点了就不再追问 |
+| 普通模式下点重试可能偷偷发请求 | 先问一句「会发一次请求（可能产生费用）」，同意才走 |
+| 「模型只给名字」只有单测 | 假上游只回名字 → 真界面必须出现带「估算」的可保存条目 |
+
+**验证**：387 单测全过、反向验证严格 119/119（新增 2 条提示词变异）、`direct-check` 三·二/三·五 新增断言、
+`browser-check` 新增「佛跳墙和米饭」场景。
+
+**没验的**：真模型是否照提示词追问（取决于服务商和模型），留在 #6。
+
+---
+
 ---
 
 ## 待办（GitHub Issues）
@@ -463,12 +491,13 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 | [1](https://github.com/kotochain/fatloss-helper/issues/1) | 会员制度：不用自己配 API，充值即用 | 日后 |
 | [12](https://github.com/kotochain/fatloss-helper/issues/12) | AI 直接估热量，认不出的菜存成「我的食物」（不再只当匹配器） | v34 已完成 |
 | [13](https://github.com/kotochain/fatloss-helper/issues/13) | 记录链路剩余漏洞：AI 只给名字会被丢 / 离线部分漏识别不提示 | v35 已修 |
-| [14](https://github.com/kotochain/fatloss-helper/issues/14) | 留存后续：A 今日两件事 / C 成长回顾 / 定时提醒（做不了，见说明） | A 已做（v36），C 待定 |
+| [14](https://github.com/kotochain/fatloss-helper/issues/14) | 留存后续：A 今日两件事 / C 成长回顾 / 定时提醒（做不了，见说明） | A 已做（v36），C 已做（v38） |
 | [15](https://github.com/kotochain/fatloss-helper/issues/15) | 数据安全：演示/导入/多窗口三条会静默覆盖记录的路径 | v33 已修 |
 | [16](https://github.com/kotochain/fatloss-helper/issues/16) | 同一规则多份实现且已分叉（资料校验 3 套、4/9/4 换算 4 份） | v35 已修 |
 | [17](https://github.com/kotochain/fatloss-helper/issues/17) | app.js 4021 行：拆分方案与触发条件 | 押后 |
 | [18](https://github.com/kotochain/fatloss-helper/issues/18) | 测试守不住：空转断言 + 关键校验没测试 | v34/v35 已修 |
 | [19](https://github.com/kotochain/fatloss-helper/issues/19) | 产品逻辑总账：每条承诺 → 代码 → 测试 → 决策号 | v35 已做 |
+| [20](https://github.com/kotochain/fatloss-helper/issues/20) | 别让用户白说：AI 只给名字要本地估 + 离线漏识别要给出口 | v39 已修 |
 
 已关闭：[#2 普通模式](https://github.com/kotochain/fatloss-helper/issues/2)、
 [#3 份量配对](https://github.com/kotochain/fatloss-helper/issues/3)、[#4 器械勾选](https://github.com/kotochain/fatloss-helper/issues/4)（v20）、

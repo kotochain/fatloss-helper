@@ -388,6 +388,34 @@ async function main() {
     await evaluate(client, 'location.reload()');
     await sleep(1400);
 
+    // 第四步半之一（v39）：本地清单只认出一部分时，不许说「没认出来」——
+    // 要说清是「本地清单」里没有，并给「用 AI 重新解析」的入口。
+    await evaluate(client, `document.querySelector('.tab[data-view="log"]').click()`);
+    await sleep(400);
+    await evaluate(client, `(() => {
+      const ta = document.querySelector('#quickText');
+      ta.value = '今天吃了佛跳墙和米饭';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#quickParse').click();
+    })()`);
+    await sleep(900);
+    const leftover = await evaluate(client, `(() => {
+      const rows = [...document.querySelectorAll('#draftHost .draft-entry')];
+      const text = (document.querySelector('#draftHost')?.innerText || '').replace(/\\s+/g, ' ');
+      return {
+        条数: rows.length,
+        名字: rows.map((r) => r.querySelector('.name')?.textContent.replace(/\\s+/g, ' ').trim() || ''),
+        有佛跳墙: text.includes('佛跳墙'),
+        有重试: Boolean(document.querySelector('#draftRetryAi')),
+        重试文案: document.querySelector('#draftRetryAi')?.textContent.trim() || '',
+        旧说法: /没认出来|没认出/.test(text),
+        文案: text.slice(0, 120),
+      };
+    })()`);
+    await screenshot(client, path.join(outDir, `shot-${size.name}-11-leftover.png`));
+    await evaluate(client, `document.querySelector('#draftCancel')?.click(); true`);
+    await sleep(300);
+
     // 第四步半之二（v31）：整句都没认出来时不许死胡同 —— 有例句、能点、能回到「说一句」。
     await evaluate(client, `document.querySelector('.tab[data-view="log"]').click()`);
     await sleep(400);
@@ -403,7 +431,9 @@ async function main() {
       例句数: document.querySelectorAll('#draftHost [data-example]').length,
       有手动: Boolean(document.querySelector('#draftManual')),
       有返回: Boolean(document.querySelector('#draftAgain')),
-      文案: (document.querySelector('#draftHost')?.innerText || '').replace(/\s+/g, ' ').slice(0, 80),
+      有重试: Boolean(document.querySelector('#draftRetryAi')),
+      重试文案: document.querySelector('#draftRetryAi')?.textContent.trim() || '',
+      文案: (document.querySelector('#draftHost')?.innerText || '').replace(/\\s+/g, ' ').slice(0, 80),
     }))()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-11-deadend.png`));
     await evaluate(client, `document.querySelector('#draftHost [data-example]').click()`);
@@ -643,7 +673,7 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -684,7 +714,8 @@ function printReport(report) {
     console.log(`  AI 兜底：${r.aiFallback.行数} 行（估算 ${r.aiFallback.估算行数} 行）｜删除按钮 ${r.aiFallback.有删除按钮} 个｜合计 ${r.aiFallback.合计文本}`);
     console.log(`       ↳ 估算说明：${JSON.stringify(r.aiFallback.估算说明)}`);
     console.log(`       ↳ 删一条后 ${r.aiFallbackAfterDel.行数} 行｜存下 ${r.aiFallbackSaved.条数} 条：${JSON.stringify(r.aiFallbackSaved.名字)}`);
-    console.log(`  没认出来时：${r.deadEnd.例句数} 个例句｜手动 ${r.deadEnd.有手动 ? '有' : '缺'}｜返回 ${r.deadEnd.有返回 ? '有' : '缺'}｜文案「${r.deadEnd.文案}」`);
+    console.log(`  本地清单只认出一半：${r.leftover.条数} 条（${JSON.stringify(r.leftover.名字)}）｜提到佛跳墙 ${r.leftover.有佛跳墙 ? '是' : '否'}｜重试入口 ${r.leftover.有重试 ? '有' : '缺'}「${r.leftover.重试文案}」｜旧说法 ${r.leftover.旧说法 ? '还在' : '没有'}`);
+    console.log(`  整句解析失败时：${r.deadEnd.例句数} 个例句｜手动 ${r.deadEnd.有手动 ? '有' : '缺'}｜返回 ${r.deadEnd.有返回 ? '有' : '缺'}｜重试 ${r.deadEnd.有重试 ? '有' : '缺'}「${r.deadEnd.重试文案}」｜文案「${r.deadEnd.文案}」`);
     console.log(`  今天空着：卡片 ${r.nudgeToday.有卡片 ? '有' : '缺'}｜标题「${r.nudgeToday.标题}」｜按钮 ${JSON.stringify(r.nudgeToday.按钮)}｜点了进记录页 ${r.nudgeTodayAfter.在记录页 ? '是' : '否'}｜输入框聚焦 ${r.nudgeTodayAfter.输入框聚焦 ? '是' : '否'}`);
     console.log(`  昨天没记：卡片 ${r.nudgeYesterday.有卡片 ? '有' : '缺'}｜标题「${r.nudgeYesterday.标题}」｜按钮 ${JSON.stringify(r.nudgeYesterday.按钮)}｜点「今天不补」后消失 ${r.skipYesterday.卡片没了 ? '是' : '否'}｜跳过已存 ${r.skipYesterday.记了跳过 ? '是' : '否'}`);
     console.log(`       ↳ 点例句后：输入框「${r.deadEndAfter.例句填进去了}」｜弹层关闭 ${r.deadEndAfter.弹层关了 ? '是' : '否'}`);
@@ -715,8 +746,11 @@ function printReport(report) {
       || !r.aiFallback.估算说明.every((x) => x.includes('食物库里没有'))
       || r.aiFallbackAfterDel.行数 !== 2 || !r.aiFallbackAfterDel.合计.includes('kcal')
       || r.aiFallbackSaved.条数 < 2
-      || r.deadEnd.例句数 < 3 || !r.deadEnd.有手动 || !r.deadEnd.有返回
-      || !r.deadEnd.文案.includes('一条都没记上')
+      || r.leftover.条数 !== 1 || !r.leftover.名字.some((x) => x.includes('米饭'))
+      || !r.leftover.有佛跳墙 || !r.leftover.有重试 || r.leftover.旧说法
+      || !r.leftover.重试文案.includes('AI')
+      || r.deadEnd.例句数 < 3 || !r.deadEnd.有手动 || !r.deadEnd.有返回 || !r.deadEnd.有重试
+      || !r.deadEnd.文案.includes('本地清单') || /没认出来|没认出/.test(r.deadEnd.文案)
       || r.deadEndAfter.例句填进去了.length < 4 || !r.deadEndAfter.弹层关了
       || !r.nudgeToday.有卡片 || !r.nudgeToday.标题.includes('今天还空着') || !r.nudgeToday.按钮.includes('说一句')
       || !r.nudgeTodayAfter.在记录页 || !r.nudgeTodayAfter.输入框聚焦

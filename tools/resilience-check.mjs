@@ -803,11 +803,11 @@ async function scenarioAiProvenanceLie(group, id, title) {
 
 /** items 空数组 */
 async function scenarioAiEmptyItems(group, id, title) {
-  const sc = beginScenario(group, id, title, '标题改说「这句没认出来」、绝不显示「记上」按钮、不显示 0 kcal 草稿、不创建记录');
+  const sc = beginScenario(group, id, title, '标题改说「这句没能解析」、绝不显示「记上」按钮、不显示 0 kcal 草稿、不创建记录');
   const r = await aiRound({ model: 'empty', text: '吃了两份宇宙能量块' });
   chk(sc, '假服务商真的收到请求', r.hits >= 1, 'chat/completions 至少 1 次', `${r.hits} 次`);
   chk(sc, '界面没卡住', !r.waitErr, '弹层在限时内出现', r.waitErr || '正常');
-  chk(sc, '标题不再问「这样记对吗」', r.dom.sheetTitle === '这句没认出来', '标题是「这句没认出来」', `标题「${r.dom.sheetTitle}」`, '严重');
+  chk(sc, '标题不再问「这样记对吗」', r.dom.sheetTitle === '这句没能解析', '标题是「这句没能解析」', `标题「${r.dom.sheetTitle}」`, '严重');
   chk(sc, '不显示「记上」按钮', !r.dom.saveBtn, '不出现 #draftSave', r.dom.saveBtn ? `有（${r.dom.saveBtnText}）` : '没有', '事故级');
   chk(sc, '没有 0 kcal 草稿', r.dom.entries.length === 0 && !/0\s*kcal/.test(r.dom.draftText), '不出现条目、不出现「0 kcal」', `条目 ${r.dom.entries.length} 条；弹层「${clip(r.dom.draftText, 120)}」`, '事故级');
   chk(sc, '不显示「AI 识别」', !/AI 识别/.test(r.dom.warnText), '弹层里没有「AI 识别」', clip(r.dom.warnText, 140) || '（无）', '事故级');
@@ -815,7 +815,7 @@ async function scenarioAiEmptyItems(group, id, title) {
   const st = await closeAndReadState();
   chk(sc, '没有创建记录', st.entries.length === 0, '存档里 0 条食物记录', `${st.entries.length} 条`, '事故级');
   chk(sc, '没有未捕获异常', (await readAuditErrors()).length === 0, 'window 错误列表为空', JSON.stringify(await readAuditErrors()).slice(0, 200));
-  endScenario(sc, `AI 返回空 items → 标题「这句没认出来」，没有「记上」按钮，也没有 0 kcal 草稿`);
+  endScenario(sc, `AI 返回空 items → 标题「这句没能解析」，没有「记上」按钮，也没有 0 kcal 草稿`);
   return sc;
 }
 
@@ -1493,7 +1493,7 @@ const REPRO_STEPS = {
   'AI-6b': '同 AI-6a，但输入「中午吃了一碗牛肉面」，看「AI 这次没成功：等了 25 秒没有响应」那一行。',
   'AI-7a': '把 model 改成 "badjson"（HTTP 200，但 content 是 "not json at all"）；输入「吃了两份宇宙能量块」；看弹层有没有解析失败提示。',
   'AI-7b': '同 AI-7a，但输入「中午吃了一碗牛肉面」，看「AI 这次没成功：模型返回的不是 JSON」那一行。',
-  'AI-8': '把 model 改成 "empty"（返回 {"items":[]}）；输入「吃了两份宇宙能量块」；检查弹层标题是不是「这句没认出来」、有没有「记上」按钮、有没有 0 kcal 条目。',
+  'AI-8': '把 model 改成 "empty"（返回 {"items":[]}）；输入「吃了两份宇宙能量块」；检查弹层标题是不是「这句没能解析」、有没有「记上」按钮、有没有 0 kcal 条目。',
   'AI-9': '把 model 改成 "unmatched"（返回 {"items":[{"name":"夸克能量块","grams":100}]}）；输入「吃了两份宇宙能量块」；检查弹层是不是按同类估算记上、标了「估算」、能保存。',
   'AI-9b': '把 model 改成 "unmatched"（AI 只返回「夸克能量块」）；输入「中午吃了一碗牛肉面」（离线解析器认得这句）；看弹层来源是不是「AI 认出来的」+ 条目标了「估算」，不能冒充离线识别。',
   'AI-10': '把 model 改成 "many"（返回 50 条 items）；输入「今天吃了一桌菜」；看弹层是否卡死、能否关掉、页面是否还能操作。',

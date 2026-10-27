@@ -105,12 +105,27 @@ function startFakeProvider() {
         const isEstimateCase = userText.includes('某网红限定轻食碗');
         // v38 回归：用户真机上说的那句（本地库里没有的奶茶品牌/口味），必须能估、能记
         const isMilkTeaCase = userText.includes('苦巧');
+        // v39：模型只给名字（没有克数、没有营养）—— 本地必须按同类均值兜底，绝不丢
+        const isNameOnlyCase = userText.includes('夸克能量块');
+        // v39：普通模式「用 AI 重新解析」会把原句再发一次；这一段里出现佛跳墙就走这条
+        const isLeftoverRetry = userText.includes('佛跳墙');
         const estimateGrams = userText.includes('200') ? 200 : 300;
         const per100 = { kcal: 140, protein: 7.3, fat: 4, carb: 17.3 };
         const at = (v) => Math.round((v * estimateGrams) / 100 * 10) / 10;
         const content = isPing
           ? '可以'
-          : isMilkTeaCase
+          : isNameOnlyCase
+            ? JSON.stringify({ meal: 'lunch', items: [{ name: '夸克能量块' }], questions: [] })
+            : isLeftoverRetry
+              ? JSON.stringify({
+                meal: 'lunch',
+                items: [
+                  { name: '红烧肉', grams: 150, kcal: 570, protein: 20, fat: 48, carb: 10 },
+                  { name: '佛跳墙', grams: 300, kcal: 330, protein: 20, fat: 18, carb: 22 },
+                ],
+                questions: [],
+              })
+              : isMilkTeaCase
             ? JSON.stringify({
               meal: 'breakfast',
               items: [{
@@ -228,6 +243,10 @@ async function main() {
   const client = await connect(target.webSocketDebuggerUrl);
   await client.send('Runtime.enable');
   await client.send('Page.enable');
+  // 普通模式点「用 AI 重新解析」会先确认一次；自检里替用户点「确定」
+  client.on('Page.javascriptDialogOpening', () => {
+    client.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => { /* 对话框可能已经关了 */ });
+  });
   await client.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   const evaluate = async (expr) => {
     const r = await client.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
@@ -356,6 +375,8 @@ async function main() {
     方式: document.querySelector('#draftHost .warn')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 40) || '',
     条目: [...document.querySelectorAll('#draftHost .entry .name')].map((n) => n.textContent.trim().replace(/\\s+/g, ' ')),
     合计: document.querySelector('#draftHost .row.between b')?.textContent || null,
+    追问: [...document.querySelectorAll('#draftHost [data-ai-question]')].map((x) => x.innerText.replace(/\\s+/g, ' ').trim()),
+    有不知道: Boolean(document.querySelector('#draftHost [data-aiq-skip]')),
   }))()`);
   console.log('解析结果 →', JSON.stringify(parsed));
   const shotDraft = await client.send('Page.captureScreenshot', { format: 'png' });
@@ -373,6 +394,19 @@ async function main() {
   if (parsed.条目.length < 3) problems.push(`AI 认出 3 条但只记上 ${parsed.条目.length} 条 —— AI 的结果可能又被丢掉了`);
   const kcalNum = Number(String(parsed.合计 || '').replace(/[^0-9.]/g, ''));
   if (!(kcalNum > 500)) problems.push(`这三样算下来应当 600~800 kcal，实际「${parsed.合计}」`);
+
+  // v39：AI 追问必须能回答，也必须给「我也不知道」的出口 —— 不知道只有用户有资格说
+  console.log(`   AI 追问 → ${parsed.追问.length} 个｜「我也不知道」出口 ${parsed.有不知道 ? '有' : '缺'}`);
+  if (!parsed.追问.length) problems.push('AI 的追问没有显示在草稿里');
+  if (!parsed.有不知道) problems.push('AI 追问没有「我也不知道」的出口（用户会被迫回答）');
+  await evaluate(`document.querySelector('#draftHost [data-aiq-skip]')?.click()`);
+  await sleep(300);
+  const afterSkip = await evaluate(`(() => ({
+    追问数: document.querySelectorAll('#draftHost [data-ai-question]').length,
+    条数: document.querySelectorAll('#draftHost .entry').length,
+  }))()`);
+  if (afterSkip.追问数 !== 0) problems.push('点了「我也不知道」之后追问没有消失');
+  if (afterSkip.条数 !== parsed.条目.length) problems.push(`点「我也不知道」把条目弄丢了（${parsed.条目.length} → ${afterSkip.条数}）`);
 
   await evaluate(`document.querySelector('#draftSave').click()`);
   await sleep(500);
@@ -559,7 +593,34 @@ async function main() {
   }))()`);
   console.log(`   部分漏识别 → ${partial.条数} 条｜提示「${partial.提示.slice(0, 70)}」`);
   if (partial.条数 < 1) problems.push('只认出一部分时，认出的那条也应该能记上');
-  if (!partial.提示.includes('佛跳墙')) problems.push('没认出来的「佛跳墙」没有被提示出来（会以为整句都记上了）');
+  if (!partial.提示.includes('佛跳墙')) problems.push('没覆盖的「佛跳墙」没有被提示出来（会以为整句都记上了）');
+  // v39：这段文案不能再像「AI 不行」——只有普通模式/请求失败才会走本地清单
+  if (/没认出来|没认出/.test(partial.提示)) problems.push('还在用「没认出来」的说法，用户会以为是 AI 不行');
+  if (!partial.提示.includes('本地清单')) problems.push('没说明是「本地清单」里没有，用户会以为是 AI 认不出来');
+
+  const retryUi = await evaluate(`(() => ({
+    有按钮: Boolean(document.querySelector('#draftRetryAi')),
+    文案: document.querySelector('#draftRetryAi')?.textContent.trim() || '',
+  }))()`);
+  console.log(`   用 AI 重试的入口 →「${retryUi.文案}」`);
+  if (!retryUi.有按钮) problems.push('本地清单没覆盖的东西没有「用 AI 重新解析」入口');
+  if (!retryUi.文案.includes('用 AI')) problems.push(`重试按钮文案不对：${retryUi.文案}`);
+
+  // 点重试：普通模式会先 confirm（自检里自动确定），然后必须真的走 AI、把佛跳墙估出来
+  const beforeRetryChats = hits.chat;
+  await evaluate(`document.querySelector('#draftRetryAi').click()`);
+  await sleep(2600);
+  const retried = await evaluate(`(() => ({
+    条数: document.querySelectorAll('#draftHost .entry').length,
+    名字: [...document.querySelectorAll('#draftHost .entry .name')].map((n) => n.textContent.replace(/\\s+/g, ' ').trim()),
+    方式: document.querySelector('#draftHost .warn')?.textContent.replace(/\\s+/g, ' ').trim().slice(0, 30) || '',
+    还在说本地清单: (document.querySelector('#draftHost')?.innerText || '').includes('本地清单'),
+  }))()`);
+  const retryChats = hits.chat - beforeRetryChats;
+  console.log(`   用 AI 重新解析 → ${retried.条数} 条｜${JSON.stringify(retried.名字)}｜新增请求 ${retryChats} 次`);
+  if (retryChats !== 1) problems.push(`点「用 AI 重新解析」应当只发 1 次请求，实际 ${retryChats} 次`);
+  if (!retried.名字.some((n) => n.includes('佛跳墙'))) problems.push(`重试后应当出现佛跳墙，实际 ${JSON.stringify(retried.名字)}`);
+  if (retried.还在说本地清单) problems.push('重试成功后还在说「本地清单」');
   await evaluate(`document.querySelector('#draftCancel')?.click(); document.querySelector('#sheetClose')?.click(); true`);
   await sleep(300);
 
@@ -570,6 +631,36 @@ async function main() {
   await sleep(450);
   const backToAi = await evaluate(`window.__appState?.mode || null`);
   if (backToAi !== 'ai') problems.push('切不回 AI 模式');
+
+  console.log('\n=== 三·五、模型只给名字：按同类估算记上，不能丢（v39）===');
+  await evaluate(`document.querySelector('.tab[data-view="log"]')?.click()`);
+  await sleep(400);
+  await evaluate(`(() => {
+    const ta = document.querySelector('#quickText');
+    ta.value = '中午吃了夸克能量块';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('#quickParse').click();
+  })()`);
+  await sleep(2500);
+  const nameOnly = await evaluate(`(() => {
+    const rows = [...document.querySelectorAll('#draftHost .draft-entry')];
+    const text = (document.querySelector('#draftHost')?.innerText || '').replace(/\\s+/g, ' ');
+    return {
+      条数: rows.length,
+      名字: rows.map((r) => r.querySelector('.name')?.textContent.replace(/\\s+/g, ' ').trim() || ''),
+      标签: rows.map((r) => r.querySelector('.tag.amber')?.textContent.trim() || ''),
+      有保存: Boolean(document.querySelector('#draftSave')),
+      文案: text.slice(0, 160),
+    };
+  })()`);
+  console.log('   AI 只回名字 →', JSON.stringify(nameOnly));
+  if (nameOnly.条数 !== 1) problems.push(`模型只给名字时必须保留并估 1 条，实际 ${nameOnly.条数} 条`);
+  if (!nameOnly.标签.some((t) => t.includes('估算'))) problems.push(`按同类估的条目没标「估算」：${JSON.stringify(nameOnly.标签)}`);
+  if (!nameOnly.有保存) problems.push('模型只给名字时没有可保存的草稿（用户会白说）');
+  if (!/食物库里没有/.test(nameOnly.文案)) problems.push('没说清这条是按同类食物估的');
+  // 不点保存：这条已经证明「有可保存的估算条目」；真存进去会改变当天热量，影响后面的教练用例
+  await evaluate(`document.querySelector('#draftCancel')?.click(); true`);
+  await sleep(300);
 
   console.log('\n=== 四、教练：AI 只组织语言，数字本地算 ===');
   await evaluate(`document.querySelector('.tab[data-view="today"]')?.click()`);

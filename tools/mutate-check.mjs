@@ -54,6 +54,9 @@ const MUTATIONS = [
   // v35：单源化与 #13（4/9/4 只有一处、没给份量不许丢、部分漏识别要提示、合计只有一份）
   { file: 'js/calc.js', from: 'export function macroKcal({ protein = 0, fat = 0, carb = 0 } = {}) {', to: 'export function macroKcal({ protein = 0, fat = 0, carb = 0 } = {) {', why: '4/9/4 折算只有一处实现（语法级破坏：改坏后测试会红）' },
   { file: 'js/ai-core.js', from: '      gramsMissing: !rounded && !portion,', to: '      gramsMissing: false,', why: 'AI 只给名字没给份量时必须标出来（否则又变成悄悄丢/悄悄估）' },
+  // v39：AI 的「不知道」红线（提示词层）——「不知道」只有用户有资格说
+  { file: 'js/ai-core.js', from: "'   「不知道」只有用户有资格说；你的职责是给出一个合理的估算，再把不确定的细节问清楚。',", to: "'   （删掉这句）',", why: 'AI 不能对用户说「不知道」（提示词里必须写死这条）' },
+  { file: 'js/ai-core.js', from: "'   questions 只问能帮到估算的细节（份量、做法、品牌），不要问\"这是什么\"——那是你该估的。',", to: "'   （删掉这句）',", why: '追问只问能帮到估算的细节，不能问「这是什么」' },
   { file: 'js/mealparse.js', from: "    if (leftover.length < 2) leftover = '';", to: "    leftover = '';", why: '部分漏识别要提示（认出一部分时不能一声不响）' },
   { file: 'js/calc.js', from: '      acc.protein += f.protein;', to: '      acc.protein += 0;', why: '每日合计只有一份（改坏蛋白累加后，合计断言必须红）' },
   // v34：AI 归位相关的三条（估营养优先级 / 4-9-4 校验 / 省请求的保守判定）

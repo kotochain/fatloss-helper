@@ -1406,7 +1406,7 @@ function openDraftSheet() {
   if (!draft) return;
   openSheet({
     // 一条都没认出来时，标题不能还问「这样记对吗？」
-    title: draft.items.length ? '这样记对吗？' : '这句没认出来',
+    title: draft.items.length ? '这样记对吗？' : '这句没能解析',
     body: '<div id="draftHost"></div>',
     onMount: () => {
       drawDraft();
@@ -1414,11 +1414,15 @@ function openDraftSheet() {
   });
 }
 
-async function runQuickParse(text, mealOverride = null) {
+async function runQuickParse(text, mealOverride = null, { forceAi = false } = {}) {
   // 餐次优先级：调用方指定（「加到午餐」里说的）> 今天页那个按钮带的提示 > 按时钟猜
   const meal = mealOverride || quickMealHint || guessMeal();
   let items = [];
   let questions = [];
+  // AI 的追问和本地「份量没说清」的问题分开存：前者可以答「不知道」让 AI 自己估，
+  // 后者直接就是本地估算的档位按钮，两件事混在一起界面会分不清该给哪种操作。
+  let aiQuestions = [];
+  let leftover = '';
   let source = 'offline';
   let aiError = null;
   let aiNote = null;
@@ -1426,13 +1430,14 @@ async function runQuickParse(text, mealOverride = null) {
   let normEstimated = [];
   let normAiEstimated = [];
 
-  if (aiOn()) {
+  if (forceAi || aiOn()) {
     /*
      * v34：这句话如果只涉及「你之前存过的菜」（上次 AI 估过、已经存成我的食物），
      * 本地就能说清，不再花一次 AI 请求 —— 这是「下次同名直接命中」的兑现方式。
      * 判定很保守：除了名字只剩份量/餐次/口语词才走这里；有别的吃的就照常问 AI（见 cachedOnlyMatch）。
      */
-    const cached = cachedOnlyMatch(text, state.customFoods);
+    // 点「用 AI 重新解析」必须真的走 AI：命中「我的食物」就停下来的话，点重试等于没点
+    const cached = forceAi ? null : cachedOnlyMatch(text, state.customFoods);
     if (cached) {
       const food = cached.food;
       const portion = findPortion(text);
@@ -1465,7 +1470,7 @@ async function runQuickParse(text, mealOverride = null) {
       normAiEstimated = norm.aiEstimated || [];
       if (norm.items.length) {
         items = norm.items;
-        questions = norm.questions;
+        aiQuestions = norm.questions;
         // **只有真的有条目落到本地库，才算「AI 识别」。**
         // 以前这里先写 source='ai' 再判断：AI 返回的名字一个都匹配不上时，
         // 下面会走离线兜底，于是离线解析出来的条目被标成「AI 识别」—— 来源造假。
@@ -1483,15 +1488,15 @@ async function runQuickParse(text, mealOverride = null) {
     const local = parseDescription(text, meal);
     items = local.items;
     if (local.unknown.length) {
-      questions = questions.concat(local.unknown.map((u) => `「${u}」我不太确定是什么，能再说具体点吗？（或者用手动记一笔）`));
+      questions = questions.concat(local.unknown.map((u) => `「${u}」不在本地清单里；用 AI 重新解析，任何食物都能估。`));
     }
     /*
      * v35（issue #13）：认出来一部分、还有没认出来的字 —— 以前不吭声，用户以为整句都记上了。
      * 现在问一句（不拦着记，已认出的照样能保存）。
      */
-    if (items.length && local.leftover) {
-      questions.push(`这句话里的「${local.leftover}」我没认出来 —— 要不要再补一条？（已认出的先记上也可以）`);
-    }
+    // 本地清单认不全时把没覆盖的片段带出去。注意这不是「AI 没认出来」：
+    // AI 正常工作时走不到这里，只有普通模式或 AI 请求失败才会用本地清单。
+    if (items.length && local.leftover) leftover = local.leftover;
   }
 
   for (const it of items) {
@@ -1503,6 +1508,8 @@ async function runQuickParse(text, mealOverride = null) {
     meal,
     items,
     questions: [...new Set(questions)].slice(0, 4),
+    aiQuestions: [...new Set(aiQuestions)].slice(0, 2),
+    leftover,
     source,
     aiError,
     note: aiNote,
@@ -1542,6 +1549,28 @@ function applyDraftGrams(box, idx, grams) {
   if (summary) summary.textContent = Math.round(sumItems(draft.items).kcal);
 }
 
+/**
+ * 「用 AI 重新解析这一句」。
+ *
+ * 只会出现在两种「本地清单兜底」的情况：普通模式，或者 AI 这次没连上。
+ * 普通模式下点它要先确认一次 —— 普通模式承诺「不联网、不花钱」，不能因为用户点了
+ * 一个按钮就偷偷发请求；用户明确同意才走。
+ */
+async function retryWithAi() {
+  if (!draft) return;
+  const meal = draft.meal;
+  const original = draft.text;
+  if (!ai.configured) {
+    closeSheet();
+    openAiSettingsSheet();
+    return;
+  }
+  if (!aiOn() && !confirm('这一步会用 AI 重新解析这一句，会发一次请求（可能产生费用）。继续吗？')) return;
+  draft = null;
+  closeSheet();
+  await runQuickParse(original, meal, { forceAi: true });
+}
+
 /** 把解析结果画成「可以改的清单」 */
 function drawDraft() {
   const box = $('#draftHost') || $('#quickResult');
@@ -1553,21 +1582,25 @@ function drawDraft() {
     // 但真遇到时也不能让用户卡在这儿：给能点的例子 + 直接进食物搜索 + 保留原句重写。
     const original = draft.text || '';
     const examples = ['一碗牛肉面加了个蛋', '半碗米饭、一份红烧肉', '一杯奶茶、一份鸡排'];
+    const canRetry = Boolean(ai.configured);
     box.innerHTML = `
       <div class="warn" style="margin-top:10px">
         ${draft.aiError
-          ? '这句没能记上：AI 那条路没通，离线识别也没认出里面的食物。'
-          : '这句我没认出里面的食物，所以一条都没记上。'}
+          ? `这句没能记上：AI 没连上（${esc(draft.aiError)}），本地清单里也没有认得的食物。`
+          : '这句没能记上：普通模式只认本地清单，里面没有认得的食物。'}
       </div>
-      ${draft.aiError ? `<div class="warn" style="margin-bottom:8px">
-        AI 给的原因：${esc(draft.aiError)}。可以去「我的 → 设置 → AI 设置」看看有没有配好。
-      </div>` : ''}
-      <p class="tiny muted" style="margin:0 0 8px">换成下面这种说法一般都能认；也可以直接搜食物自己记：</p>
+      <p class="tiny muted" style="margin:0 0 8px">
+        ${canRetry
+          ? '用 AI 重新解析这一句，它会按最接近的常见食物估一条。'
+          : '在「我的 → 设置 → AI 设置」配好 AI，任何食物都能估。'}
+      </p>
+      <button class="btn block" style="margin-top:12px" id="draftRetryAi">${canRetry ? '用 AI 重新解析这一句' : '去配 AI'}</button>
+      <button class="btn ghost block" style="margin-top:8px" id="draftManual">手动搜食物记一笔</button>
+      <button class="btn ghost block" style="margin-top:8px" id="draftAgain">回到输入框改一改</button>
+      <p class="tiny muted" style="margin:12px 0 8px">或者换成下面这种说法再试：</p>
       <div class="chips" id="draftExamples">
         ${examples.map((e) => `<button class="chip" type="button" data-example="${esc(e)}">${esc(e)}</button>`).join('')}
-      </div>
-      <button class="btn block" style="margin-top:12px" id="draftManual">手动搜食物记一笔</button>
-      <button class="btn ghost block" style="margin-top:8px" id="draftAgain">回到输入框改一改</button>`;
+      </div>`;
     // 两个入口（记录页大输入框 / 加食物弹层里的「说一句」）都要能接上：
     // 前者有 #quickText，后者弹层已经关了，只能重新打开「说一句」并把文字填好
     const fillSay = (text, hint) => {
@@ -1587,6 +1620,7 @@ function drawDraft() {
       btn.addEventListener('click', () => fillSay(btn.dataset.example, $('#quickText') ? '改成例句了，点「解析这一句」试试。' : '改成例句了，点「解析并记到这一餐」试试。'));
     });
     $('#draftAgain', box)?.addEventListener('click', () => fillSay(original, '原句给你留着了，改一改再点解析。'));
+    $('#draftRetryAi', box)?.addEventListener('click', retryWithAi);
     $('#draftManual', box)?.addEventListener('click', () => {
       const meal = draft.meal;
       draft = null;
@@ -1619,6 +1653,20 @@ function drawDraft() {
       有 ${draft.estimated.length} 样食物库里没有，先按<b>同类食物的平均值</b>估了（标签「估算」）：
       <b>${draft.estimated.map((x) => esc(x)).join('、')}</b>。不准就点右边的 × 删掉，或者直接改克数。
     </div>` : ''}
+    ${(draft.aiQuestions || []).map((q, i) => `
+      <div class="warn info" style="margin-bottom:6px" data-ai-question="${i}">
+        <div>AI 想确认一下：${esc(q)}</div>
+        <input type="text" data-aiq-input="${i}" maxlength="60" placeholder="知道就补一句；不知道就点下面" style="margin-top:6px">
+        <div class="chips" style="margin-top:6px">
+          <button class="chip" type="button" data-aiq-send="${i}">按这个重新估</button>
+          <button class="chip" type="button" data-aiq-skip="${i}">我也不知道，你按常见的估</button>
+        </div>
+      </div>`).join('')}
+    ${draft.leftover ? `<div class="warn info" style="margin-bottom:6px">
+      ${draft.aiError ? '本地清单里没有' : '普通模式只用了本地清单，里面没有'}「<b>${esc(draft.leftover)}</b>」。
+      ${ai.configured ? '用 AI 重新解析这一句，AI 能估任何食物。' : '配好 AI 之后，任何食物都能估。'}
+    </div>
+    <button class="btn ghost block" style="margin-bottom:8px" id="draftRetryAi">${ai.configured ? '用 AI 重新解析这一句' : '去配 AI'}</button>` : ''}
     ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
     <div style="margin-top:8px">
       ${draft.items.map((it, i) => `
@@ -1660,6 +1708,36 @@ function drawDraft() {
     </div>
     ${needsCheck ? '<p class="tiny muted" style="margin:8px 0 0">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
 
+  // 本地清单没覆盖到的东西：一键把原句重新交给 AI，用户在普通模式下会先被问一句
+  $('#draftRetryAi', box)?.addEventListener('click', retryWithAi);
+  // AI 追问：补一句就带着原句重新估；点「不知道」就按现有估算记，问题当场消失。
+  // 「不知道」只有用户有资格说 —— 点了之后 AI 不再追问，数字用它已经估好的那份。
+  box.querySelectorAll('[data-aiq-send]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!draft) return;
+      const i = Number(btn.dataset.aiqSend);
+      const q = draft.aiQuestions?.[i];
+      if (!q) return;
+      const answer = String(box.querySelector(`[data-aiq-input="${i}"]`)?.value || '').trim();
+      if (!answer) return toast('先补一句，或者点「我也不知道」。');
+      const meal = draft.meal;
+      const merged = `${draft.text}（补充说明：${q}${answer}）`;
+      draft = null;
+      closeSheet();
+      await runQuickParse(merged, meal, { forceAi: true });
+    });
+  });
+  box.querySelectorAll('[data-aiq-skip]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!draft) return;
+      const i = Number(btn.dataset.aiqSkip);
+      if (!Number.isInteger(i) || !draft.aiQuestions?.[i]) return;
+      // 只把这一块拿掉、把槽位留空，不整页重绘 —— 否则别的问题里已经打好的补充会丢
+      box.querySelector(`[data-ai-question="${i}"]`)?.remove();
+      draft.aiQuestions[i] = null;
+      toast('好，就按现在的估算记。');
+    });
+  });
   // 改份量：点档位和用户自己敲数字走同一条路 —— 两处各写一遍，迟早有一处忘了更新合计（这个坑踩过）
   box.querySelectorAll('.draft-grams').forEach((inp) => {
     inp.addEventListener('input', () => {
