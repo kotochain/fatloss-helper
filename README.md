@@ -638,6 +638,7 @@ git push -u origin main
 ## 四、给开发者的部分
 
 > 接手/交接先看 [HANDOFF.md](HANDOFF.md)：当前状态、关键决策、验证命令、待办和踩过的坑都在里面。
+> 只想要一屏速览：[docs/交接速览.md](docs/交接速览.md)。
 
 
 ```bash
