@@ -18,15 +18,19 @@
 </head>
 <body>
 <!--
-  ┌─ 版本自查（v45）──────────────────────────────────────────────────┐
-  │ 为什么必须是内联脚本、不能放在 app.js 里：                          │
-  │  1) Service Worker 的策略是「先用缓存、后台更新」，所以打开时页面     │
-  │     **本来就是旧版** —— 这是 PWA 的常态，不是 bug；                │
-  │  2) 线上 sw.js 带 cache-control: max-age=600，CDN 还会缓存。        │
-  │     app.js 里的 cache:'no-store' 只绕浏览器缓存、**绕不过 CDN**，    │
-  │     读到的还是旧版本号 → 判定「已是最新」→ 一条提示都没有。          │
-  │     用户真撞上：新开网页是旧版、没有任何提示、手动刷新一下才好。      │
-  │  3) 这段不依赖 app.js：万一旧版 app.js 本身有问题，提示也不能没有。  │
+  ┌─ 版本自查（v45 引入，v46 补齐「一直开着」这一半）──────────────────┐
+  │ 这个应用对更新的要求是两条，缺一条都不算对：                        │
+  │   A) **每次打开都应该是新版** —— 由 sw.js 的「网络优先」保证；      │
+  │   B) **页面一直开着时，线上发了新版要主动提示** —— 就是下面这段。    │
+  │                                                                   │
+  │ 为什么必须内联、不能放在 app.js 里：                                │
+  │  1) 这段要能在旧版 app.js 本身出问题时照样工作；                    │
+  │  2) 页面一解析就要开始查，不能等 30 多个模块下完、主程序跑起来。      │
+  │                                                                   │
+  │ ?ts= 不能省：线上 sw.js 带 cache-control: max-age=600，CDN 还会     │
+  │ 缓存。不带时间戳时 CDN 会把 10 分钟前的旧 sw.js 直接还回来，          │
+  │ 版本号永远读不到新的 → 判定「已是最新」→ 一条提示都没有。            │
+  │ （用户真撞上过：新开网页是旧版、没有任何提示、手动刷新才好。）        │
   │                                                                   │
   │ 下面的 HERE 必须等于 js/version.js 的 APP_VERSION，                │
   │ 由 tests/version.test.mjs 守着（改版本号漏改这里就红）。            │
@@ -37,7 +41,7 @@
 </div>
 <script>
 (function () {
-  var HERE = 'v45';
+  var HERE = 'v46';
   var bar = document.getElementById('verBar');
   var txt = document.getElementById('verBarText');
   if (!bar || !txt) return;
@@ -63,25 +67,56 @@
   }
   bar.addEventListener('click', goFresh);
 
+  var shown = false;   // 已经提示过了就不再查（避免一分钟一次的无用请求）
+  var checking = false; // 上一次还没回来就别叠加
+
+  function show(v) {
+    if (shown) return;
+    shown = true;
+    txt.textContent = '有新版本 ' + v + '，点这里更新（记录不会丢）';
+    bar.style.display = 'block';
+    // 顺手催浏览器去装新版 Service Worker（装好再刷新就是新代码）
+    try {
+      navigator.serviceWorker.getRegistration().then(function (reg) {
+        if (reg && reg.update) reg.update();
+      });
+    } catch (e) { /* 忽略 */ }
+  }
+
   /*
+   * 问一次服务器现在是什么版本。
    * ?ts= 让每次请求都回源：sw.js 在 GitHub Pages 上是 max-age=600，
    * 不带时间戳的话 CDN 会把旧的 sw.js 直接还给你，版本号永远读不到新的。
    */
-  fetch('sw.js?ts=' + Date.now(), { cache: 'no-store' })
-    .then(function (r) { return r.ok ? r.text() : ''; })
-    .then(function (t) {
-      var m = t.match(/APP_VERSION = '([^']+)'/);
-      if (!m || !m[1] || m[1] === HERE) return;
-      txt.textContent = '有新版本 ' + m[1] + '，点这里更新（记录不会丢）';
-      bar.style.display = 'block';
-      // 顺手催浏览器去装新版 Service Worker（装好再刷新就是新代码）
-      try {
-        navigator.serviceWorker.getRegistration().then(function (reg) {
-          if (reg && reg.update) reg.update();
-        });
-      } catch (e) { /* 忽略 */ }
-    })
-    .catch(function () { /* 离线或网络抖动：安静，app.js 启动后还会再试一次 */ });
+  function check() {
+    if (shown || checking) return;
+    checking = true;
+    fetch('sw.js?ts=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : ''; })
+      .then(function (t) {
+        checking = false;
+        var m = t.match(/APP_VERSION = '([^']+)'/);
+        if (!m || !m[1] || m[1] === HERE) return;
+        show(m[1]);
+      })
+      .catch(function () { checking = false; /* 离线或网络抖动：安静，下一个周期再试 */ });
+  }
+
+  check(); // 打开就查一次（配合 sw.js 的网络优先，正常情况下这里本来就该是最新版）
+
+  /*
+   * 页面一直开着的情况 —— 这是 v46 补的一半：
+   *  · 每分钟自查一次（标签页在后台时不查，省电省流量）；
+   *  · 切回前台立刻查（用户回来了，正好把新版递到眼前）；
+   *  · 网络恢复立刻查（刚才断网时查不到，接上就有可能是新版）。
+   */
+  setInterval(function () {
+    if (document.visibilityState === 'visible') check();
+  }, 60000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') check();
+  });
+  window.addEventListener('online', check);
 })();
 </script>
 <!--

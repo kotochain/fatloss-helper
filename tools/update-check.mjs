@@ -1,21 +1,17 @@
 /**
- * 更新提示自检（v45，真事故回归）。
+ * 更新机制自检（v45 引入，v46 按正确的逻辑重写）。
  *
- * 要守住的一件事：**打开网页是旧版时，用户必须立刻看到「有新版本」的提示**，
- * 而不是「看到旧界面 → 没有任何提示 → 自己手动刷新才好」。
+ * 这个应用对更新只有两条要求，两条都必须守住：
  *
- * 为什么以前会没提示：
- *  1) Service Worker 是「先用缓存 + 后台更新」，所以打开时页面本来就是旧版（PWA 常态）；
- *  2) 线上 sw.js 带 `cache-control: max-age=600`，前面还有 CDN。
- *     app.js 里的 `cache: 'no-store'` 只绕浏览器缓存、**绕不过 CDN** ——
- *     读回来的是旧版本号，一比「已是最新」，提示永远不出现。
+ *   A) **每次打开网页都是最新版** —— 不该「先给旧版、再提示更新」。
+ *      由 sw.js 的「网络优先」保证：先问服务器要最新的，拿不到才用缓存。
+ *   B) **页面一直开着时，线上发了新版要主动提示** —— 用户不该靠自己刷新才发现。
+ *      由 index.html 内联的那段自查保证：每分钟 / 切回前台 / 网络恢复时各查一次。
  *
- * 现在 index.html 里有一段内联脚本：页面一解析就 fetch(`sw.js?ts=…`) 拿线上版本，
- * 和页面自己的版本比，不一样就把顶部横幅亮出来；点横幅清代码缓存 + 重载（不碰 localStorage）。
- *
- * 做法：整个项目复制到临时目录再折腾（不在真实仓库里改版本号）——
- * 起服务 → 让浏览器缓存当前版本 → 把副本的版本号改成 v99 模拟发版 →
- * 同一个浏览器新开页面 → 断言横幅立刻出现、点完真的换成新版。
+ * 做法：整个项目复制到临时目录再折腾（不在真实仓库里改版本号），
+ * 起服务 → 第一次打开（装 SW、缓存当前版本）→ 把副本改成 v99 模拟发版 →
+ * 新开一个标签（断言「直接就是 v99」）→ 让这个标签一直开着、再改成 v100 →
+ * 触发「切回前台」（断言横幅立刻出现）→ 点横幅（断言变成 v100）。
  *
  * 用法：node tools/update-check.mjs（自己起服务，不需要先跑 serve）
  */
@@ -79,7 +75,7 @@ async function waitFor(fn, what, timeout = 25000) {
   throw new Error(`等待「${what}」超时：${JSON.stringify(last)}`);
 }
 
-/** 采集这一页的「实际版本 + 有没有横幅」 */
+/** 采集这一页的「实际版本 + 有没有横幅 + 缓存名」 */
 function probe(client) {
   return evaluate(client, `(async () => {
     const { APP_VERSION } = await import('./js/version.js');
@@ -123,11 +119,28 @@ async function main() {
     '--window-size=390,844', 'about:blank',
   ], { stdio: 'ignore' });
 
+  // 只改沙箱副本，模拟「线上发了一版」
+  const bump = (to) => {
+    const swap = (file, from, target) => {
+      const p = path.join(sandbox, file);
+      const s = fs.readFileSync(p, 'utf8');
+      const next = s.split(from).join(target);
+      if (next === s) throw new Error(`沙箱里没找到要替换的内容：${file} ← ${from}`);
+      fs.writeFileSync(p, next);
+    };
+    const prev = (fs.readFileSync(path.join(sandbox, 'js', 'version.js'), 'utf8').match(/APP_VERSION = '(v\d+)'/) || [])[1];
+    swap('js/version.js', `APP_VERSION = '${prev}'`, `APP_VERSION = '${to}'`);
+    swap('sw.js', `const CACHE = 'fatloss-${prev}'`, `const CACHE = 'fatloss-${to}'`);
+    swap('sw.js', `const APP_VERSION = '${prev}'`, `const APP_VERSION = '${to}'`);
+    swap('index.html', `var HERE = '${prev}'`, `var HERE = '${to}'`);
+    return prev;
+  };
+
   try {
     await waitFor(async () => (await fetch(BASE + '/', { signal: AbortSignal.timeout(3000) })).ok, '本地服务', 20000);
     await waitFor(async () => (await fetch(`http://127.0.0.1:${CDP}/json/version`)).ok, '调试端口', 40000);
 
-    // 第 1 次打开：让 Service Worker 把当前版本缓存下来
+    // ── 第 1 次打开：正常安装 Service Worker，把当前版本缓存下来 ──
     const first = await newPage();
     await first.send('Page.navigate', { url: BASE + '/' });
     await waitFor(() => evaluate(first, 'window.__appReady === true'), '第一次启动', 40000);
@@ -136,33 +149,56 @@ async function main() {
     const before = await probe(first);
     if (before.版本 !== cur) bad(`第一次打开跑的不是当前版本：${before.版本}（应为 ${cur}）`);
     if (before.横幅) bad('第一次打开就有更新横幅（版本没变却提示，会天天误报）');
-    ok(`第一次打开：缓存 ${cur}，没有横幅`);
+    if (!before.缓存.includes(`fatloss-${cur}`)) bad(`第一次打开后缓存里没有 fatloss-${cur}：${JSON.stringify(before.缓存)}`);
+    ok(`第一次打开：版本 ${cur}、缓存 ${before.缓存.join('/')}、没有横幅`);
     await first.send('Page.close').catch(() => {});
     await sleep(400);
 
-    // 模拟「线上发了新版」：只改沙箱里的版本号
-    const bump = (file, from, to) => {
-      const p = path.join(sandbox, file);
-      fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(from, to));
-    };
-    bump('sw.js', `const CACHE = 'fatloss-${cur}'`, "const CACHE = 'fatloss-v99'");
-    bump('sw.js', `const APP_VERSION = '${cur}'`, "const APP_VERSION = 'v99'");
-    bump('js/version.js', `APP_VERSION = '${cur}'`, "APP_VERSION = 'v99'");
-    bump('index.html', `var HERE = '${cur}'`, "var HERE = 'v99'");
-    console.log(`\n   模拟发版：${cur} → v99（只改了临时副本）\n`);
+    // ── 规则 A：模拟发版后新开一个网页，应该**直接**是新版 ──
+    const from = bump('v99');
+    console.log(`\n   模拟发版：${from} → v99（只改了临时副本）\n`);
 
-    // 第 2 次打开：同一个浏览器、不清缓存 —— 就是用户「新开一个网页」
     const second = await newPage();
     await second.send('Page.navigate', { url: BASE + '/' });
-    await waitFor(() => evaluate(second, 'window.__appReady === true'), '第二次启动', 40000);
+    await waitFor(() => evaluate(second, 'window.__appReady === true'), '发版后新开网页', 40000);
+    await sleep(600);
     const justOpened = await probe(second);
-    if (justOpened.版本 !== cur) bad(`第二次打开本应是缓存的旧版 ${cur}，实际 ${justOpened.版本}（这个自检就失去意义了）`);
-    if (!justOpened.横幅) bad('打开旧版却没有更新横幅（用户看到旧界面、什么提示都没有 —— v45 修的就是这个）');
-    else ok(`打开旧版（${cur}）时横幅立刻出现：「${justOpened.横幅文字}」`);
-    if (!/有新版本/.test(justOpened.横幅文字)) bad(`横幅文案没说「有新版本」：${justOpened.横幅文字}`);
-    if (!/记录不会丢/.test(justOpened.横幅文字)) bad(`横幅文案没说「记录不会丢」（用户不敢点）：${justOpened.横幅文字}`);
+    if (justOpened.版本 === 'v99') {
+      ok(`发版后新开网页：直接就是新版 v99（没有"先给旧版"这一步）`);
+    } else {
+      bad(`发版后新开网页拿到的是 ${justOpened.版本}，不是 v99 —— 打开时还是旧版，说明 Service Worker 的「网络优先」没生效`);
+    }
+    if (justOpened.横幅) {
+      bad(`打开就已经是最新版，却还挂着更新横幅：「${justOpened.横幅文字}」`);
+    }
+    // Service Worker 本身也要跟着换到新缓存（否则下次断网会退回旧版）
+    const swSwapped = await waitFor(
+      () => evaluate(second, `caches.keys().then((ks) => ks.includes('fatloss-v99') ? ks : null)`),
+      '新版 Service Worker 装好', 20000,
+    ).catch(() => null);
+    if (swSwapped) ok(`Service Worker 也换到新版缓存：${swSwapped.join('/')}`);
+    else bad('新版 Service Worker 没装上（缓存里没有 fatloss-v99），断网时会退回旧版');
 
-    // 点横幅：应该清掉旧缓存并重载成新版
+    // ── 规则 B：页面**一直开着**，又发了一版 → 切回前台就该提示 ──
+    bump('v100');
+    console.log('\n   再发一版：v99 → v100（页面保持打开，不重新加载）\n');
+    // 模拟「用户切回这个标签页」：触发 visibilitychange（真实路径，不直接调内部函数）
+    await evaluate(second, `(() => { document.dispatchEvent(new Event('visibilitychange')); return document.visibilityState; })()`);
+    const barShown = await waitFor(
+      () => evaluate(second, `(() => { const b = document.getElementById('verBar'); return b && getComputedStyle(b).display !== 'none' ? document.getElementById('verBarText').textContent.trim() : ''; })()`),
+      '页面一直开着时的更新提示', 15000,
+    ).catch(() => '');
+    if (barShown) ok(`页面没重新加载，也主动提示了：「${barShown}」`);
+    else bad('页面一直开着时发新版，没有任何提示（用户必须自己刷新才知道 —— 这正是要修的）');
+    if (barShown && !/有新版本/.test(barShown)) bad(`横幅文案没说「有新版本」：${barShown}`);
+    if (barShown && !/记录不会丢/.test(barShown)) bad(`横幅文案没说「记录不会丢」（用户不敢点）：${barShown}`);
+    // 页面本身这时候还应该是 v99（提示归提示，不该偷偷重载把用户正在看的东西弄没）
+    const stillOpen = await probe(second);
+    if (stillOpen.版本 !== 'v99') bad(`页面被自动替换成 ${stillOpen.版本} 了 —— 应该先提示、由用户决定什么时候更新`);
+    else ok('提示期间页面保持原样（没有偷偷重载）');
+
+    // ── 点横幅：换成 v100，记录不丢 ──
+    await evaluate(second, `localStorage.setItem('fatloss.selfcheck.marker', 'keep-me')`);
     await evaluate(second, `document.getElementById('verBar').click()`).catch(() => {});
     await sleep(2200);
     let after = null;
@@ -173,9 +209,12 @@ async function main() {
       bad(`点横幅之后页面没起来：${err.message}`);
     }
     if (after) {
-      if (after.版本 === 'v99') ok('点横幅之后变成新版 v99');
-      else bad(`点横幅之后还是 ${after.版本}（应当是新版 v99）`);
+      if (after.版本 === 'v100') ok('点横幅之后变成 v100');
+      else bad(`点横幅之后还是 ${after.版本}（应当是新版 v100）`);
       if (after.横幅) bad('更新完横幅还挂着（用户会以为没生效）');
+      const kept = await evaluate(second, `localStorage.getItem('fatloss.selfcheck.marker')`).catch(() => null);
+      if (kept === 'keep-me') ok('本机记录没被清掉（只清了代码缓存）');
+      else bad('点更新把本机记录也清掉了 —— 绝对不能丢用户数据');
     }
   } finally {
     try { chrome.kill('SIGKILL'); } catch { /* 忽略 */ }
@@ -189,11 +228,11 @@ async function main() {
     for (const p of problems) console.log(`❌ ${p}`);
     process.exit(1);
   }
-  console.log('✅ 旧版打开会立刻提示更新，点一下就换成新版，记录不受影响');
+  console.log('✅ 打开就是最新版；页面一直开着时有新版会主动提示；点一下换成新版，记录不丢');
   process.exit(0);
 }
 
 main().catch((err) => {
-  console.error(`更新提示自检自己崩了：${err.message}`);
+  console.error(`更新机制自检自己崩了：${err.message}`);
   process.exit(1);
 });

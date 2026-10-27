@@ -124,8 +124,9 @@ async function main() {
 
   // 自己起服务的（不需要 4173）
   await run('浏览器直连 AI（本地假服务商，零费用）', 'tools/direct-check.mjs');
-  // v45：真事故回归 —— 打开旧版时必须立刻提示更新（CDN 缓存旧 sw.js 时也不能没提示）
-  await run('打开旧版要提示更新（模拟发版）', 'tools/update-check.mjs');
+  // v46：更新的两条底线 —— ① 打开就是最新版（不是先给旧版再提示）；
+  // ② 页面一直开着时，线上发了新版要主动提示。两条都在临时副本里模拟发版验。
+  await run('打开就是最新版 + 开着时主动提示（模拟发版）', 'tools/update-check.mjs');
   await run('照包装营养成分表（手动填 + 拍照读表）', 'tools/label-check.mjs');
   if (mode === 'full') {
     await run('AI 失败路径与存档异常', 'tools/resilience-check.mjs');
