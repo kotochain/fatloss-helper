@@ -14,13 +14,21 @@
  * 为什么要有更新说明：使用者不会去看 GitHub，也不会读提交记录。
  * 改了什么东西，只能在应用里告诉用户 —— 这是用户唯一会看到的地方。
  */
-export const APP_VERSION = 'v39';
+export const APP_VERSION = 'v40';
 
 /**
  * 更新说明：新的在最前面。
  * 文案是给使用者看的：说人话、说「你」、只说用户在界面上能感知到的变化。
  */
 export const CHANGELOG = [
+  {
+    version: 'v40',
+    date: '2026-10-27',
+    items: [
+      'DeepSeek 的默认模型更新成官方现在用的 deepseek-flash（旧的 deepseek-chat 官方已停用，新用户再也不用自己改模型名了）。',
+      'DeepSeek 解析时会自动关掉「深度思考」，避免正文被思考过程占满、看起来像没返回。',
+    ],
+  },
   {
     version: 'v39',
     date: '2026-10-27',

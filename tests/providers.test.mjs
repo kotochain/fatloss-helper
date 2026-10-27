@@ -22,8 +22,7 @@ const proxy = await import('../tools/ai-proxy.mjs');
 
 test('预设覆盖常见国内服务商，且每个都填好了地址和模型', () => {
   const ids = PRESETS.map((p) => p.id);
-  for (const must of ['deepseek', 'dashscope', 'moonshot', 'zhipu', 'openai', 'ollama', 'custom']) {
-    assert.ok(ids.includes(must), `缺少预设 ${must}`);
+  for (const must of ['deepseek', 'dashscope', 'moonshot', 'zhipu', 'openai', 'ollama', 'custom']) {    assert.ok(ids.includes(must), `缺少预设 ${must}`);
   }
   assert.ok(PRESETS.some((p) => p.recommended), '应当标出推荐的那一家');
   for (const p of PRESETS) {
@@ -212,4 +211,10 @@ test('没配密钥时连通测试直接说「还没填密钥」，不发请求',
   if (!r.ok) assert.ok(r.error.includes('密钥'), r.error);
   assert.equal(called, !!r.ok);
   Object.assign(process.env, saved);
+});
+
+test('DeepSeek 预设不能用已停用的模型 ID（deepseek-chat / deepseek-reasoner 于 2026-07-24 停用）', () => {
+  const p = findPreset('deepseek');
+  assert.equal(p.model, 'deepseek-flash', 'DeepSeek 默认模型要跟官方当前文档一致');
+  assert.ok(!['deepseek-chat', 'deepseek-reasoner'].includes(p.model), `还在用已停用的模型：${p.model}`);
 });

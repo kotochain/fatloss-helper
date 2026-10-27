@@ -15,10 +15,12 @@ export const PRESETS = [
     id: 'deepseek',
     name: 'DeepSeek（深度求索）',
     baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-chat',
+    model: 'deepseek-flash',
     keyUrl: 'https://platform.deepseek.com/api_keys',
-    // 2026-10-21 实测：这个模型名（现在指向 deepseek-flash）能看图，拍照读表可用。
-    // 别改成 deepseek-flash —— 那个会先吐一大段 reasoning_content，额度不够时正文是空的。
+    // 2026-10-27 按官方文档更新：deepseek-chat / deepseek-reasoner 已于 2026-07-24 停用；
+    // 现在可用的是 deepseek-flash（v4.1，能看图、官方推荐 JSON）和 deepseek-v4-pro。
+    // V4 默认开思考模式，请求里会显式传 thinking: disabled（js/ai-core.js#providerExtras），
+    // 否则正文会被 reasoning_content 占空（2026-10-21 实测过这个坑）。
     note: '国内直连、便宜、中文理解好，也能看照片（拍照读营养成分表可用）。一次解析大约几厘钱，充 10 块能用很久。',
     recommended: true,
     directCall: true,

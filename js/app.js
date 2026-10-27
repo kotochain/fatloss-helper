@@ -3775,7 +3775,7 @@ function drawAiSettings(cfg, relay, then = null) {
     </label>
 
     <label class="field"><span>模型名 <button class="btn ghost" id="aiFetchModels" style="padding:2px 8px;font-size:12px;float:right">获取模型列表</button></span>
-      <input type="text" id="aiModel" value="${esc(cfg.model || preset.model || '')}" placeholder="deepseek-chat" list="aiModelList" autocomplete="off">
+      <input type="text" id="aiModel" value="${esc(cfg.model || preset.model || '')}" placeholder="deepseek-flash" list="aiModelList" autocomplete="off">
       <datalist id="aiModelList">${lastModels.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
       <div id="modelPick" class="chips" style="margin-top:6px"></div>
     </label>

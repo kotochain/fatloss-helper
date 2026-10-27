@@ -190,7 +190,7 @@ test('正文是空的、但模型写了「思考过程」：要说清是模型�
     () => requestLabelParse({ imageDataUrl: 'data:image/jpeg;base64,AAAA', config: { baseUrl: 'https://x', model: 'deepseek-flash', apiKey: 'k' }, fetchImpl: truncated }),
     (err) => {
       assert.ok(/思考/.test(err.message), err.message);
-      assert.ok(/deepseek-chat/.test(err.message), '要说出换哪个模型才不会踩同一个坑');
+      assert.ok(/关掉思考模式|不做深度思考/.test(err.message), '要说清怎么避免同一个坑（换模型或关思考模式）');
       assert.ok(!/没有返回内容/.test(err.message), '不能让人以为是断网');
       return true;
     },

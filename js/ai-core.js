@@ -222,6 +222,19 @@ export function humanizeNetworkError(err, baseUrl) {
 }
 
 /**
+ * 个别服务商需要额外请求参数。
+ *
+ * DeepSeek V4 默认开启「思考模式」：正文之前先吐 reasoning_content，
+ * max_tokens 一紧正文就是空的（官方文档 + 项目 2026-10-21 实测都这样）。
+ * 解析、读表、教练都不需要思考，显式关掉；只对官方域名生效，不影响别家。
+ */
+function providerExtras(config) {
+  const base = String(config?.baseUrl || '');
+  if (/api\.deepseek\.com/i.test(base)) return { thinking: { type: 'disabled' } };
+  return {};
+}
+
+/**
  * 发一次解析请求。浏览器直连和电脑中转都调它。
  * @param {{text:string, meal?:string|null, hour?:number, config:{baseUrl:string, model:string, apiKey:string}, fetchImpl?:Function}} opts
  */
@@ -252,6 +265,7 @@ export async function requestParse({ text, meal, hour, config, fetchImpl = fetch
           messages,
           temperature: 0.2,
           ...(withJsonMode ? { response_format: { type: 'json_object' } } : {}),
+          ...providerExtras(config),
           max_tokens: 800,
         }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -336,6 +350,7 @@ export async function requestCoach({ brief, config, fetchImpl = fetch }) {
           { role: 'user', content: coachUserMessage(brief) },
         ],
         temperature: 0.5,
+        ...providerExtras(config),
         max_tokens: 420,
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -363,6 +378,7 @@ export async function requestPing({ config, fetchImpl = fetch }) {
       body: JSON.stringify({
         model: config.model,
         messages: [{ role: 'user', content: '回复两个字：可以' }],
+        ...providerExtras(config),
         max_tokens: 10,
       }),
       signal: AbortSignal.timeout(20000),
@@ -437,18 +453,18 @@ export function buildLabelPrompt() {
 
 /**
  * 正文是空的，但模型写了「思考过程」—— 这不是网络问题，是模型把额度花在思考上了。
- * 真事：显式指定 deepseek-flash 时，它会先吐一大段 reasoning_content，
+ * DeepSeek V4 默认开启思考模式，正文之前先吐 reasoning_content；
  * max_tokens 不够时 content 直接是空串，界面上就变成「没读出来：服务商没有返回内容」，看着像断网。
- * 回到 deepseek-chat（同一个模型的别名，不做深度思考）就正常。
+ * 现在请求里会显式传 thinking: disabled（见 providerExtras）；这条兜底是给别家/第三方中转用的。
  */
 function emptyContentError(data) {
   const choice = data?.choices?.[0] || {};
   const thinking = String(choice?.message?.reasoning_content || '').trim();
   if (!thinking) return null;
   if (choice.finish_reason === 'length') {
-    return new Error('模型把额度都花在「思考」上了，正文被截断。换一个不做深度思考的模型再试（DeepSeek 用 deepseek-chat，别加 -flash）。');
+    return new Error('模型把额度都花在「思考」上了，正文被截断。换一个不做深度思考的模型，或在服务商设置里关掉思考模式。');
   }
-  return new Error('模型只回了「思考过程」，正文是空的。换一个不做深度思考的模型再试（DeepSeek 用 deepseek-chat，别加 -flash）。');
+  return new Error('模型只回了「思考过程」，正文是空的。换一个不做深度思考的模型，或在服务商设置里关掉思考模式。');
 }
 
 /** 模型返回的 content 可能是字符串，也可能是 [{type:'text',text}] 数组 */
@@ -512,6 +528,7 @@ export async function requestLabelParse({ imageDataUrl, config, fetchImpl = fetc
           },
         ],
         temperature: 0,
+        ...providerExtras(config),
         max_tokens: 500,
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS + 15000),
@@ -523,7 +540,7 @@ export async function requestLabelParse({ imageDataUrl, config, fetchImpl = fetc
     const body = await res.text().catch(() => '');
     // 大量文字模型会直接拒绝：不支持 image_url / 不是多模态模型
     if (/image|vision|multimodal|content type|unsupported/i.test(body)) {
-      throw new Error('当前这个模型看不了图片。换一个支持看图的模型（例如 deepseek-chat、qwen-vl-plus、glm-4v、gpt-4o-mini），或者直接手动填 —— 数字都一样准。');
+      throw new Error('当前这个模型看不了图片。换一个支持看图的模型（例如 deepseek-flash、qwen-vl-plus、glm-4v、gpt-4o-mini），或者直接手动填 —— 数字都一样准。');
     }
     throw new Error(humanizeHttpError(res.status, body, { model: config.model }));
   }

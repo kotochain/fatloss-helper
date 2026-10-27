@@ -385,3 +385,36 @@ test('v34：只有份量说法、没有克数时，营养不留（没法换算�
   assert.equal(r.items[0].grams, null);
   assert.equal(r.items[0].nutrition, null);
 });
+
+test('DeepSeek 请求显式关掉思考模式；别家不带这个参数', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => {
+    seen.push({ url, body: JSON.parse(init.body) });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: '{"items":[{"name":"米饭","grams":150}]}' } }] }),
+    };
+  };
+  await requestParse({
+    text: '吃了米饭',
+    config: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash', apiKey: 'sk-fake' },
+    fetchImpl,
+  });
+  assert.deepEqual(seen[0].body.thinking, { type: 'disabled' }, 'DeepSeek V4 默认开思考，必须显式关掉，否则正文会被 reasoning 占空');
+
+  const other = [];
+  await requestParse({
+    text: '吃了米饭',
+    config: CFG,
+    fetchImpl: async (url, init) => {
+      other.push(JSON.parse(init.body));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: '{"items":[{"name":"米饭","grams":150}]}' } }] }),
+      };
+    },
+  });
+  assert.equal(other[0].thinking, undefined, '别家服务商不认识 thinking，不能乱加');
+});
