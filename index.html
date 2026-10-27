@@ -18,6 +18,73 @@
 </head>
 <body>
 <!--
+  ┌─ 版本自查（v45）──────────────────────────────────────────────────┐
+  │ 为什么必须是内联脚本、不能放在 app.js 里：                          │
+  │  1) Service Worker 的策略是「先用缓存、后台更新」，所以打开时页面     │
+  │     **本来就是旧版** —— 这是 PWA 的常态，不是 bug；                │
+  │  2) 线上 sw.js 带 cache-control: max-age=600，CDN 还会缓存。        │
+  │     app.js 里的 cache:'no-store' 只绕浏览器缓存、**绕不过 CDN**，    │
+  │     读到的还是旧版本号 → 判定「已是最新」→ 一条提示都没有。          │
+  │     用户真撞上：新开网页是旧版、没有任何提示、手动刷新一下才好。      │
+  │  3) 这段不依赖 app.js：万一旧版 app.js 本身有问题，提示也不能没有。  │
+  │                                                                   │
+  │ 下面的 HERE 必须等于 js/version.js 的 APP_VERSION，                │
+  │ 由 tests/version.test.mjs 守着（改版本号漏改这里就红）。            │
+  └───────────────────────────────────────────────────────────────────┘
+-->
+<div id="verBar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#E86A82;color:#fff;font:14px/1.5 -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;padding:10px 14px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;-webkit-tap-highlight-color:transparent">
+  <span id="verBarText"></span>
+</div>
+<script>
+(function () {
+  var HERE = 'v45';
+  var bar = document.getElementById('verBar');
+  var txt = document.getElementById('verBarText');
+  if (!bar || !txt) return;
+
+  function goFresh() {
+    var jobs = [];
+    try {
+      if ('serviceWorker' in navigator) {
+        jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.map(function (r) { return r.unregister(); }));
+        }));
+      }
+    } catch (e) { /* 不支持就算了，下面照样重载 */ }
+    try {
+      if (window.caches) {
+        jobs.push(caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        }));
+      }
+    } catch (e) { /* 同上 */ }
+    // 只清「代码缓存」，**不碰 localStorage** —— 记录、资料、AI 密钥都留着
+    Promise.all(jobs).catch(function () {}).then(function () { location.reload(); });
+  }
+  bar.addEventListener('click', goFresh);
+
+  /*
+   * ?ts= 让每次请求都回源：sw.js 在 GitHub Pages 上是 max-age=600，
+   * 不带时间戳的话 CDN 会把旧的 sw.js 直接还给你，版本号永远读不到新的。
+   */
+  fetch('sw.js?ts=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.text() : ''; })
+    .then(function (t) {
+      var m = t.match(/APP_VERSION = '([^']+)'/);
+      if (!m || !m[1] || m[1] === HERE) return;
+      txt.textContent = '有新版本 ' + m[1] + '，点这里更新（记录不会丢）';
+      bar.style.display = 'block';
+      // 顺手催浏览器去装新版 Service Worker（装好再刷新就是新代码）
+      try {
+        navigator.serviceWorker.getRegistration().then(function (reg) {
+          if (reg && reg.update) reg.update();
+        });
+      } catch (e) { /* 忽略 */ }
+    })
+    .catch(function () { /* 离线或网络抖动：安静，app.js 启动后还会再试一次 */ });
+})();
+</script>
+<!--
   最外层兜底：如果 js/app.js 根本没跑起来（语法/加载/早期异常），页面上要有人话，
   而不是一片空白。用户只会说「卡死了、点不动」—— 这正是这个应用最该避免的体验。
   这段必须内联、不依赖任何模块，因为它要处理的正是「模块没起来」。

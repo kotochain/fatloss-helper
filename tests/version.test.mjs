@@ -31,6 +31,22 @@ test('版本号只有一个来源：version.js 和 sw.js 必须一致', () => {
   }
 });
 
+test('index.html 内联的版本自查不能漏改（漏了就永远不提示更新）', () => {
+  /*
+   * v45 真事故：打开网页是旧版、没有任何更新提示，手动刷新才好。
+   * 根因是版本检查放在 app.js 里，而线上 sw.js 带 cache-control: max-age=600 + CDN 缓存，
+   * cache:'no-store' 绕不过 CDN → 读回旧版本号 → 判定「已是最新」。
+   * 现在 index.html 里内联了一段「页面一解析就查版本」的脚本，版本号硬编码在 HERE 里；
+   * 它必须等于 APP_VERSION，否则提示要么永远不出现，要么每次打开都误报。
+   */
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const here = (html.match(/var HERE = '(v\d+)'/) || [])[1];
+  assert.ok(here, 'index.html 里找不到版本自查用的 `var HERE`');
+  assert.equal(here, APP_VERSION, '改版本号时漏改了 index.html 的 HERE（更新提示会失效）');
+  // 请求必须带时间戳：不带的话 CDN 会把旧 sw.js 直接还回来，版本号读不到新的
+  assert.match(html, /fetch\('sw\.js\?ts=' \+ Date\.now\(\)/, 'index.html 的版本自查必须给 sw.js 带时间戳（绕 CDN 缓存）');
+});
+
 test('更新说明：每条都完整，且最上面那条必须就是当前版本', () => {
   assert.ok(Array.isArray(CHANGELOG) && CHANGELOG.length >= 2, '更新说明至少要能回看到上一版');
   const versions = CHANGELOG.map((e) => e.version);

@@ -630,8 +630,15 @@ async function main() {
      * （在更新检查的 4 秒前 dispatch 一个 pointerdown），让自动更新让路。
      */
     await sleep(1200);
+    /*
+     * v45：index.html 里那段内联的版本自查会在页面刚起来时就把「有新版本」横幅亮出来，
+     * 而 app.js 的 showUpdateBanner 会主动避让（同一条信息不叠两层）。
+     * 这一节要测的是 app.js 那条**兜底**横幅 + 刷新弹层，所以先把它藏起来，
+     * 模拟「内联那一步没成功」（比如内联脚本的请求失败）。
+     */
+    await evaluate(client, `(() => { const b = document.getElementById('verBar'); if (b) b.style.display = 'none'; return true; })()`);
     await evaluate(client, `document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
-    await sleep(6000); // 等过 4 秒的更新检查
+    await sleep(3000); // 等过 1.2 秒的更新检查（v45 从 4 秒提前到 1.2 秒）
     const banner = await evaluate(client, `(() => {
       const el = document.querySelector('.update-banner');
       return { 有横幅: !!el, 文字: el?.textContent.replace(/\\s+/g, ' ').trim() || '' };

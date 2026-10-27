@@ -3238,10 +3238,16 @@ function maybeShowWhatsNew() {
   return true;
 }
 
-/** 问服务端要一下 sw.js 里的版本号（读不到就返回空串：离线、被缓存、格式不对都算读不到） */
+/**
+ * 问服务端要一下 sw.js 里的版本号（读不到就返回空串：离线、格式不对都算读不到）。
+ *
+ * `?ts=` 不能省：线上 sw.js 带 cache-control: max-age=600，CDN 还会缓存，
+ * 光靠 `cache: 'no-store'` 只绕过浏览器缓存、绕不过 CDN —— 读回来的是旧版本号，
+ * 一比「已是最新」，更新提示就永远不弹（v45 修的真问题）。
+ */
 async function deployedVersion() {
   try {
-    const res = await fetch('sw.js', { cache: 'no-store' });
+    const res = await fetch(`sw.js?ts=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) return '';
     const text = await res.text();
     return (text.match(/APP_VERSION = '([^']+)'/) || [])[1] || '';
@@ -3294,6 +3300,9 @@ async function forceFresh(latest = '') {
 let updateBanner = null;
 function showUpdateBanner(latest) {
   if (updateBanner) return;
+  // index.html 里那条内联横幅（页面一解析就查版本）已经在显示了，就别再叠一条
+  const inline = document.getElementById('verBar');
+  if (inline && inline.style.display !== 'none') return;
   const el = document.createElement('div');
   el.className = 'update-banner';
   const text = document.createElement('span');
@@ -4262,7 +4271,8 @@ for (const evt of ['pointerdown', 'keydown', 'touchstart']) {
 // 更新提示要在界面渲染完之后再弹，避免和「数据迁移提示 / 读不出来的记录」抢同一个弹层。
 // 900ms 是等启动 toast 出来之后；4s 后再检查一次服务端有没有更新（离线时读不到就静默跳过）。
 setTimeout(() => { try { maybeShowWhatsNew(); } catch (err) { console.warn('更新说明没弹出来：', err); } }, 900);
-setTimeout(() => { checkForUpdate().catch(() => {}); }, 4000);
+// v45：从 4 秒改成 0.9 秒 —— 原来的 4 秒里用户早就看到旧界面、自己刷新了，等于没有提示。
+setTimeout(() => { checkForUpdate().catch(() => {}); }, 1200);
 let lastUpdateCheckAt = Date.now();
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;

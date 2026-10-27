@@ -1,8 +1,8 @@
 /**
  * 一条命令跑完本地检查。
  *
- *   npm run check        快：单元测试 + 反向验证 + 密钥扫描 + 界面自检 + 直连 AI + 照包装（8 步，约 4 分钟）
- *   npm run check:full   全：快的那套 + 线上流程(本地地址) + AI 失败/存档异常 + 全按钮清扫 + 排版（约 10 分钟）
+ *   npm run check        快：单元测试 + 反向验证 + 密钥扫描 + 界面自检 + 直连 AI + 更新提示 + 照包装（9 步，约 5 分钟）
+ *   npm run check:full   全：快的那套 + 线上流程(本地地址) + AI 失败/存档异常 + 全按钮清扫 + 排版（13 步，约 12 分钟）
  *   npm run check:live   只测线上：文件逐字节一致 + 真打开线上网址跑一遍（约 2 分钟，需要联网）
  *
  * 为什么要有这个文件：
@@ -124,6 +124,8 @@ async function main() {
 
   // 自己起服务的（不需要 4173）
   await run('浏览器直连 AI（本地假服务商，零费用）', 'tools/direct-check.mjs');
+  // v45：真事故回归 —— 打开旧版时必须立刻提示更新（CDN 缓存旧 sw.js 时也不能没提示）
+  await run('打开旧版要提示更新（模拟发版）', 'tools/update-check.mjs');
   await run('照包装营养成分表（手动填 + 拍照读表）', 'tools/label-check.mjs');
   if (mode === 'full') {
     await run('AI 失败路径与存档异常', 'tools/resilience-check.mjs');
