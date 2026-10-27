@@ -80,7 +80,10 @@ AI 返回格式宽松化 + 空结果重试 + 不支持 JSON 模式自动重试�
 **没做的**：离线解析器代码（`parseDescription`、`findHits`、`GOLDEN_CASES` 等）还在仓库里，只是不再被调用；
 删除代码和对应测试留给 #24，避免这一轮改动面过大。
 
-**发布记录（v42）**：待补（CI / Pages / check-live / live-audit）。
+**发布记录（v42）**：提交 `820a88a`；CI 4 个 job 全绿（run `40482448209`），Pages 发布成功（run `40482448212`）；
+`check-live` 线上 v42 / 缓存名 `fatloss-v42`，34 个运行时文件逐字节一致（css 一次 `fetch failed` 是本机 TLS 抖动，
+curl 复核 HTTP 200、42003 字节且 `cmp` 与本地一致）；`live-audit` **0 个阻断问题**；
+本地 389 测试、`npm run check` 8/8、`npm run check:full` 12/12。
 
 ### v41：AI 设置里加 5 分钟新手教程（2026-10-27，issue #25）
 
