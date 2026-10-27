@@ -471,6 +471,10 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 配好后显示「已经配好了，继续」并能走完）；`live-audit` 同口径验线上；`layout-check` 的界面名跟着改；
 `direct-check` 断言教程有 6 步、含平台链接、含「验证码」登录说明、含「不收任何费用」。
 
+**发布记录**：提交 `f832859`；CI 4 个 job 全绿（[run 40504499095](https://github.com/kotochain/fatloss-helper/actions/runs/40504499095)），
+Pages 发布成功（[run 40504499011](https://github.com/kotochain/fatloss-helper/actions/runs/40504499011)）；
+`check-live` 线上 v44、34 个文件逐字节一致、缓存名 `fatloss-v44`；`live-audit` 0 个阻断问题。
+
 ---
 
 ## 〇·十九、删掉「离线猜句子」的老程序（2026-10-27，v43，issue #24）
