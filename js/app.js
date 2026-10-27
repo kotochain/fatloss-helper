@@ -564,8 +564,9 @@ function handleAction(act, data) {
    引导要解决三件事，一件都不能少：
      1) 让用户知道「这工具是干嘛的、数据在哪」（信任）
      2) 拿到算目标需要的几个数字（不然什么都算不出来）
-     3) **让用户知道要配 AI**（以及不配也能手动记）—— 配置入口在开始就给，
-        不要藏在设置的角落里。
+     3) **让用户当场把 AI 配好** —— v44 起这一步是硬性的：产品只有 AI 一条理解路径，
+        所以第 3 步不再给「先跳过」，配好才进最后一步；教程要手把手（官网 → 登录 → 密钥 → 粘贴），
+        并且说清「API 的钱是给服务商的，跟我们无关」。
    最后一定要让用户**记下第一笔**再结束 —— 空着的应用用户不会再打开第二次。
    ─────────────────────────────────────────── */
 
@@ -621,34 +622,35 @@ function onboardMode(t, review = false) {
   const kcal = t ? Math.round(t.targetCalories / 10) * 10 : null;
   const cfg = currentAiConfig();
   openSheet({
-    title: '用 AI 帮你记',
+    title: '配好 AI 再开始',
     body: `
       <div class="onboard-step">3 / 4</div>
       ${kcal ? `<div class="warn info">你每天的目标大约是 <b>${kcal} kcal</b>。</div>` : ''}
       <div class="onboard-h">
-        <b>说一句，AI 帮你听懂</b>
-        <p>「中午在食堂吃了碗牛肉面，加了个蛋」—— 说人话就行。份量含糊时 AI 会问一句，
-        你也可以直接说「我也不知道」，它会按常见份量估。</p>
+        <b>这个应用靠 AI 听懂你说的话</b>
+        <p>「中午在食堂吃了碗牛肉面，加了个蛋」—— 说人话就行，剩下的交给 AI：
+        它把这句话拆成食物和份量，再按本地食物库算热量。所以这一步必须做完才能开始记。</p>
       </div>
       <div class="onboard-h">
-        <b>需要一个 API 密钥</b>
-        <p>AI 由你自己选的服务商提供（推荐 DeepSeek，便宜、国内直连）。
-        填密钥的地方有 <b>5 分钟教程</b>，从注册到粘贴一步一步写好了，不用懂技术。</p>
+        <b>要准备两样东西</b>
+        <p>一个手机号（注册用）、支付宝或微信（充值用，10 元能用很久）。
+        不用懂技术 —— 点下面的按钮，里面有一份<b>从打开官网到粘贴密钥的手把手教程</b>，
+        跟着点就行。</p>
       </div>
       <div class="onboard-h">
-        <b>没配好也能手动记</b>
-        <p>搜食物、只填热量、照包装营养成分表，都不需要 AI。配好之后「说一句」才可用。</p>
+        <b>关于钱：这笔钱不是给我们的</b>
+        <p>AI 由 <b>DeepSeek 官方按用量收费</b>，钱直接付给 DeepSeek。
+        我们<b>不收任何费用</b>，也拿不到你的密钥、看不到你的账单 —— 这笔交易跟我们无关。
+        觉得贵随时可以换别家服务商（教程里有说明）。</p>
       </div>`,
     foot: `
-      <button class="btn block" id="obAi">${cfg.configured ? '已经配好了，继续' : '去配置 AI（有教程）'}</button>
-      <button class="btn ghost block" style="margin-top:8px" id="obSkip">先跳过，手动记</button>`,
+      <button class="btn block" id="obAi">${cfg.configured ? '已经配好了，继续' : '开始配置（手把手教）'}</button>`,
     onMount: (_b, foot) => {
       $('#obAi', foot).addEventListener('click', () => {
         closeSheet();
         if (cfg.configured) onboard({ step: 'first', review });
         else openAiSettingsSheet({ then: () => onboard({ step: 'first', review }) });
       });
-      $('#obSkip', foot).addEventListener('click', () => onboard({ step: 'first', review }));
     },
   });
 }
@@ -1428,7 +1430,7 @@ async function runQuickParse(text, mealOverride = null) {
       items: [],
       questions: [],
       aiQuestions: [],
-      source: 'offline',
+      source: 'no-ai',
       aiError: null,
       noAi: true,
       note: null,
@@ -2095,7 +2097,7 @@ function renderProgress() {
         <b>AI 设置</b>
         <em>${aiCfg.configured
           ? `说一句由 AI 听懂：${esc(aiCfg.model || '已配置')}`
-          : '还没配 AI —— 点这里配置，有 5 分钟教程'}</em>
+          : '还没配 AI —— 点这里配（手把手教程）'}</em>
       </span>
       <span class="mode-pill">${aiCfg.configured ? '已开启' : '去配置'}<span class="mode-pill-go">›</span></span>
     </button>
@@ -2719,7 +2721,7 @@ function openSettingsSheet() {
 
       <button class="set-row" data-set="ai">
         <span class="set-ico" data-tone="gold">${icon('sparkles', { size: 23 })}</span>
-        <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（点这里，有 5 分钟教程）'}</em></span>
+        <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（点这里，手把手教程）'}</em></span>
         <span class="set-go">›</span>
       </button>
 
@@ -3656,29 +3658,39 @@ function drawAiSettings(cfg, relay, then = null) {
       <input type="text" id="aiKey" placeholder="${cfg.keyMasked ? `已保存：${esc(cfg.keyMasked)}（留空则不改）` : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
     </label>
     <details id="aiKeyGuide" style="margin:-4px 0 12px">
-      <summary style="cursor:pointer;color:var(--rose);font-size:13px">不知道怎么获取密钥？看 5 分钟教程</summary>
+      <summary style="cursor:pointer;color:var(--rose);font-size:13px">手把手教程：从注册到粘贴（5 分钟）</summary>
       <div class="tiny" style="margin-top:8px;line-height:1.75">
-        <p style="margin:0 0 6px">以 DeepSeek 为例，照着做就行。需要：手机号 + 支付宝/微信（充值用）。</p>
+        <div class="warn info" style="margin:0 0 10px">
+          <b>先把钱的事说清楚</b>：API 是 <b>DeepSeek 官方按用量收费</b>，钱直接付给 DeepSeek。
+          我们<b>不收任何费用</b>，也拿不到你的密钥、看不到你的账单 —— 这笔交易跟我们无关。
+          不想花钱就换别家服务商（上面「选一个服务商」里随便换，流程差不多）。
+        </div>
+        <p style="margin:0 0 6px">以 DeepSeek 为例，照着做就行。要准备：<b>手机号</b>（注册用）+ <b>支付宝或微信</b>（充值用）。</p>
         <ol style="margin:0 0 8px 18px;padding:0">
-          <li><b>打开开放平台</b>：在浏览器打开
-            <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>，
-            用手机号注册并登录。<br>
-            <span class="tiny muted">这是给程序用的「开放平台」，不是你平时聊天的 DeepSeek。</span></li>
-          <li><b>充一点钱</b>：登录后点左侧「充值 / Top up」，充 10 元就够用很久
-            （按一天记三顿算，一次解析大约几厘钱；具体以官方价格为准）。</li>
+          <li><b>打开官网</b>：在浏览器地址栏输入
+            <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>
+            （也可以直接点这个链接）。<br>
+            <span class="tiny muted">注意：这是给程序用的「开放平台」，不是你平时聊天用的那个 DeepSeek 网页。</span></li>
+          <li><b>注册 / 登录</b>：点「登录」，输入手机号 → 收短信验证码 → 填进去就进去了。
+            没有账号的会自动注册，不用单独点注册。</li>
+          <li><b>充一点钱</b>：登录后看左侧菜单，点「充值 / Top up」，充 10 元就够用很久
+            （按一天记三顿算，一次解析大约几厘钱；具体价格以官方页面为准）。
+            <span class="tiny muted">钱充进的是你在 DeepSeek 的账户，不是给我们。</span></li>
           <li><b>创建密钥</b>：点左侧「API Keys」→「创建 API Key / Create new API key」，
             名字随便写（例如「减脂小助手」）→ 创建。<br>
-            复制那一长串 <code>sk-</code> 开头的字符，<b>它只显示这一次</b>，关掉就看不到了。</li>
+            复制那一长串 <code>sk-</code> 开头的字符，<b>它只显示这一次</b>，关掉就看不到了
+            （没复制到就再创建一个新的，不要紧）。</li>
           <li><b>回来粘贴</b>：把密钥粘贴到上面的「密钥」输入框，点下面的「保存并测试连通」。
-            显示成功就能用了。</li>
-          <li><b>密钥安全</b>：只存在这台手机上，不上传、不经过我们的服务器。
-            换手机或清缓存前，在「数据与备份」里导出。</li>
+            显示「保存成功，连通正常」就能用了。</li>
+          <li><b>密钥安全</b>：只存在这台手机上，不上传、不经过我们的服务器，我们看不到。
+            换手机或清缓存前，在「数据与备份」里导出备份。</li>
         </ol>
         <p style="margin:0 0 4px"><b>常见问题</b></p>
         <p style="margin:0">· 提示「密钥无效」：检查是不是复制全了、前后有没有空格。<br>
           · 提示「余额不足」：回开放平台充值。<br>
           · 提示「model not found」：模型名填 <code>deepseek-flash</code>。<br>
-          · 提示「连不上」：换 WiFi / 流量再试；公司网络可能挡了 API。</p>
+          · 提示「连不上」：换 WiFi / 流量再试；公司网络可能挡了 API。<br>
+          · 不想用 DeepSeek：在上面「选一个服务商」里换一家，步骤都差不多。</p>
       </div>
     </details>
 
@@ -3838,6 +3850,13 @@ function drawAiSettings(cfg, relay, then = null) {
       // 也让「留空则不改」这句话在同一个弹层里就变成真的
       $('#aiKey').value = '';
       $('#aiKey').placeholder = keyPlaceholder(findPreset(findPresetId()));
+      /*
+       * 从新手引导点「开始配置」进来的：配好就直接接着走引导最后一步。
+       * 以前这个 then 参数只声明、从来没被调用过 —— 用户在引导里配完密钥，
+       * 弹层停在原地，得自己退出去重新点「新手引导」才能走完（v44 修）。
+       * 留 600ms 让他看清「保存成功」，再关弹层跳下一步。
+       */
+      if (typeof then === 'function') setTimeout(() => { closeSheet(); then(); }, 600);
     } else {
       show(`设置已保存，但连通测试失败：<b>${esc(t.error)}</b><br>修好之前「说一句」还用不了；搜食物、只填热量、照包装都能正常记。`, '');
       ai = { configured: false, checked: true, reason: t.error };
@@ -3853,12 +3872,12 @@ function drawAiSettings(cfg, relay, then = null) {
   });
 
   $('#aiClear')?.addEventListener('click', () => {
-    if (!confirm('清除这台手机上保存的 AI 密钥？清除后「说一句」会提示先去配置；手动记一笔不受影响。')) return;
+    if (!confirm('清除这台手机上保存的 AI 密钥？清除后「说一句」要重新配置才能用。')) return;
     clearAiConfig();
     ai = { configured: false, checked: true };
     closeSheet();
     render();
-    toast('已清除。说一句话前要重新配置；手动记一笔不受影响。');
+    toast('已清除。说一句话前要重新配置。');
   });
 }
 

@@ -297,6 +297,8 @@ async function main() {
       步骤数: d?.querySelectorAll('ol li').length || 0,
       有创建密钥: (d?.textContent || '').includes('创建 API Key'),
       有平台链接: Boolean(d?.querySelector('a[href*="platform.deepseek.com"]')),
+      有登录说明: (d?.textContent || '').includes('验证码'),
+      有收费归属: (d?.textContent || '').includes('不收任何费用'),
     };
   })()`);
   console.log('密钥教程 →', JSON.stringify(keyGuide));
@@ -305,6 +307,9 @@ async function main() {
   if (keyGuide.步骤数 < 5) problems.push(`教程步骤太少（${keyGuide.步骤数} 步）`);
   if (!keyGuide.有创建密钥) problems.push('教程没写怎么创建密钥');
   if (!keyGuide.有平台链接) problems.push('教程没有开放平台链接');
+  if (!keyGuide.有登录说明) problems.push('教程没写怎么登录（手机号 + 验证码）');
+  // R59：钱的事必须说清 —— API 是服务商官方收费，跟我们无关
+  if (!keyGuide.有收费归属) problems.push('教程没说清「API 的钱不给我们」');
   await evaluate(`document.querySelector('#presetChips [data-preset="custom"]').click()`);
   await sleep(200);
   await evaluate(`(() => {

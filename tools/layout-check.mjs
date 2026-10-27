@@ -72,7 +72,7 @@ const INTERFACE_ORDER = [
   ['sheet-recover', '弹层·找回记录（恢复）'],
   ['onboard-1', '引导 1/4·先说三件事'],
   ['onboard-2', '引导 2/4·填资料'],
-  ['onboard-3', '引导 3/4·用 AI 帮你记'],
+  ['onboard-3', '引导 3/4·配好 AI 再开始'],
   ['onboard-4', '引导 4/4·最后一步'],
   ['tab-today', '标签·今天'],
   ['tab-log-food', '标签·记录（吃的）'],
@@ -874,12 +874,30 @@ async function runPass(size, { passId, passLabel, scale, captureAll }) {
   await closeSheetNow();
 
   // ── 新手引导 4 步 ──
+  // v44：第 3 步要求先配好 AI（没有「先跳过」）。塞一份占位配置让它显示「已经配好了，继续」，
+  // 否则点主按钮会打开 AI 设置弹层，排版检查就跑偏了。
+  await evaluate(`localStorage.setItem('fatloss.ai.v1', JSON.stringify({
+    presetId: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
+    apiKey: 'layout-placeholder', mode: 'direct', updatedAt: new Date().toISOString(),
+  }))`);
   await runStep('onboard-1', '引导 1/4·先说三件事', 'sheet', () => openSheetByClick(`(() => { const b = document.querySelector('[data-act="onboard"]'); if (!b) return false; b.click(); return true; })()`, '先说三件事'));
   await runStep('onboard-2', '引导 2/4·填资料', 'sheet', async () => { await click('#obNext'); await waitSheetEl('#pHeight'); });
-  await runStep('onboard-3', '引导 3/4·用 AI 帮你记', 'sheet', async () => { await click('#pSave'); await waitSheetEl('#obSkip'); });
-  await runStep('onboard-4', '引导 4/4·最后一步', 'sheet', async () => { await click('#obSkip'); await waitSheetEl('#obGo'); });
+  await runStep('onboard-3', '引导 3/4·配好 AI 再开始', 'sheet', async () => { await click('#pSave'); await waitSheetEl('#obAi'); });
+  await runStep('onboard-4', '引导 4/4·最后一步', 'sheet', async () => { await click('#obAi'); await waitSheetEl('#obGo'); });
   await clickExpr(`(() => { const b = document.querySelector('#obLater'); if (!b) return false; b.click(); return true; })()`, '我先随便看看');
   await waitForNode(`document.querySelector('.big-log') !== null`, '引导结束回到今天页', 12000);
+  /*
+   * 引导验完就把占位配置清掉：后面的界面（弹层、记录页、教练）都要恢复到
+   * 「用户刚装好、还没配 AI」的真实状态 —— 带着一份假配置跑，界面会走「已配置但连不上」的分支，
+   * 文案更长，小屏大字号下会撑破容器（v44 第一次跑就是这么假红的）。
+   */
+  await evaluate(`(() => { localStorage.removeItem('fatloss.ai.v1'); return true; })()`);
+  /*
+   * 引导验完就把占位配置清掉：后面的界面（弹层、记录页、教练）都要恢复到
+   * 「用户刚装好、还没配 AI」的真实状态 —— 带着一份假配置跑，界面会走「已配置但连不上」的分支，
+   * 文案更长，小屏大字号下会撑破容器（v44 第一次跑就是这么假红的）。
+   */
+  await evaluate(`(() => { localStorage.removeItem('fatloss.ai.v1'); return true; })()`);
 
   // ── 造一份有 6 天记录的示例档（保证「经验总结」「成长」「我的」都有内容可排）──
   await evaluate(SEED_STATE);

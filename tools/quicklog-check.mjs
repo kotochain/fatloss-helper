@@ -285,6 +285,70 @@ async function main() {
   if (!welcome.有直接填资料) problems.push('欢迎页缺少「直接填资料」（老用户重装时不该被迫重看引导）');
   if (!welcome.有引导按钮) problems.push('首次打开没有引导入口');
 
+  /*
+   * v44 的核心规则：新用户第一次看到第 3 步时**没有「先跳过」**，只能去配 AI。
+   * 这段走的就是真实新用户的路径（本地没有任何配置）—— 先验它，再带配置走一遍确认能过。
+   */
+  await evaluate(`document.querySelector('[data-act="onboard"]')?.click()`);
+  await sleep(700);
+  await evaluate(`document.querySelector('#obNext')?.click()`);
+  await evaluate(`(async () => {
+    for (let i = 0; i < 30; i++) {
+      if (document.querySelector('#pHeight')) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  })()`);
+  await sleep(200);
+  await evaluate(`(() => {
+    const h = document.querySelector('#pHeight'); if (h) h.value = '163';
+    const w = document.querySelector('#pWeight'); if (w) w.value = '58';
+    const a = document.querySelector('#pAge'); if (a) a.value = '26';
+    document.querySelector('#pSave')?.click();
+    return true;
+  })()`);
+  await evaluate(`(async () => {
+    for (let i = 0; i < 30; i++) {
+      if (document.querySelector('#obAi')) return true;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return false;
+  })()`);
+  await sleep(200);
+  const noAiStep = await evaluate(`(() => ({
+    按钮: document.querySelector('#obAi')?.textContent.trim() || '',
+    有跳过: !!document.querySelector('#obSkip'),
+    文本: (document.querySelector('#sheetBody')?.textContent || '').replace(/\\s+/g, ' '),
+  }))()`);
+  console.log(`✅ 没配 AI 时的第 3 步：按钮「${noAiStep.按钮}」｜跳过按钮 ${noAiStep.有跳过}`);
+  if (!noAiStep.按钮.includes('开始配置')) problems.push(`没配 AI 时第 3 步主按钮应当是「开始配置」，实际「${noAiStep.按钮}」`);
+  if (noAiStep.有跳过) problems.push('没配 AI 时第 3 步还有「先跳过」（v44 起不允许绕过）');
+  if (!noAiStep.文本.includes('不收任何费用')) problems.push('没配 AI 时的第 3 步没说清「API 的钱不给我们」');
+
+  await evaluate(`document.querySelector('#obAi')?.click()`);
+  await sleep(900);
+  const guided = await evaluate(`({ 标题: document.querySelector('#sheetTitle')?.textContent || '', 有教程: !!document.querySelector('#aiKeyGuide') })`);
+  console.log(`✅ 点「开始配置」→「${guided.标题}」（手把手教程 ${guided.有教程}）`);
+  if (guided.标题 !== 'AI 设置') problems.push('引导里点「开始配置」没有打开 AI 设置');
+  if (!guided.有教程) problems.push('从引导进的 AI 设置里没有手把手教程');
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(400);
+
+  // 重来一遍：清空存储，换成「已经配好 AI」的状态走完整条引导
+  await evaluate(`(() => { localStorage.clear(); return true; })()`);
+  await client.send('Page.navigate', { url: BASE + '/' });
+  await sleep(1700);
+
+  /*
+   * 引导第 3 步现在要求「配好 AI 才能继续」（v44）：先塞一份本地配置，
+   * 让这一步显示「已经配好了，继续」。引导过程不会发请求，所以不会真的连出去。
+   * 引导走完会把它清掉 —— 后面专门测「没配 AI 时」的行为。
+   */
+  await evaluate(`localStorage.setItem('fatloss.ai.v1', JSON.stringify({
+    presetId: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
+    apiKey: 'guide-placeholder-no-real-key', mode: 'direct', updatedAt: new Date().toISOString(),
+  }))`);
+
   await evaluate(`document.querySelector('[data-act="onboard"]')?.click()`);
   await sleep(700);
   const ob1 = await evaluate(`({ 标题: document.querySelector('#sheetTitle')?.textContent, 步骤: document.querySelector('.onboard-step')?.textContent })`);
@@ -314,7 +378,7 @@ async function main() {
   })()`);
   await evaluate(`(async () => {
     for (let i = 0; i < 30; i++) {
-      if (document.querySelector('#obSkip')) return true;
+      if (document.querySelector('#obAi')) return true;
       await new Promise((r) => setTimeout(r, 100));
     }
     return false;
@@ -323,15 +387,18 @@ async function main() {
     标题: document.querySelector('#sheetTitle')?.textContent || '',
     文本: (document.querySelector('#sheetBody')?.textContent || '').replace(/\\s+/g, ' '),
     去配置: document.querySelector('#obAi')?.textContent.trim() || '',
-    跳过: document.querySelector('#obSkip')?.textContent.trim() || '',
+    有跳过: !!document.querySelector('#obSkip'),
     有模式选项: !!document.querySelector('[data-pick]'),
   }))()`);
-  console.log(`✅ 第 3 步「${ob3.标题}」：${ob3.去配置} / ${ob3.跳过}`);
-  if (!ob3.文本.includes('5 分钟教程')) problems.push('引导第 3 步没提「填密钥的地方有 5 分钟教程」');
+  console.log(`✅ 第 3 步「${ob3.标题}」：${ob3.去配置}｜跳过按钮 ${ob3.有跳过}`);
+  if (!ob3.去配置) problems.push('引导第 3 步没有「开始配置 / 已经配好了」按钮');
+  if (ob3.有跳过) problems.push('引导第 3 步还留着「先跳过，手动记」（v44 起必须配好 AI 才能开始记）');
+  if (!ob3.文本.includes('手把手')) problems.push('引导第 3 步没提「手把手教程」');
+  if (!ob3.文本.includes('不收任何费用')) problems.push('引导第 3 步没说清「API 的钱不是给我们的」');
   if (ob3.有模式选项) problems.push('引导里还让用户选普通模式（v42 起只有 AI 一种模式）');
 
-  // 没配密钥的用户走「先跳过，手动记」：一样能完成引导
-  await evaluate(`document.querySelector('#obSkip')?.click()`);
+  // 配好 AI 之后才能进最后一步（这就是 v44 的规则）
+  await evaluate(`document.querySelector('#obAi')?.click()`);
   await evaluate(`(async () => {
     for (let i = 0; i < 30; i++) {
       if (document.querySelector('#obGo')) return true;
@@ -347,6 +414,11 @@ async function main() {
   console.log(`✅ 引导结束 → 落在「${obDone.标签}」页，存档里不再写模式（${obDone.模式}），引导标记 ${obDone.引导完成}`);
   if (obDone.引导完成 !== true) problems.push('引导完成后没有记录标记（下次打开会重复引导）');
   if (obDone.模式 !== undefined) problems.push(`引导还在往存档里写使用模式（${obDone.模式}），v42 起已经没有这个概念`);
+
+  // 引导验完，把那份占位配置清掉：后面专门测「没配 AI 时」的行为
+  await evaluate(`(() => { localStorage.removeItem('fatloss.ai.v1'); return true; })()`);
+  await evaluate(`location.reload()`);
+  await sleep(1600);
 
   console.log('\n=== 一、没配 AI 时说一句：明说没解析，不造假条目 ===');
   await evaluate(`document.querySelector('.tab[data-view="log"]').click()`);

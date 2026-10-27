@@ -215,6 +215,15 @@ async function main() {
     await shot(client, '01-welcome.png');
 
     // 引导：和真用户一样点
+    /*
+     * v44 起引导第 3 步要求「配好 AI 才能继续」，没有「先跳过」了。
+     * 线上没有真密钥，这里塞一份本地占位配置，让这一步显示「已经配好了，继续」；
+     * 引导过程不发请求，所以不会真的连出去。走完引导会清掉它（后面要测没配 AI 的行为）。
+     */
+    await evaluate(client, `localStorage.setItem('fatloss.ai.v1', JSON.stringify({
+      presetId: 'deepseek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
+      apiKey: 'online-audit-placeholder', mode: 'direct', updatedAt: new Date().toISOString(),
+    }))`);
     await evaluate(client, `document.querySelector('[data-act="onboard"]').click()`);
     await sleep(600);
     await evaluate(client, `document.querySelector('#obNext').click()`);
@@ -225,17 +234,20 @@ async function main() {
       const a = document.querySelector('#pAge'); if (a) { a.value = '26'; a.dispatchEvent(new Event('input',{bubbles:true})); }
       document.querySelector('#pSave').click();
     })()`);
-    await waitFor(() => evaluate(client, `!!document.querySelector('#obSkip')`), { what: '引导第 3 步' });
+    await waitFor(() => evaluate(client, `!!document.querySelector('#obAi')`), { what: '引导第 3 步' });
     const obMode = await evaluate(client, `(() => ({
       标题: document.querySelector('#sheetTitle')?.textContent || '',
       有模式选项: !!document.querySelector('[data-pick]'),
       去配置: document.querySelector('#obAi')?.textContent.trim() || '',
-      跳过: document.querySelector('#obSkip')?.textContent.trim() || '',
+      有跳过: !!document.querySelector('#obSkip'),
+      文本: (document.querySelector('#sheetBody')?.textContent || '').replace(/\s+/g, ' '),
     }))()`);
-    console.log(`   第 3 步「${obMode.标题}」：${obMode.去配置} / ${obMode.跳过}`);
+    console.log(`   第 3 步「${obMode.标题}」：${obMode.去配置}｜跳过按钮 ${obMode.有跳过}`);
     if (obMode.有模式选项) fail('线上引导里还让用户选普通模式（v42 起只有 AI 一种模式）');
-    if (!obMode.跳过) fail('线上引导第 3 步没有「先跳过，手动记」');
-    await evaluate(client, `document.querySelector('#obSkip').click()`);
+    if (obMode.有跳过) fail('线上引导第 3 步还留着「先跳过，手动记」—— v44 起必须配好 AI 才能开始记');
+    if (!obMode.去配置) fail('线上引导第 3 步没有「开始配置 / 已经配好了」按钮');
+    if (!obMode.文本.includes('不收任何费用')) fail('线上引导第 3 步没说清「API 的钱不是给我们的」');
+    await evaluate(client, `document.querySelector('#obAi').click()`);
     await waitFor(() => evaluate(client, `!!document.querySelector('#obGo')`), { what: '引导最后一步' });
     await evaluate(client, `document.querySelector('#obGo').click()`);
     await sleep(1200);
@@ -258,6 +270,12 @@ async function main() {
     // 163cm/58kg/26 岁、轻度活动 → 约 1479 kcal（这是算出来的，不是抄的）
     if (typeof ob.目标 !== 'number' || Math.abs(ob.目标 - 1479) > 60) fail(`线上算出的目标热量不对：${ob.目标} kcal（预期约 1479）`);
     await shot(client, '02-onboarded.png');
+
+    // 引导验完：把占位配置清掉并重载，「说一句」要回到「还没配置 AI」的真实状态
+    await evaluate(client, `(() => { localStorage.removeItem('fatloss.ai.v1'); return true; })()`);
+    await client.send('Page.reload', { ignoreCache: false });
+    await waitFor(() => evaluate(client, `window.__appReady === true`), { what: '清掉密钥后重新启动', timeoutMs: 30000 });
+    await sleep(500);
 
     // 记一笔：线上没有 AI 密钥，先确认「说一句」明说还没配 AI（不造假条目）
     await evaluate(client, `document.querySelector('.tab[data-view="log"]').click()`);
