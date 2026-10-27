@@ -1,30 +1,29 @@
 /**
- * 把「今天在食堂吃了碗牛肉面」这类大白话，拆成可确认的食物条目。
+ * 把 AI 说回来的一顿饭，整理成本地能记的条目。
  *
- * 这里做两件事：
- *  1) 离线解析（parseDescription）：靠关键词匹配 + 份量推断，把用户说的东西拆成几项。
- *     解析不了的会标成「需要确认」，界面负责反问用户。
- *  2) 整理 AI 返回的结果（normalizeAiItems）：本地库/「我的食物」命中时用本地数字；
- *     本地没有的菜，AI 现在可以直接给营养估算，但必须过本地校验（4/9/4 对账 + 上下限），
+ * 这里只做三件事（**不再自己猜句子**）：
+ *  1) 整理 AI 返回的结果（normalizeAiItems）：本地库/「我的食物」命中时用本地数字；
+ *     本地没有的菜，AI 可以直接给营养估算，但必须过本地校验（4/9/4 对账 + 上下限），
  *     过不了就退回同类均值 —— 数字始终能核对、能离线复算。
+ *  2) 把「一碗」「两个」「半斤」这类说法换算成克数（findPortion / gramsForPortion）。
+ *  3) 给「份量是猜的」条目生成几个档位按钮（buildPortionChoices）。
+ *
+ * v43（issue #24）：原来还有一套「靠关键词猜整句话」的离线解析器（parseDescription），
+ * 只有普通模式在用。普通模式删掉后它不再被任何地方调用，已整体删除 ——
+ * 现在"听懂人话"只有一条路：AI。没配 AI 就不发请求，界面直说「还没配置 AI」。
  *
  * 统一的中间结果叫「条目（item）」：
  *   { name, grams, kcal, protein, fat, carb, confidence, confidenceReason,
  *     portionChoices, needsConfirm, question, source }
  *
- * confidence（'high' | 'low'）说的是「份量有多确定」，不是「这条准不准」：
- * 用户给了确切克数、或者用了个头/包装有标准的量词，就是 high；
- * 「一碗」「一份」这种说不准的说法、以及什么都没说时，是 low，
+ * confidence（'high' | 'low' | 'medium'）说的是「份量有多确定」，不是「这条准不准」：
+ * 有确切克数就是 high；AI 没给份量、按常见一份猜的是 low，
  * 界面会拿 portionChoices 里的档位反问用户一句，而不是默默按默认值记上。
  */
 
-import { FOODS, ALIASES, findFood, findMatchableFood, parseAmount, matchFoodByName, detectFoodForm, genericEstimateFor } from './foods.js';
-import { DISHES } from './dishes.js';
+import { findMatchableFood, matchFoodByName, detectFoodForm, genericEstimateFor } from './foods.js';
 import { validateNutritionEstimate } from './label.js';
 import { macroKcal } from './calc.js';
-
-// 老代码/测试从 mealparse 里取 DISHES，这里继续转出去，避免调用方改动
-export { DISHES };
 
 /** 单份默认克数：用户没说份量时按「正常一份」估，而不是统一 100 克 */
 export const FOOD_DEFAULT_GRAMS = {
@@ -46,9 +45,6 @@ export const FOOD_DEFAULT_GRAMS = {
   oats: 40, milk: 250,
 };
 
-/** 组合菜按「个」计时每个多少克（包子 100、饺子 20 之类） */
-const DISH_PER_UNIT = { baozi_pork: 100, dumpling_meal: 20, burger_meal: 250 };
-
 /** 常见份量的克数：写「一碗」时按这个算，界面会让用户确认/改 */
 export const PORTIONS = {
   '一小碗': 200, '一碗': 350, '大碗': 500, '超大碗': 650,
@@ -60,23 +56,11 @@ export const PORTIONS = {
   '一根': 100, '一片': 30, '一条': 80, '一只': 50, '一颗': 10, '一粒': 5, '一枚': 50, '一把': 30,
 };
 
-/** 份量疑问的选项，界面直接拿它渲染按钮 */
-export const PORTION_CHOICES = [
-  { label: '小碗（约 200 克）', value: '一小碗', grams: 200 },
-  { label: '普通碗（约 350 克）', value: '一碗', grams: 350 },
-  { label: '大碗（约 500 克）', value: '大碗', grams: 500 },
-  { label: '超大碗（约 650 克）', value: '超大碗', grams: 650 },
-];
-
-/* ── 份量置信度：什么时候该反问用户 ──────────────────
+/* ── 份量档位：AI 没说清克数时，给用户几个能点的按钮 ──────────────
    用户的原话是「一碗在食堂和家里能差一倍」。所以「说了份量词」不等于「说得够准」：
-     · 「200克」「半斤」「两个鸡蛋」「一罐可乐」→ 能换成一个确定的克数，别打扰用户；
-     · 「一碗」「一份」「半包」→ 碗有大小、份量看食堂、包装有大有小包，问一句比猜准。
-   判据落在每条 item 的 confidence / confidenceReason 上，界面据此决定要不要给档位按钮。
+     · 「200克」「半斤」→ 能换成一个确定的克数，别打扰用户；
+     · 「一碗」「一份」→ 碗有大小、份量看食堂，给档位让用户点一下比猜准。
    ────────────────────────────────────────────── */
-
-/** 说了这些量词也还是说不准：碗有大小、份量看食堂、包装有大有小包 */
-const VAGUE_UNITS = new Set(['碗', '小碗', '大碗', '超大碗', '份', '盘', '盒', '袋', '包']);
 
 /**
  * 补档的幅度：按「这东西平时还有多小/多大」分开定，不是所有食物统一乘 0.6/1.5 ——
@@ -194,159 +178,15 @@ export function buildPortionChoices(target, defaultGrams, count = 1) {
   ];
 }
 
-/** 食物库里写没写过这个量词（牛奶写了「一杯 250 克」才算换算明确） */
-function servingMatch(food, unit) {
-  if (!food || !Array.isArray(food.servings)) return null;
-  const clean = (x) => String(x).replace(/^一/, '').replace(/[（(].*?[)）]/g, '');
-  const exact = food.servings.find(([label]) => clean(label) === unit);
-  if (exact) return { exact: true, label: exact[0] };
-  const loose = food.servings.find(([label]) => String(label).includes(unit));
-  return loose ? { exact: false, label: loose[0] } : null;
-}
-
-/**
- * 这条的份量算不算说清了。
- * 高：给了克数/斤两，或用了个头、包装有标准的量词（两个鸡蛋、一罐可乐）；
- * 低：什么都没说，或者只有「一碗」「一份」「半包」这种说不准的说法。
- * @param {boolean} converted 用户说的那个份量能不能换算成克数（换不出来就等于没说清）
- */
-function portionVerdict(food, portion, converted = true) {
-  // 换不出克数（比如「半包」套在一个没有包装规格的食物上）：等于没说，别拿用户没说的量词当理由
-  if (!portion || !converted) return { confidence: 'low', reason: '你没说多少，我先按常见的一份记的' };
-  if (portion.counting || !portion.portionWord) return { confidence: 'high', reason: null };
-  const said = portion.text || portion.portionWord;
-  const unit = String(portion.portionWord).replace(/^一/, '');
-  if (VAGUE_UNITS.has(unit)) {
-    return { confidence: 'low', reason: `「${said}」有大有小，先按常见的估的` };
-  }
-  const hit = servingMatch(food, unit);
-  if (hit?.exact) return { confidence: 'high', reason: null };
-  return {
-    confidence: 'low',
-    reason: hit
-      ? `「${said}」没有统一规格，我按「${prettyTierLabel(hit.label)}」估的`
-      : `「${said}」没有固定规格，先按常见的估的`,
-  };
-}
-
-/** 常见配料/加料：识别出来就往上加。vague = 加多少全看用户手，界面要反问一句 */
-const EXTRA_INGREDIENTS = [
-  { key: 'egg', aliases: ['加蛋', '加个蛋', '卤蛋', '鸡蛋', '煎蛋', '荷包蛋', '蛋'], foodId: 'egg', defaultGrams: 50 },
-  { key: 'beef_extra', aliases: ['加肉', '加牛肉', '加份肉', '肉多'], foodId: 'beef_lean_cooked', defaultGrams: 60, vague: true },
-  { key: 'pork_extra', aliases: ['加猪排', '加大排', '加排骨'], foodId: 'pork_lean_cooked', defaultGrams: 80, vague: true },
-  { key: 'tofu_extra', aliases: ['加豆腐', '豆腐'], foodId: 'tofu_firm', defaultGrams: 100, vague: true },
-  { key: 'veg_extra', aliases: ['加青菜', '青菜', '加菜', '蔬菜', '小白菜', '生菜'], foodId: 'bokchoy', defaultGrams: 150, vague: true },
-  { key: 'rice_extra', aliases: ['加饭', '加米饭', '多饭'], foodId: 'rice_cooked', defaultGrams: 150, vague: true },
-  { key: 'noodle_extra', aliases: ['加面'], foodId: 'noodle_cooked', defaultGrams: 150, vague: true },
-  { key: 'chili_oil', aliases: ['辣油', '红油', '辣椒油'], foodId: 'oil', defaultGrams: 10, warn: '辣油其实是纯油，一勺约 10 克 = 90 kcal' },
-  { key: 'sesame', aliases: ['麻酱', '芝麻酱'], foodId: 'sesame_paste', defaultGrams: 15 },
-  { key: 'mayo', aliases: ['沙拉酱', '蛋黄酱', '千岛酱'], foodId: 'salad_dressing', defaultGrams: 15 },
-  { key: 'cheese', aliases: ['芝士', '奶酪', '起司'], foodId: 'cheese_slice', defaultGrams: 20 },
-  { key: 'milk_tea', aliases: ['奶茶', '饮料', '可乐', '汽水', '果汁'], foodId: 'bubble_tea', defaultGrams: 500, warn: '含糖饮料是减脂期最容易忽略的热量来源' },
-  { key: 'beer_extra', aliases: ['啤酒', '喝酒', '一瓶酒'], foodId: 'beer', defaultGrams: 330 },
-  { key: 'sugar', aliases: ['加糖', '多糖', '全糖'], foodId: 'sugar', defaultGrams: 10 },
-];
-
-/** 做法关键词：影响用油量，用来给「需要确认」的条目调整估算 */
-const COOKING_STYLE = [
-  { key: 'fried', aliases: ['炸', '油炸', '酥'], oilFactor: 1.8, note: '油炸做法，热量比清炒高很多' },
-  { key: 'stirfried', aliases: ['炒', '干煸', '爆炒'], oilFactor: 1.25, note: '炒菜用油按家常量估的' },
-  { key: 'braised', aliases: ['红烧', '烧', '焖', '卤'], oilFactor: 1.3, note: '红烧/卤味通常含糖和油' },
-  { key: 'steamed', aliases: ['蒸', '煮', '清蒸', '水煮', '汆'], oilFactor: 0.8, note: '蒸煮做法用油少' },
-  { key: 'grilled', aliases: ['烤', '煎', '空气炸'], oilFactor: 1.1, note: '煎烤用油中等' },
-  { key: 'soup', aliases: ['汤', '汤面', '砂锅'], oilFactor: 1.0, note: '汤类注意别喝油汤' },
-];
-
 const CN_NUM = { 一: 1, 两: 2, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
 const CN_GRAMS = { 半: 0.5 };
-const MEAL_KEYWORDS = [
-  { key: 'breakfast', words: ['早饭', '早餐', '早上'] },
-  { key: 'lunch', words: ['午饭', '午餐', '中午'] },
-  { key: 'dinner', words: ['晚饭', '晚餐', '晚上'] },
-  { key: 'snack', words: ['加餐', '下午茶', '夜宵', '零食'] },
-];
-
-function mealFromText(text, fallback = null) {
-  for (const m of MEAL_KEYWORDS) {
-    if (m.words.some((w) => text.includes(w))) return m.key;
-  }
-  return fallback;
-}
-
-/** 全部可搜索的名字：食材 + 组合菜（长的优先，避免「面」抢走「牛肉面」） */
-export function buildDictionary() {
-  const dict = [];
-  for (const d of DISHES) {
-    for (const a of d.aliases) {
-      // 泛称组合词（「包子早餐」这种）不进字典：否则「两个包子」会被它整段抢走，
-      // 份量和热量都会跟着错。它们只在没有更具体匹配时才作为兜底。
-      if (a.length > 3 && /早餐|套餐|一顿|打饭/.test(a)) continue;
-      dict.push({ text: a, kind: 'dish', ref: d });
-    }
-    if (!d.aliases.includes(d.name)) dict.push({ text: d.name, kind: 'dish', ref: d });
-  }
-  for (const f of FOODS) {
-    const clean = f.name.replace(/[（(].*?[)）]/g, '');
-    // 带 form 的条目（生重/熟重肉鱼）允许单字名进字典：「虾」这种日常说法不然永远认不出来。
-    // 其余食物仍要求 ≥2 字，避免「米」「面」「蛋」这种单字把别的词抢走。
-    dict.push({ text: clean, kind: 'food', ref: f, allowSingle: Boolean(f.form) });
-    if (f.name.length > 2) dict.push({ text: f.name, kind: 'food', ref: f });
-    // 别名也要进解析字典 —— **v31 修的大坑**：
-    // 以前只有「生熟两条」的食物把别名放进来了，其它食物的别名（酸奶、牛奶、肉丸、蛋糕…）
-    // 只有搜索和 AI 匹配在用，离线解析根本看不见。于是「一杯酸奶」这种话在离线模式下
-    // 会整句认不出来，AI 没开/没接上时用户就只能重说。
-    for (const a of (ALIASES[f.id] || [])) {
-      if (a.length >= 2) dict.push({ text: a, kind: 'food', ref: f });
-    }
-  }
-  // 极少数单字是安全的：它们只在口语里指那一样东西，而且长词（米饭/面条/鸡蛋…）会先匹配走。
-  for (const [word, id] of [['粥', 'congee'], ['饭', 'rice_cooked'], ['面', 'noodle_cooked'], ['蛋', 'egg'], ['糖', 'sugar']]) {
-    const f = FOODS.find((x) => x.id === id);
-    if (f) dict.push({ text: word, kind: 'food', ref: f, allowSingle: true });
-  }
-  for (const e of EXTRA_INGREDIENTS) {
-    for (const a of e.aliases) dict.push({ text: a, kind: 'extra', ref: e });
-  }
-  // 长的先匹配
-  dict.sort((a, b) => b.text.length - a.text.length);
-  return dict;
-}
-
-const DICTIONARY = buildDictionary();
-
-/**
- * 在文本里找关键词。按「长词优先 + 不重叠」贪心匹配，
- * 所以「牛肉面」不会被拆成「食堂」+「面」这种莫名其妙的组合。
- */
-function findHits(text) {
-  const taken = new Array(text.length).fill(false);
-  const hits = [];
-  for (const entry of DICTIONARY) {
-    if (!entry.text) continue;
-    if (entry.text.length < 2 && !entry.allowSingle) continue;
-    let from = 0;
-    for (;;) {
-      const idx = text.indexOf(entry.text, from);
-      if (idx < 0) break;
-      const free = taken.slice(idx, idx + entry.text.length).every((x) => !x);
-      // 单字词（粥/饭/面/蛋/糖）最容易误伤：「晚饭」里的「饭」不是一碗米饭，
-      // 「皮蛋」里的「蛋」也不是一颗蛋。前后紧挨着这些字时不当独立食物。
-      const mealWord = entry.text.length === 1 && /[早午晚夜中宵]/.test(text[idx - 1] || '');
-      if (free && !mealWord) {
-        for (let i = idx; i < idx + entry.text.length; i++) taken[i] = true;
-        hits.push({ ...entry, index: idx });
-      }
-      from = idx + entry.text.length;
-    }
-  }
-  return hits.sort((a, b) => a.index - b.index);
-}
 
 const COUNTING_UNITS = new Set(['个', '块', '串', '根', '片', '条', '只', '颗', '粒', '枚', '把']);
 const BASE_UNIT = { 小把: '把', 大把: '把', 小块: '块', 大片: '片', 小片: '片', 小包: '包', 大包: '包', 小份: '份', 大份: '份' };
 
 /**
  * 找一段文字里的份量说法（支持中文数字：一碗 / 两个 / 半斤 / 一两 / 200毫升）。
+ * AI 有时不给克数、只给「一碗」这种说法，靠它换算。
  * @returns {{grams:number, text:string, portionWord?:string, counting?:boolean, count?:number}|null}
  */
 export function findPortion(text) {
@@ -386,168 +226,6 @@ export function findPortion(text) {
   return null;
 }
 
-/** 所有份量说法的位置 */
-export function findAllPortions(text) {
-  const re = /([0-9]+(?:\.[0-9]+)?|[一二两三四五六七八九十半])\s*(超大碗|小碗|大碗|小把|大把|小块|大片|小片|小包|大包|小份|大份|碗|份|盘|盒|袋|包|杯|瓶|罐|个|块|串|根|片|条|只|颗|粒|枚|把|勺|筷子|克|g|毫升|ml|斤|两)/gi;
-  const out = [];
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    const one = findPortion(m[0]);
-    if (one) out.push({ ...one, index: m.index, end: m.index + m[0].length });
-  }
-  // 口语里常常不带「一」：「喝了杯奶茶」「吃了碗面」「来份沙拉」。
-  // 不认这些说法的话，这句话里就只剩「半包」一个份量，会被离得近的奶茶抢走（issue #3）。
-  const bare = /(?:喝|吃|点|来|要|买|加)\s*(?:了|个)?\s*(超大碗|小碗|大碗|小把|大把|小块|大片|小片|小包|大包|小份|大份|碗|份|盘|盒|袋|包|杯|瓶|罐|个|块|串|根|片|条|只|颗|粒|枚|把)/g;
-  while ((m = bare.exec(text)) !== null) {
-    const unit = m[1];
-    const index = m.index + m[0].length - unit.length;
-    const end = index + unit.length;
-    // 前面已经带数字的（「一杯」）由上面的规则处理，别重复加
-    if (out.some((p) => index < p.end && end > p.index)) continue;
-    out.push(portionFromBareUnit(unit, index));
-  }
-  return out.sort((a, b) => a.index - b.index);
-}
-
-/** 「喝了杯奶茶」里的那个「杯」→ 一个标准份量（碗大小有别，交给界面确认） */
-function portionFromBareUnit(rawUnit, index) {
-  const unit = BASE_UNIT[rawUnit] || rawUnit;
-  const base = { text: rawUnit, index, end: index + rawUnit.length, count: 1 };
-  if (COUNTING_UNITS.has(unit)) {
-    const perUnit = PORTIONS[`一${unit}`] || 100;
-    return { ...base, grams: Math.round(perUnit), portionWord: `一${unit}`, counting: true, perUnit };
-  }
-  if (['碗', '小碗', '大碗', '超大碗'].includes(unit)) {
-    const key = unit === '碗' ? '一碗' : unit === '小碗' ? '一小碗' : unit;
-    return { ...base, grams: PORTIONS[key], portionWord: key, counting: false, unitKey: key };
-  }
-  return { ...base, grams: null, portionWord: `一${unit}`, counting: false, unitKey: `一${unit}` };
-}
-
-/**
- * 把每个食物配上「它自己的」份量说法。
- *
- * 三个必须守住的规则（否则份量会离谱）：
- *  1) 不能拿整句话里唯一的份量去套所有食物
- *     （「一杯奶茶和半包薯片」里 325 克是奶茶的，不能套给薯片）；
- *  2) 匹配要有距离窗口，且「一碗」「一份」里的「一」不算个数
- *     （「一碗白粥和两个鸡蛋」不能变成白粥 1300 克）；
- *  3) **单位和食物类型要对得上**：「半包」是包装食品的说法，奶茶按杯算。
- *     只看距离会让离得近的奶茶把「半包」抢走，薯片就按默认 50 克记了（issue #3）。
- */
-const PAIR_WINDOW = 8;
-
-/**
- * 这个单位平时装什么（按食物分类）。
- * 只列「明显该给谁」，没列到的按中立处理 —— 宁可交给距离判断，也不要乱扣分。
- */
-const UNIT_CATEGORY_FIT = {
-  '杯': ['drink', 'dairy'],
-  '瓶': ['drink'],
-  '罐': ['drink'],
-  '包': ['snack'],
-  '袋': ['snack', 'staple'],
-  '盒': ['dairy', 'snack', 'staple'],
-  '碗': ['staple', 'dish', 'vegetable', 'protein'],
-  '盘': ['dish', 'vegetable', 'protein', 'staple'],
-  '个': ['fruit', 'protein', 'staple', 'dairy', 'snack', 'fat'],
-  '块': ['protein', 'fruit', 'snack', 'dairy', 'staple'],
-  '串': ['protein', 'vegetable'],
-  '勺': ['fat', 'dairy', 'staple'],
-  '根': ['fruit', 'staple', 'protein'],
-  '片': ['protein', 'snack', 'dairy', 'staple', 'vegetable'],
-  '条': ['protein', 'vegetable', 'fruit'],
-  '只': ['protein', 'fruit'],
-  '颗': ['fruit', 'snack', 'vegetable'],
-  '粒': ['fruit', 'snack'],
-  '枚': ['fruit', 'protein'],
-  '把': ['fat', 'vegetable'],
-};
-
-/** 明显说不通的组合：「半包奶茶」「一瓶米饭」不是口语里会出现的说法 */
-const UNIT_CATEGORY_CLASH = {
-  '包': ['drink'],
-  '袋': ['drink'],
-  '碗': ['drink'],
-  '盘': ['drink'],
-  '瓶': ['staple', 'vegetable', 'protein', 'fruit', 'dish'],
-  '罐': ['staple', 'vegetable', 'protein', 'fruit', 'dish'],
-  '串': ['drink', 'dairy', 'snack', 'fruit'],
-};
-
-/**
- * 这个份量说法有多像是给这个食物的：
- *  3 = 食物自己的份量表里就有这个单位（薯片写了「一小包」）
- *  1 = 分类上说得通（一杯奶茶）
- *  0 = 看不出来（「一份」什么都能说）
- * -2 = 明显对不上（半包奶茶）
- */
-function unitFitScore(food, portion) {
-  const unitKey = portion?.unitKey || portion?.portionWord;
-  if (!unitKey) return 0;
-  const unit = String(unitKey).replace(/^一/, '');
-  const labels = (food?.servings || []).map(([label]) => String(label));
-  if (labels.some((label) => label.includes(unit))) return 3;
-  if ((UNIT_CATEGORY_CLASH[unit] || []).includes(food?.category)) return -2;
-  const fits = UNIT_CATEGORY_FIT[unit];
-  if (!fits) return 0;
-  return fits.includes(food?.category) ? 1 : 0;
-}
-
-export function pairPortions(text, foodHits) {
-  const portions = findAllPortions(text);
-  const cands = [];
-  foodHits.forEach((hit, hi) => {
-    for (const p of portions) {
-      // 距离按「食物开头」和「份量结尾」算，紧挨着的说法距离为 0
-      const dist = Math.min(Math.abs(p.index - hit.index), Math.abs(hit.index - p.end));
-      if (dist > PAIR_WINDOW) continue;
-      const fit = unitFitScore(hit.ref, p);
-      if (fit < 0) continue; // 单位跟食物类型明显对不上，不许抢
-      // 同分时优先「紧挨着前面」的那个（「两个鸡蛋」而不是后面别的东西的份量）
-      const before = p.end <= hit.index ? 1 : 0;
-      cands.push({ hi, p, dist, before, score: fit * 3 - dist });
-    }
-  });
-  // 全局挑「最说得通的组合」：先给匹配度最高的，避免先遍历到的食物把别人更该拿的份量抢走
-  cands.sort((a, b) => b.score - a.score || a.dist - b.dist || b.before - a.before || a.p.index - b.p.index);
-  const usedHit = new Set();
-  const usedPortion = new Set();
-  const chosen = new Map();
-  for (const c of cands) {
-    if (usedHit.has(c.hi) || usedPortion.has(c.p.index)) continue;
-    usedHit.add(c.hi);
-    usedPortion.add(c.p.index);
-    chosen.set(c.hi, c.p);
-  }
-  return foodHits.map((hit, hi) => ({
-    hit,
-    portion: chosen.get(hi) || null,
-    counting: Boolean(chosen.get(hi)?.counting),
-  }));
-}
-
-/**
- * 找做法关键词（炒、炸、红烧…），用来给生鲜食材调整用油量。
- * 只看「没有被菜名/食物名覆盖」的文字，否则「红烧肉」「烧烤」会被当成烹饪方式。
- */
-function styleHit(text, covered) {
-  const gap = [...text].map((ch, i) => (covered[i] ? ' ' : ch)).join('');
-  for (const style of COOKING_STYLE) {
-    if (style.aliases.some((a) => gap.includes(a))) return style;
-  }
-  return null;
-}
-
-/** 标记文字里被识别出的名称所占的位置 */
-function markCovered(text, hits) {
-  const covered = new Array(text.length).fill(false);
-  for (const h of hits) {
-    for (let i = h.index; i < h.index + h.text.length && i < covered.length; i++) covered[i] = true;
-  }
-  return covered;
-}
-
 /**
  * 把份量说法换算成克数。
  * 优先用这个食物自己的份量表（粥的一碗 250 克 ≠ 米饭的一碗 180 克），
@@ -581,24 +259,6 @@ export function gramsForPortion(food, portion) {
   return portion.grams;
 }
 
-/**
- * 组合菜的一份有多大。
- *
- * 「一碗牛肉面」里的「一碗」是**一份**的意思，不是通用碗重 350 克 ——
- * 以前两种说法（「吃了碗牛肉面」600 克 / 「一碗牛肉面」350 克）能差 260 kcal。
- * 碗的大小仍然有别，所以按份量表里的比例缩放，不是一律乘 1。
- */
-const DISH_UNIT_SCALE = { '一小碗': 0.7, '一碗': 1, '大碗': 1.4, '超大碗': 1.6, '一份': 1, '一盘': 1.1, '一盒': 0.9 };
-
-function dishGramsFor(dish, portion, baseGrams) {
-  if (!portion) return baseGrams;
-  const scale = DISH_UNIT_SCALE[portion.portionWord];
-  if (scale) return Math.round(baseGrams * scale);
-  const grams = Number(portion.grams);
-  if (grams > 0) return Math.min(grams, baseGrams * 1.6);
-  return baseGrams;
-}
-
 /** 按克数等比换算营养素 */
 function scaleNutrition(base, grams, baseGrams) {
   const k = grams / baseGrams;
@@ -608,176 +268,6 @@ function scaleNutrition(base, grams, baseGrams) {
     fat: Math.round(base.fat * k * 10) / 10,
     carb: Math.round(base.carb * k * 10) / 10,
   };
-}
-
-export function parseDescription(raw, defaultMeal = null) {
-  const text = String(raw || '').trim();
-  const meal = mealFromText(text, defaultMeal);
-  if (!text) return { items: [], meal, unknown: [], text };
-
-  const hits = findHits(text);
-  const style = styleHit(text, markCovered(text, hits));
-  const items = [];
-  const usedExtras = new Set();
-
-  // 主菜：优先「具体的菜」，其次才是「食堂/套餐」这类泛称
-  const dishHits = hits.filter((h) => h.kind === 'dish');
-  const chosenDish = dishHits.find((h) => !h.ref.generic)?.ref || dishHits[0]?.ref || null;
-  const chosenDishIndex = dishHits.find((h) => h.ref === chosenDish)?.index ?? -1;
-
-  // 食材：所有命中的食物（组合菜的原料也常被单独说出来，例如「黄焖鸡米饭」里的鸡）
-  const foodHits = hits.filter((h) => h.kind === 'food');
-  const paired = pairPortions(text, foodHits);
-
-  // 泛称组合菜（食堂打饭/盖饭套餐）和具体的菜同时出现时，具体菜更准：
-  // 「食堂打了三个菜：土豆丝、青椒肉丝、炒青菜」按过去会记成「食堂套餐 650 + 三道菜」，
-  // 一顿饭算成两顿。这里改成：有两道以上具体的菜时，就不再用泛称套餐兜底。
-  const foodDishCount = paired.filter(({ hit }) => hit.ref.category === 'dish').length;
-  const dropGeneric = Boolean(chosenDish && chosenDish.generic && foodDishCount >= 2);
-  if (chosenDish && !dropGeneric) {
-    // 已经被食材拿走的份量，组合菜不能再来抢一次：
-    // 「红烧肉配了一碗米饭」里的一碗是米饭的，抢走就变成 350 克红烧肉 + 130 克米饭（issue #3）
-    const takenByFoods = new Set(paired.map((x) => x.portion?.index).filter((i) => Number.isFinite(i)));
-    const nearAll = findAllPortions(text)
-      .filter((p) => Math.abs(p.index - chosenDishIndex) <= 6 && !takenByFoods.has(p.index));
-    // 「两个包子」里的「两个」是包子的个数，不能拿 200 克当整份的重量
-    const near = nearAll.find((p) => !p.counting) || null;
-    const dishHit = dishHits.find((h) => h.ref === chosenDish);
-    // 「两个包子」：按个数算；只说「包子」时按一份算
-    const units = near?.counting ? (near.count || 1) : 1;
-    // 泛称（食堂/套餐）不一定就是一份，按具体名称命中的次数缩放
-    const scale = chosenDish.generic ? Math.max(1, /两个|三个|两份|三份|两菜|三菜/.test(text) ? 1.6 : 1) : 1;
-    const baseForThis = chosenDish.generic ? chosenDish.baseGrams * scale : chosenDish.baseGrams;
-    void dishHit;
-    const grams = near?.counting
-      ? Math.round(units * (DISH_PER_UNIT[chosenDish.id] || 100))
-      : dishGramsFor(chosenDish, near, baseForThis);
-    const nut = scaleNutrition(
-      { kcal: chosenDish.kcal, protein: chosenDish.protein, fat: chosenDish.fat, carb: chosenDish.carb },
-      grams, chosenDish.baseGrams,
-    );
-    // 组合菜大多是「一碗」「一份」这种说法（碗有大小、份量看食堂），这里误差最大；
-    // 但用户要是直接说了 600 克，那就是说清了，不该再问。组合菜没有份量表，所以第一个参数给 null。
-    const dishVerdict = near
-      ? portionVerdict(null, near)
-      : { confidence: 'low', reason: '你没说这一份多大，我先按常见的一份记的' };
-    items.push({
-      name: chosenDish.name,
-      grams: Math.round(grams),
-      ...nut,
-      confidence: dishVerdict.confidence,
-      confidenceReason: dishVerdict.reason,
-      portionChoices: dishVerdict.confidence === 'low'
-        ? buildPortionChoices({ id: chosenDish.id, category: 'dish' }, grams)
-        : [],
-      needsConfirm: !near,
-      question: near ? (chosenDish.ask || null) : '这一份大概多大？（小碗/普通碗/大碗，热量能差一倍）',
-      source: 'dish',
-      dishId: chosenDish.id,
-    });
-  }
-
-  // 逐个食材
-  const effectiveDish = dropGeneric ? null : chosenDish;
-  for (const { hit, portion, counting } of paired) {
-    const f = hit.ref;
-    // 组合菜已经覆盖了它的原料时跳过（避免「牛肉面」再加一份牛肉）
-    if (effectiveDish && effectiveDish.aliases.some((a) => a.includes(hit.text) || hit.text.includes(a))) continue;
-    if (effectiveDish && items.some((it) => it.name.includes(hit.text))) continue;
-    const standard = f.servings?.[0]?.[1] || FOOD_DEFAULT_GRAMS[f.id] || 100;
-    const converted = portion ? gramsForPortion(f, portion) : null;
-    let grams = converted;
-    if (!(grams > 0)) grams = FOOD_DEFAULT_GRAMS[f.id] || standard;
-    grams = Math.min(grams, 3000);
-    const nut = scaleNutrition({ kcal: f.kcal, protein: f.protein, fat: f.fat, carb: f.carb }, grams, 100);
-    const needsConfirm = !portion;
-    const verdict = portionVerdict(f, portion, converted > 0);
-    items.push({
-      name: f.name,
-      grams: Math.round(grams),
-      ...nut,
-      confidence: verdict.confidence,
-      confidenceReason: verdict.reason,
-      portionChoices: verdict.confidence === 'low'
-        ? buildPortionChoices(f, grams, portion?.count || 1)
-        : [],
-      needsConfirm,
-      question: needsConfirm && !effectiveDish ? `${f.name}大概多少量？（一个拳头约 150 克）` : null,
-      source: 'food',
-      foodId: f.id,
-    });
-  }
-
-  // 配料/加料
-  for (const h of hits) {
-    if (h.kind !== 'extra') continue;
-    if (usedExtras.has(h.ref.key)) continue;
-    usedExtras.add(h.ref.key);
-    // 已经被某个主菜覆盖的配料不重复加
-    if (items.some((it) => it.foodId === h.ref.foodId)) continue;
-    if (effectiveDish && /面|粉/.test(effectiveDish.name) && h.ref.key === 'noodle_extra') continue;
-    const food = findFood(h.ref.foodId);
-    if (!food) continue;
-    const nearExtra = findAllPortions(text).find((p) => Math.abs(p.index - h.index) <= 6);
-    const grams = h.ref.defaultGrams;
-    const nut = scaleNutrition({ kcal: food.kcal, protein: food.protein, fat: food.fat, carb: food.carb }, grams, 100);
-    items.push({
-      name: `加${food.name}`,
-      grams,
-      ...nut,
-      // 「加了个蛋」是一颗标准大小，不用问；「加了点肉/加饭」加多少全看用户手，得问一句
-      confidence: h.ref.vague ? 'low' : 'high',
-      confidenceReason: h.ref.vague ? `「${h.text}」没说多少，先按常见的估的` : null,
-      portionChoices: h.ref.vague ? buildPortionChoices(food, grams) : [],
-      needsConfirm: false,
-      warning: h.ref.warn || null,
-      source: 'extra',
-      foodId: food.id,
-      note: nearExtra ? `按 ${nearExtra.text} 估的` : null,
-    });
-  }
-
-  // 做法只影响「生鲜食材」，组合菜的热量本身已经包含做法了
-  if (style) {
-    for (const it of items) {
-      if (it.source !== 'food') continue;
-      const foodForm = findFood(it.foodId)?.form;
-      if (foodForm === 'cooked') continue; // 熟重数据已经包含做法，不能再按做法乘油量
-      it.fat = Math.round(it.fat * style.oilFactor * 10) / 10;
-      it.kcal = Math.round(macroKcal(it));
-      it.cookingStyle = style.note;
-      // 注意别在这里动 confidence：那个字段专门表示「份量有多确定」。
-      // 油量不确定走 needsConfirm/question，两件事混在一起界面就分不清该问哪一句了。
-      it.needsConfirm = true;
-      it.question = `${it.name}是${style.aliases[0]}的，按家常油量估的，差不多吗？`;
-    }
-  }
-
-  // 没认出来的部分，让界面提示用户补充
-  const unknown = [];
-  if (!items.length) {
-    const cleaned = text.replace(/[，,。.、!！?？\s]/g, '');
-    if (cleaned.length >= 2) unknown.push(cleaned);
-  }
-
-  /*
-   * v35（issue #13）：认出来一部分、但还有没认出来的字（比如「红烧肉和一份佛跳墙」只认出了红烧肉）。
-   * 以前这种情况**一声不响**，用户以为整句都记上了。现在把剩下的字带出去，界面会问一句。
-   * 去掉的只是份量/餐次/口语词；剩下的（真正的食物名）才会被提示。
-   */
-  let leftover = '';
-  if (items.length) {
-    const covered = markCovered(text, hits);
-    leftover = [...text]
-      .map((ch, i) => (covered[i] ? ' ' : ch))
-      .join('')
-      .replace(/[0-9０-９]+(\.[0-9]+)?/g, ' ')
-      .replace(LEFTOVER_NOISE, ' ')
-      .replace(/[\s，,。.、！!?？:：;；()（）【】]/g, '');
-    if (leftover.length < 2) leftover = '';
-  }
-
-  return { items, meal, unknown, leftover, text };
 }
 
 /**
@@ -899,7 +389,7 @@ export function normalizeAiItems(aiResult, defaultMeal = null, { text = '', cust
       estimated: true,
       estimateId: generic.id,
       note: checked && !checked.ok
-        ? `食物库里没有「${name}」，AI 估的数字没通过本地校验（${checked.reason}），先按「${generic.name.replace(/（.*?）/g, '')}」的平均值估的；不准就删掉或改克数`
+        ? `食物库里没有「${name}」，AI 估的数字没通过本地校验（${checked.reason}），先按「${generic.name.replace(/（.*?）/g, '')}」的平均值估的；不准就删掉或改克数${why}`
         : `食物库里没有「${name}」，先按「${generic.name.replace(/（.*?）/g, '')}」的平均值估的；不准就删掉或改克数`,
     });
     out.unmatched.push(name);
@@ -955,9 +445,6 @@ export function cachedOnlyMatch(rawText, customFoods = []) {
   return { food: hit, leftover };
 }
 
-/** 离线解析里「不算食物」的常见词：餐次、吃/喝、份量、口语、人称 */
-const LEFTOVER_NOISE = /(今天|昨天|前天|早上|上午|中午|下午|晚上|夜宵|早餐|午饭|晚饭|加餐|吃了|喝的|吃的|喝完|吃|喝|又|还|再|大概|大约|左右|差不多|一份|一碗|一个|一杯|半|几|些|点|了|的|我|你|它|我们|朋友|同事|一起|外面|家里|自己|然后|还有|加上|配|和|跟|腻|有点|挺|很|不|没|有|是|在|外面吃|外卖|食堂|公司|学校|克|g|ml|毫升|斤|两|个|碗|份|杯|瓶|盘|盒|袋|包|块|片|根|只|颗|粒|把|勺)/g;
-
 /** cachedOnlyMatch 允许出现的「非食物」文字：餐次、吃/喝、份量、口语 */
 const CACHED_ONLY_NOISE = /(今天|昨天|前天|早上|上午|中午|下午|晚上|夜宵|早餐|午饭|晚饭|加餐|吃了|喝的|吃的|喝完|吃|喝|又|还|再|大概|大约|左右|差不多|一份|一碗|一个|一杯|半|几|些|点|了|的|克|g|ml|毫升|斤|两|个|碗|份|杯|瓶|盘|盒|袋|包|块|片|根|只|颗|粒|把|勺)/g;
 
@@ -975,57 +462,4 @@ export function sumItems(items) {
     a.carb += it.carb || 0;
     return a;
   }, { kcal: 0, protein: 0, fat: 0, carb: 0 });
-}
-
-/** 需要反问的问题清单 */
-export function collectQuestions(items, extraQuestions = []) {
-  const qs = [];
-  for (const it of items) {
-    if (it.question) qs.push({ item: it, text: it.question });
-  }
-  for (const t of extraQuestions) qs.push({ item: null, text: t });
-  return qs;
-}
-
-/** 份量词 → 克数（界面上的快捷按钮用） */
-export function portionGrams(word) {
-  return PORTIONS[word] ?? null;
-}
-
-/** 把「一碗」这种写法解析成克数（复用 foods.js 的逻辑，但这里不依赖具体食物） */
-export function gramsFromText(text) {
-  const p = findPortion(String(text || ''));
-  if (p) return p.grams;
-  const n = parseAmount(text, null);
-  return n && n > 0 ? n : null;
-}
-
-/**
- * 离线解析的基准用例：每句都写了「人肉估算的合理热量」。
- * 用途有二：一是回归测试，二是浏览器里可以直接跑（AI 不通时至少保证兜底不退化）。
- * 默认允许 ±25% 的偏差 —— 家常菜的份量本身就有这个浮动。
- * 但**能算准的句子要单独收紧**：容差太宽会把真 bug 盖住（「半包薯片」那条就是这么被漏掉的，issue #3）。
- */
-export const GOLDEN_CASES = [
-  { text: '早上吃了一碗白粥和两个鸡蛋', kcal: 260, note: '粥一碗 250 克（115 kcal）+ 两个蛋 100 克（143 kcal）' },
-  { text: '中午吃了两个鸡蛋和一个苹果', kcal: 250, note: '两个蛋 100 克（143 kcal）+ 一个苹果 200 克（106 kcal）' },
-  { text: '今天中午在食堂吃了碗牛肉面，加了个蛋', kcal: 680, note: '一碗牛肉面约 600 克 + 一个蛋' },
-  { text: '下午喝了杯奶茶，还有半包薯片', kcal: 559, tol: 0.05, note: '中杯奶茶 500 克（425 kcal）+ 半包薯片 25 克（134 kcal）' },
-  { text: '晚饭红烧肉配了一碗米饭，还有炒青菜', kcal: 969, note: '红烧肉一份 150 克（570）+ 一碗米饭 180 克（209）+ 炒青菜 200 克（190）。旧值 1750 是「一碗」被红烧肉抢走算出来的（issue #3）' },
-  { text: '中午吃了一份黄焖鸡米饭', kcal: 780, note: '一份黄焖鸡米饭' },
-  { text: '晚上吃了碗馄饨', kcal: 330, note: '一碗馄饨 300 克' },
-];
-
-/** 跑一遍基准用例，返回不合格的项 */
-export function selfTestParser() {
-  const failed = [];
-  for (const c of GOLDEN_CASES) {
-    const r = parseDescription(c.text);
-    const got = sumItems(r.items).kcal;
-    if (!r.items.length) { failed.push(`${c.text}：一条都没解析出来`); continue; }
-    const tol = c.tol ?? 0.25;
-    const diff = Math.abs(got - c.kcal) / c.kcal;
-    if (diff > tol) failed.push(`${c.text}：解析出 ${Math.round(got)} kcal，应在 ${Math.round(c.kcal * (1 - tol))}~${Math.round(c.kcal * (1 + tol))} 之间`);
-  }
-  return failed;
 }

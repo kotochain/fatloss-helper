@@ -51,7 +51,7 @@
 > （上下限 + 4/9/4 对账）；本地库和「我的食物」命中时以本地数字为准。
 > 所以没配 API 也不会变成「残废版」—— 只是「说一句」要先把 AI 配起来。
 >
-> 相关待办见 GitHub issue：#1 会员制度、#24 清理已经停用的离线解析代码。
+> 相关待办见 GitHub issue：#1 会员制度、#21 看图模型单独选、#22 备份附上读不出来的存档。
 
 **份量不确定时会反问你**：说「一碗牛肉面」，你会看到
 「这个份量我是猜的 —— 你没说这一份多大」+ 三个档位（小碗 420 / 正常 600 / 大碗 840 克），
@@ -451,6 +451,26 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 
 ---
 
+## 〇·十九、删掉「离线猜句子」的老程序（2026-10-27，v43，issue #24）
+
+v42 删掉普通模式后，那套「靠关键词猜整句话」的解析器就没人调用了，但代码还占着 `js/mealparse.js` 的六成。
+这一版把它连同配套的词典、份量配对、做法判断、基准例句一起删掉：**1031 行 → 465 行**，功能一个没少。
+
+- **删掉**：`parseDescription`（猜整句话）、`findHits` / `buildDictionary`（建词典找人名）、
+  `pairPortions`（把「一碗」配给哪样菜）、`styleHit`（炒/炸乘油）、`portionVerdict`（离线路线的置信度）、
+  `GOLDEN_CASES` / `selfTestParser`（标准例句自测）；
+- **顺手清掉四个死导入**：`app.js` 里 `collectQuestions` / `PORTION_CHOICES` / `gramsFromText` / `portionGrams`
+  导入了却一次都没调用；
+- **保留**：食物库 163 条 + 组合菜 19 条的数字、搜索、别名、生熟口径、份量档位、
+  「一碗 / 两个 / 半斤」换算成克数、AI 名字匹配、同类均值兜底、省请求判断；
+- **护栏**：测试 389 → 365（删掉的都是只测老程序的），反向验证严格项 119 → 107（全部仍按预期抓到）；
+  总账新增 R58「食物库只负责出数字和被搜索」，58 条规则 / 57 条有测试。
+
+**为什么要专门发一版**：删代码不改行为，但把「食物库到底还负责什么」写死在账上 ——
+以后想加「离线也能听懂」的功能，得先改总账，不会顺手把一套废弃的猜测逻辑复活。
+
+---
+
 ## 〇·十八、删掉普通模式，只保留 AI（2026-10-27，v42，issue #23）
 
 用户拍板「直接把普通模式删了」：产品只有 AI 一种模式，但**没配 AI 的人照样能手动记**。
@@ -462,8 +482,8 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 - 新手引导第 3 步改成「用 AI 帮你记」：去配置 AI（有教程）/ 先跳过，手动记；
 - 手动记（搜食物 / 只填热量 / 拍照读表）、教练本地版、周洞察都不受影响。
 
-**没做的**：离线解析器的代码（`parseDescription` 等）暂时留在仓库里，只是不再被调用；
-删除代码和对应测试留给 [#24](https://github.com/kotochain/fatloss-helper/issues/24)，避免这一轮改动面太大。
+**没做的**（v43 已补）：离线解析器的代码（`parseDescription` 等）当时还留在仓库里、只是不再被调用；
+删除代码和对应测试留给 [#24](https://github.com/kotochain/fatloss-helper/issues/24)，避免这一轮改动面太大 —— v43 已删干净。
 
 **回归测试**：`quicklog-check` 断言没配 AI 时的说明、没有「记上」按钮、点「去配 AI」进设置、手动记一笔能落库；
 `live-audit` 走「先跳过，手动记」；`resilience-check` 的存储场景改用手动记一笔造数据；
@@ -545,7 +565,7 @@ V4 模型默认开启「思考模式」，正文之前先吐 `reasoning_content`
 | [19](https://github.com/kotochain/fatloss-helper/issues/19) | 产品逻辑总账：每条承诺 → 代码 → 测试 → 决策号 | v35 已做 |
 | [20](https://github.com/kotochain/fatloss-helper/issues/20) | 别让用户白说：AI 只给名字要本地估 + 离线漏识别要给出口 | v39 已修 |
 | [23](https://github.com/kotochain/fatloss-helper/issues/23) | 删掉普通模式，只保留 AI 模式 | v42 已完成 |
-| [24](https://github.com/kotochain/fatloss-helper/issues/24) | 离线食物库的去留：删掉离线自然语言解析，保留食物库本身 | 待做（解析已停用，代码未删） |
+| [24](https://github.com/kotochain/fatloss-helper/issues/24) | 离线食物库的去留：删掉离线自然语言解析，保留食物库本身 | v43 已完成 |
 | [25](https://github.com/kotochain/fatloss-helper/issues/25) | 新手教程：以 DeepSeek 为例，教完全不懂的人拿到 API 密钥 | v41 已完成 |
 | [26](https://github.com/kotochain/fatloss-helper/issues/26) | DeepSeek 默认模型 ID 已过时（deepseek-chat 已停用） | v40 已修 |
 

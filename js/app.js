@@ -17,8 +17,7 @@ import {
   resolveTrainingAction, logTraining, describeTraining, estimateTrainingKcal,
 } from './exercise.js';
 import {
-  normalizeAiItems, sumItems, collectQuestions, PORTION_CHOICES,
-  gramsFromText, portionGrams, cachedOnlyMatch, findPortion, gramsForPortion,
+  normalizeAiItems, sumItems, cachedOnlyMatch, findPortion, gramsForPortion,
 } from './mealparse.js';
 import {
   askAi, aiStatus, currentAiConfig, saveAiConfigLocal, clearAiConfig,

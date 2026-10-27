@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readApiKey, aiConfig, aiConfigStatus, buildSystemPrompt, callUpstream, normalizeResult } from '../tools/ai-proxy.mjs';
-import { parseDescription, normalizeAiItems, selfTestParser, GOLDEN_CASES, sumItems, cachedOnlyMatch } from '../js/mealparse.js';
+import { normalizeAiItems, sumItems, cachedOnlyMatch } from '../js/mealparse.js';
 
 const CONFIG = { baseUrl: 'https://example.invalid', model: 'test-model', key: 'sk-fake-for-test' /* secret-scan:allow 假密钥 */ };
 
@@ -226,63 +226,6 @@ test('提示词要求模型只输出 JSON、且明确份量参考值', () => {
   assert.ok(p.includes('只输出 JSON'));
   assert.ok(p.includes('一小碗米饭 130 克'));
   assert.ok(p.includes('breakfast'));
-});
-
-test('离线解析的基准用例全部合格（AI 不通时的兜底不能退化）', () => {
-  const failed = selfTestParser();
-  assert.deepEqual(failed, [], failed.join('\n'));
-  assert.ok(GOLDEN_CASES.length >= 6, '基准用例太少，覆盖不住常见说法');
-});
-
-test('离线解析：一句话里的多个份量不会被串到一起（issue #3）', () => {
-  // 真出过的 bug：「半包」被奶茶抢走，薯片按默认 50 克记（误差 100%）。
-  // 以前的断言写成「薯片 <= 60 克」——默认值刚好 50，于是这条测试一直在假绿。
-  // 现在钉死克数，并且正反两种语序都要对。
-  const cases = [
-    '下午喝了杯奶茶，还有半包薯片',
-    '半包薯片和一杯奶茶',
-    '一杯奶茶和半包薯片',
-    '喝了奶茶，还有半包薯片',        // 口语里常常不说「一杯」
-    '奶茶和半包薯片',
-  ];
-  for (const text of cases) {
-    const r = parseDescription(text);
-    const milkTea = r.items.find((i) => i.name.includes('奶茶'));
-    const chips = r.items.find((i) => i.name.includes('薯片'));
-    assert.ok(milkTea && chips, `${text}：两样都要解析出来`);
-    assert.equal(chips.grams, 25, `${text}：「半包」应当归薯片（25 克），实际 ${chips.grams} 克`);
-    assert.ok(milkTea.grams >= 400 && milkTea.grams <= 500,
-      `${text}：奶茶该按中杯 500 克算，实际 ${milkTea.grams} 克`);
-  }
-});
-
-test('基准用例「半包薯片」这条必须收紧容差（±25% 会把真 bug 盖住）', () => {
-  const c = GOLDEN_CASES.find((x) => x.text.includes('半包薯片'));
-  assert.ok(c, '基准用例里必须有这条：用户日常真会这么说');
-  assert.ok((c.tol ?? 0.25) <= 0.1, `这条的容差要收紧到 10% 以内，现在 ${c.tol}`);
-  const got = sumItems(parseDescription(c.text).items).kcal;
-  const diff = Math.abs(got - c.kcal) / c.kcal;
-  assert.ok(diff <= c.tol, `解析出 ${got} kcal，应在 ${c.kcal} ±${Math.round(c.tol * 100)}% 之内`);
-});
-
-test('离线解析：「两个鸡蛋」不能被后面的「一个苹果」抢走份量', () => {
-  const r = parseDescription('中午吃了两个鸡蛋和一个苹果');
-  const egg = r.items.find((i) => i.name.includes('鸡蛋'));
-  const apple = r.items.find((i) => i.name.includes('苹果'));
-  assert.equal(egg.grams, 100, `两个鸡蛋应当是 100 克，实际 ${egg.grams}`);
-  assert.equal(apple.grams, 200, `一个苹果应当是 200 克，实际 ${apple.grams}`);
-});
-
-test('离线解析：「一碗面」不会被「食堂」这类泛称抢走', () => {
-  const r = parseDescription('今天中午在食堂吃了碗牛肉面');
-  assert.equal(r.items.length, 1);
-  assert.ok(r.items[0].name.includes('牛肉面'), `解析成了 ${r.items[0].name}`);
-});
-
-test('离线解析：完全看不懂的内容不伪造条目，而是回报原文', () => {
-  const r = parseDescription('今天心情不好随便吃了点');
-  assert.equal(r.items.length, 0);
-  assert.ok(r.unknown.length > 0, '应当把没认出来的原文回报给界面');
 });
 
 test('v31 整条链路：AI 返回组合菜 + 库里没有的菜，本地都要能记上（不能空手而归）', async () => {

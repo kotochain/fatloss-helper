@@ -1,22 +1,16 @@
 /**
- * 离线解析的「份量置信度」测试
+ * 份量换算与档位测试
  *
- * 要守住的产品行为（issue #2）：用户说得清楚就别打扰用户；说不清楚（「一碗」「一份」、
- * 干脆没说）就必须反问一句，并且给出几个按食物类型给的档位，让用户一点就选。
- * 这里同时钉住「不许悄悄改克数」—— 加置信度只是多问一句，不能顺手把估算值改掉。
+ * v43（issue #24）：离线「猜整句话」的解析器删掉后，这个文件只剩两件事：
+ *  1) 「一碗」「两个」「半斤」这类说法怎么换算成克数（AI 只给说法、不给数字时全靠它）；
+ *  2) 「份量是猜的」时候给用户的档位按钮必须真的能点（最小 < 当前 < 最大）。
+ * 另外保留 AI 条目整理的几条：AI 报的菜名要能对上本地库、只给说法或什么都不给也不能丢。
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDescription, buildPortionChoices, portionKindOf, normalizeAiItems } from '../js/mealparse.js';
-import { findFood } from '../js/foods.js';
-
-/** 取一条 item，找不到就直接失败（比 `?.` 静默通过好：静默通过会让测试变成摆设） */
-function item(text, keyword) {
-  const it = parseDescription(text).items.find((x) => x.name.includes(keyword));
-  assert.ok(it, `「${text}」里没解析出「${keyword}」`);
-  return it;
-}
+import { findPortion, gramsForPortion, buildPortionChoices, portionKindOf, normalizeAiItems } from '../js/mealparse.js';
+import { findFood, matchFoodByName } from '../js/foods.js';
 
 const gramsOf = (choices) => choices.map((c) => c.grams);
 
@@ -34,80 +28,36 @@ function assertChoicesSane(it, label) {
   assert.equal(new Set(labels).size, labels.length, `${label}：两个按钮说法一样，用户不知道选哪个 → ${labels.join('/')}`);
 }
 
-test('用户说了确切克数 → 高置信度，不该再问', () => {
-  const rice = item('中午吃了200克米饭', '米饭');
-  assert.equal(rice.grams, 200, '说好的克数不能被改动');
-  assert.equal(rice.confidence, 'high');
-  assert.equal(rice.confidenceReason, null, '说得清楚就不要给理由，界面也不该多出东西');
-  assert.deepEqual(rice.portionChoices, []);
+test('份量说法要能换算成克数：一碗 / 两个 / 半斤 / 一两 / 毫升 / 克数', () => {
+  assert.equal(findPortion('一碗').grams, 350, '通用一碗按 350 克兜底（具体食物会覆盖它）');
+  assert.equal(findPortion('一碗').portionWord, '一碗');
+
+  const two = findPortion('两个');
+  assert.equal(two.counting, true, '「两个」是个数，不是重量');
+  assert.equal(two.count, 2);
+  assert.equal(two.portionWord, '一个');
+
+  assert.equal(findPortion('半斤').grams, 250, '一斤 500 克，半斤 250');
+  assert.equal(findPortion('一两').grams, 50, '一两 50 克');
+  assert.equal(findPortion('300毫升').grams, 300);
+  assert.equal(findPortion('200克').grams, 200, '用户说了确切克数就照用');
+  assert.equal(findPortion('一罐').portionWord, '一罐', '罐装饮料按包装算，克数交给具体食物');
+
+  assert.equal(findPortion('随便吃了点'), null, '没有份量说法时要老实返回空，不能编一个');
 });
 
-test('有明确换算的份量词（两个鸡蛋、一罐可乐、一杯酸奶）→ 高置信度', () => {
-  const egg = item('中午吃了两个鸡蛋', '鸡蛋');
-  assert.equal(egg.confidence, 'high', '鸡蛋个头有标准，两个就是 100 克，不用问');
-  assert.equal(egg.grams, 100);
-
-  const cola = item('喝了一罐可乐', '可乐');
-  assert.equal(cola.confidence, 'high', '一罐可乐是固定包装');
-
-  const yogurt = item('喝了一杯无糖酸奶', '酸奶');
-  assert.equal(yogurt.confidence, 'high', '库里写了「一杯 150 克」，换算明确');
+test('换算克数要按食物自己的份量表，不是统一 350 克', () => {
+  const byWord = (id, text) => gramsForPortion(findFood(id), findPortion(text));
+  assert.equal(byWord('rice_cooked', '一碗'), 180, '米饭一碗是 180 克');
+  assert.equal(byWord('congee', '一碗'), 250, '白粥一碗是 250 克（比米饭稀）');
+  assert.equal(byWord('milk_whole', '一杯'), 250, '牛奶一杯 250 克');
+  assert.equal(byWord('egg', '两个'), 100, '两个鸡蛋 100 克（一个 50 克，不是通用 100 克）');
+  assert.equal(byWord('banana', '一根'), 120, '一根香蕉 120 克');
 });
 
-test('「一碗米饭」→ 低置信度，档位就是食物库里那三个碗', () => {
-  const rice = item('一碗米饭', '米饭');
-  assert.equal(rice.confidence, 'low');
-  assert.ok(rice.confidenceReason.includes('一碗'), `理由要说清是哪个说法说不准：${rice.confidenceReason}`);
-  assert.equal(rice.grams, 180, '一碗米饭还是按库里的 180 克，只是多问一句');
-  assert.deepEqual(gramsOf(rice.portionChoices), [130, 180, 250], '米饭的档位该跟食物库的份量表一致');
-});
-
-test('组合菜「一碗牛肉面」→ 一定反问用户（这是误差最大的地方）', () => {
-  const noodle = item('今天中午在食堂吃了碗牛肉面', '牛肉面');
-  assert.equal(noodle.confidence, 'low');
-  assert.equal(noodle.source, 'dish');
-  assertChoicesSane(noodle, '牛肉面');
-  assert.equal(noodle.grams, 600, '加的是「问一句」，不是把克数改小');
-  assert.deepEqual(noodle.portionChoices.map((c) => c.label), ['小碗', '正常', '大碗'],
-    '一碗面要按碗问，不是按「份」');
-});
-
-test('组合菜只要用户说了克数，就别再问（说得清楚就不打扰）', () => {
-  const noodle = item('中午吃了600克牛肉面', '牛肉面');
-  assert.equal(noodle.confidence, 'high', '明说了 600 克还要问，就成了烦用户');
-  assert.equal(noodle.grams, 600);
-  assert.deepEqual(noodle.portionChoices, []);
-});
-
-test('「一份黄焖鸡米饭」→ 低置信度，档位按份给', () => {
-  const meal = item('中午吃了一份黄焖鸡米饭', '黄焖鸡');
-  assert.equal(meal.confidence, 'low');
-  assert.ok(meal.confidenceReason.includes('一份'));
-  assertChoicesSane(meal, '黄焖鸡米饭');
-  assert.equal(meal.grams, 550, '基准热量不能因为多问一句就变');
-});
-
-test('包装有大有小（半包薯片）→ 低置信度', () => {
-  const chips = item('下午吃了半包薯片', '薯片');
-  assert.equal(chips.confidence, 'low', '小包 50 克和大包 100 克差一倍，得问');
-  assertChoicesSane(chips, '薯片');
-});
-
-test('用户什么份量都没说 → 低置信度，理由要说明是按常见的一份记的', () => {
-  const veg = item('中午吃了西兰花', '西兰花');
-  assert.equal(veg.confidence, 'low');
-  assert.ok(veg.confidenceReason.includes('没说'), `理由要说清是「没说」：${veg.confidenceReason}`);
-  assertChoicesSane(veg, '西兰花');
-});
-
-test('都说得清楚时：一条低置信度都没有，界面不该多出任何东西', () => {
-  const r = parseDescription('中午吃了200克米饭和两个鸡蛋');
-  assert.equal(r.items.length, 2);
-  for (const it of r.items) {
-    assert.equal(it.confidence, 'high', `${it.name} 不该被问`);
-    assert.deepEqual(it.portionChoices, [], `${it.name} 高置信度却给了档位按钮`);
-    assert.equal(it.confidenceReason, null);
-  }
+test('组合菜「一碗」= 一份，不是通用碗重 350 克', () => {
+  const wonton = matchFoodByName('馄饨').food;
+  assert.equal(gramsForPortion(wonton, findPortion('一碗')), 300, '一碗馄饨按它自己的 300 克一份算');
 });
 
 test('档位按食物类型给，不是所有食物统一乘一个系数', () => {
@@ -127,94 +77,6 @@ test('档位按食物类型给，不是所有食物统一乘一个系数', () =>
   assert.equal(portionKindOf({ id: 'beef_noodle', category: 'dish' }), 'bowl');
 });
 
-test('「两碗米饭」的档位要跟着翻倍，不是还按一碗给', () => {
-  const rice = item('两碗米饭', '米饭');
-  assert.equal(rice.grams, 360);
-  assert.deepEqual(gramsOf(rice.portionChoices), [260, 360, 500]);
-});
-
-test('「加饭」「加肉」这种加多少全看用户手的，要问；「加蛋」是一颗标准大小，不问', () => {
-  const rice = item('牛肉面加饭', '加米饭');
-  assert.equal(rice.confidence, 'low');
-  assertChoicesSane(rice, '加饭');
-
-  const meat = item('牛肉面加肉', '加瘦'); // 加肉默认按「瘦牛肉（熟重）」算
-  assert.equal(meat.confidence, 'low');
-  assertChoicesSane(meat, '加肉');
-
-  const egg = item('牛肉面加蛋', '鸡蛋');
-  assert.equal(egg.confidence, 'high', '一颗蛋是标准大小，不该拿这种问题烦用户');
-  assert.deepEqual(egg.portionChoices, []);
-});
-
-test('生熟口径：说「生鸡胸肉」按生重，其余默认熟重（离线解析也一样）', () => {
-  const cooked = item('中午吃了150克鸡胸肉', '鸡胸肉');
-  assert.equal(cooked.foodId, 'chicken_breast_cooked', '默认应当是熟重那条');
-  assert.equal(cooked.grams, 150);
-  assert.equal(cooked.kcal, 236, '150 克 × 157/100');
-
-  const raw = item('中午吃了150克生鸡胸肉', '生鸡胸肉');
-  assert.equal(raw.foodId, 'chicken_breast', '带「生」要落到生重那条');
-  assert.equal(raw.kcal, 177, '150 克 × 118/100');
-
-  const boiled = item('水煮鸡胸100克', '鸡胸');
-  assert.equal(boiled.foodId, 'chicken_breast_cooked');
-  assert.equal(boiled.kcal, 157, '熟重数据已经包含做法，不能再按「水煮」乘油量');
-});
-
-test('口语里不带「一」的份量词也要认（喝了瓶 → 就是「瓶」）', () => {
-  // 用户说「喝了瓶运动饮料」时，「瓶」是有固定规格的 —— 不该退化成「你没说多少」再问一遍。
-  // 以前有人把「裸量词」这条逻辑删掉，其它断言全过（因为都落在别的字段上），实测才发现漏了。
-  const drink = item('喝了瓶运动饮料', '运动饮料');
-  assert.equal(drink.confidence, 'high', '「瓶」有固定规格，不该再问用户');
-  assert.equal(drink.grams, 500);
-  assert.equal(drink.confidenceReason, null);
-
-  // 「食堂吃了碗牛肉面」：碗确实说不准，但理由必须落在「碗」上，而不是「没说量」。
-  const noodle = item('食堂吃了碗牛肉面', '牛肉面');
-  assert.equal(noodle.confidence, 'low');
-  assert.ok(noodle.confidenceReason.includes('碗'), `理由要落在「碗」上：${noodle.confidenceReason}`);
-  assert.ok(!/你没说/.test(noodle.confidenceReason), `用户明明说了「碗」：${noodle.confidenceReason}`);
-});
-
-test('组合菜不能抢走「一杯奶茶」这种明显给饮料的份量（issue #3）', () => {
-  // 「吃完火锅又喝了杯奶茶」里，火锅和奶茶都可能去抢「杯」。
-  // 以前组合菜会把「杯」抢走：火锅的理由变成「『杯』没有固定规格」、追问也变成问锅底。
-  const r = parseDescription('吃完火锅又喝了杯奶茶');
-  const firepot = r.items.find((i) => i.name.includes('火锅'));
-  const tea = r.items.find((i) => i.name.includes('奶茶'));
-  assert.ok(firepot && tea, '火锅和奶茶都要在');
-  assert.ok(!firepot.confidenceReason.includes('杯'), `火锅的理由不该是「杯」：${firepot.confidenceReason}`);
-  assert.ok(firepot.question.includes('多大'), `火锅该问份量大小，实际问的是：${firepot.question}`);
-  assert.ok(tea.confidenceReason.includes('杯'), `奶茶才该拿「杯」，实际：${tea.confidenceReason}`);
-});
-
-test('批量过一遍常见说法：低置信度的档位必须都能点', () => {
-  const phrases = [
-    '一碗米饭', '两碗米饭', '一小碗粥', '一份黄焖鸡米饭', '一份麻辣烫', '一碗牛肉面', '一碗馄饨',
-    '一份炒饭', '一碗面条', '今天中午在食堂吃了碗牛肉面，加了个蛋', '下午喝了杯奶茶，还有半包薯片',
-    '晚上吃了碗红烧肉配了一碗米饭，还有炒青菜', '加饭加肉', '吃了一根香蕉', '一片面包',
-    '喝了瓶运动饮料', '一碗炒青菜', '一份宫保鸡丁', '一份麻婆豆腐', '一块奶油蛋糕',
-  ];
-  let asked = 0;
-  for (const p of phrases) {
-    for (const it of parseDescription(p).items) {
-      assert.ok(['high', 'low'].includes(it.confidence), `${p} / ${it.name}：置信度只能是 high/low，实际 ${it.confidence}`);
-      if (it.confidence === 'high') {
-        assert.deepEqual(it.portionChoices, [], `${p} / ${it.name}：说得清楚就别给档位`);
-        continue;
-      }
-      asked += 1;
-      assert.ok(it.confidenceReason, `${p} / ${it.name}：低置信度要有一句人话解释`);
-      assertChoicesSane(it, `${p} / ${it.name}`);
-      const vals = gramsOf(it.portionChoices);
-      // 「小碗 130 克」和「大碗 3 公斤」这种跨度用户也没法选
-      assert.ok(Math.max(...vals) / Math.min(...vals) <= 5, `${p} / ${it.name}：档位跨度太大 ${vals.join('/')}`);
-    }
-  }
-  assert.ok(asked >= 8, `这组例句里该问的太少（只有 ${asked} 条），说明置信度判定退化了`);
-});
-
 test('档位函数的边界：没有食物数据、份量不合理时不能崩', () => {
   // 认不出食物时也得给档位（界面只依赖这个函数）
   assertChoicesSane({ grams: 100, portionChoices: buildPortionChoices(null, 100) }, '无食物数据');
@@ -229,72 +91,7 @@ test('档位函数的边界：没有食物数据、份量不合理时不能崩',
   assertChoicesSane({ grams: 3000, portionChoices: big }, '3000 克');
 });
 
-test('组合菜不会抢走后面食材的份量（issue #3）', () => {
-  // 「红烧肉配了一碗米饭」：一碗是米饭的，红烧肉按自己的一份算。
-  // 以前红烧肉会把「一碗」抢走（350 克红烧肉 1330 kcal），米饭只剩「小碗 130 克」。
-  const r = parseDescription('晚饭红烧肉配了一碗米饭，还有炒青菜');
-  const rice = r.items.find((i) => i.name.includes('米饭'));
-  const pork = r.items.find((i) => i.name.includes('红烧肉'));
-  assert.ok(rice && pork, '米饭和红烧肉都要在');
-  assert.equal(rice.grams, 180, `一碗米饭应当是 180 克，实际 ${rice.grams}`);
-  assert.equal(pork.grams, 150, `红烧肉该按库里的一份 150 克算，实际 ${pork.grams} 克`);
-});
-
-test('组合菜「一碗」= 一份，不是通用碗重 350 克', () => {
-  // 同一个意思的两种说法不能差出 200 kcal：以前「吃了碗牛肉面」=600 克、「一碗牛肉面」=350 克
-  const a = item('中午吃了一碗牛肉面', '牛肉面');
-  const b = item('中午吃了碗牛肉面', '牛肉面');
-  assert.equal(a.grams, b.grams, `两种说法必须一致：${a.grams} 克 vs ${b.grams} 克`);
-  assert.ok(a.grams >= 500, `一碗牛肉面至少 500 克，实际 ${a.grams}`);
-});
-
-test('v31：食物别名进了离线词典（以前只有搜索和 AI 能用，离线看不见）', () => {
-  // 这些说法以前离线整句认不出来：AI 没开 / AI 没接上时，用户只能重说
-  const cases = [
-    ['一杯酸奶', '无糖酸奶', 150],
-    ['半斤牛奶', '全脂牛奶', 250],
-    ['一块蛋糕', '奶油蛋糕', 100],
-    ['两碗粥', '白粥', 500],
-    ['一根香蕉', '香蕉', 120],
-    ['一小把杏仁', '巴旦木/杏仁', 25],
-    ['吃了一颗糖', '白砂糖', 8],
-    ['两片吐司', '白吐司', 70],
-  ];
-  for (const [text, name, grams] of cases) {
-    const r = parseDescription(text);
-    const it = r.items.find((x) => x.name === name);
-    assert.ok(it, `「${text}」里没解析出「${name}」，实际：${r.items.map((x) => x.name).join('/')}`);
-    assert.equal(it.grams, grams, `「${text}」的克数不对`);
-  }
-});
-
-test('v31：一句话里几样东西都要记上（不能再只记第一样）', () => {
-  const r = parseDescription('早上喝了杯豆浆，吃了个鸡蛋灌饼');
-  assert.deepEqual(r.items.map((x) => x.name), ['无糖豆浆', '鸡蛋灌饼']);
-  assert.equal(r.items[0].grams, 300);
-  assert.equal(r.items[1].grams, 200);
-
-  const r2 = parseDescription('喝了杯橙汁，吃了块鸡排');
-  assert.equal(r2.items.length, 2);
-});
-
-test('v31：单字词只在水词是「买的东西」时才算食物（晚饭≠一碗饭）', () => {
-  // 「晚饭吃了一碗米饭」以前会记出两条米饭（晚饭的「饭」+ 米饭），热量凭空多一倍
-  const r = parseDescription('晚饭吃了一碗米饭，一份宫保鸡丁，一杯酸奶');
-  const rice = r.items.filter((x) => x.name === '米饭（熟）');
-  assert.equal(rice.length, 1, `米饭被记了 ${rice.length} 次：${r.items.map((x) => x.name)}`);
-  assert.equal(rice[0].grams, 180);
-});
-
-test('v31：食堂打饭 + 三样具体菜时，不能一顿算成两顿', () => {
-  const r = parseDescription('食堂打了三个菜：土豆丝、青椒肉丝、炒青菜');
-  assert.ok(!r.items.some((x) => x.name.includes('食堂打饭')), '有具体菜时不该再用泛称套餐兜底');
-  for (const name of ['炒土豆丝', '青椒肉丝', '炒青菜（家常油量）']) {
-    assert.ok(r.items.some((x) => x.name === name), `少了「${name}」：${r.items.map((x) => x.name)}`);
-  }
-});
-
-test('v31：AI 说组合菜的名字也要能对上本地库', () => {
+test('AI 说组合菜的名字也要能对上本地库', () => {
   const r = normalizeAiItems({
     items: [
       { name: '黄焖鸡米饭', grams: 550 },
@@ -307,7 +104,7 @@ test('v31：AI 说组合菜的名字也要能对上本地库', () => {
   assert.equal(r.items[0].kcal, 780, '黄焖鸡米饭 550 克 = 780 kcal');
 });
 
-test('v31：AI 只给「一碗」这种说法、或者干脆没给份量，也不能丢', () => {
+test('AI 只给「一碗」这种说法、或者干脆没给份量，也不能丢', () => {
   const r = normalizeAiItems({
     items: [
       { name: '馄饨', portion: '一碗' },
@@ -318,20 +115,11 @@ test('v31：AI 只给「一碗」这种说法、或者干脆没给份量，也�
   assert.deepEqual(r.items.map((x) => x.grams), [300, 500, 25], '一碗馄饨=一份 300，一碗酸菜鱼=500，寿司默认一贯 25');
 });
 
+test('AI 说「两个鸡蛋」这种个数说法，要按食物自己的单个重量换算', () => {
+  // 回归：以前「一个」被当成通用 100 克，两个鸡蛋算成 200 克（实际 100 克，误差一倍）
+  const r = normalizeAiItems({ items: [{ name: '鸡蛋', portion: '两个' }] });
+  assert.equal(r.items[0].grams, 100, '两个鸡蛋 100 克（一个 50 克）');
 
-/*
- * v35（issue #13）：离线解析认出一部分、还有没认出来的字 —— 以前一声不响，用户以为整句都记上了。
- * 现在把没认出来的部分带出来，界面会问一句（已认出的照样能保存）。
- */
-
-test('v35：离线解析把「没认出来剩下的字」带出来，只认出一部分时不能一声不响', () => {
-  const part = parseDescription('中午吃了红烧肉和一份佛跳墙');
-  assert.ok(part.items.length >= 1, '红烧肉该认出来');
-  assert.equal(part.leftover, '佛跳墙', '没认出来的菜名要带出来');
-
-  const clean = parseDescription('中午吃了一碗牛肉面');
-  assert.equal(clean.leftover, '', '整句都认出来时不该乱提示');
-
-  const none = parseDescription('今天吃了点东西');
-  assert.equal(none.leftover, '', '一个都没认出来时由 unknown 负责，不重复提示');
+  const rice = normalizeAiItems({ items: [{ name: '米饭', portion: '两碗' }] });
+  assert.equal(rice.items[0].grams, 360, '两碗米饭 360 克（一碗 180）');
 });
