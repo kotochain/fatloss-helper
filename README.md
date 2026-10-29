@@ -501,6 +501,10 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 **总账**：R60 改写为「打开就是最新版（网络优先）」，新增 R61「一直开着要主动提示」、
 R62「更新只清代码缓存、不碰 localStorage」；62 条规则 / 61 条有测试。
 
+**发布记录**：提交 `a3c5016`；CI 4 个 job 全绿（[run 40522445671](https://github.com/kotochain/fatloss-helper/actions/runs/40522445671)），
+Pages 发布成功（[run 40522445292](https://github.com/kotochain/fatloss-helper/actions/runs/40522445292)）；
+`check-live` 线上 v46、34 个文件逐字节一致、缓存名 `fatloss-v46`；`live-audit` 0 个阻断问题。
+
 ---
 
 ## 〇·二十一、修好「打开是旧版、还没有更新提示」（2026-10-27，v45）
