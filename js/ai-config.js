@@ -36,6 +36,8 @@ export function readAiConfig(storage = defaultStorage()) {
       presetId: data.presetId || 'custom',
       baseUrl: String(data.baseUrl).replace(/\/+$/, ''),
       model: String(data.model),
+      // 拍照读表专用的看图模型：空串 = 跟随 model（老配置里没有这一栏，读出来就是空）
+      visionModel: String(data.visionModel || '').trim(),
       apiKey: String(data.apiKey || ''),
       mode: data.mode === 'relay' ? 'relay' : 'direct',
       updatedAt: data.updatedAt || null,
@@ -50,6 +52,7 @@ export function writeAiConfig(config, storage = defaultStorage()) {
     presetId: config.presetId || 'custom',
     baseUrl: String(config.baseUrl).replace(/\/+$/, ''),
     model: config.model,
+    visionModel: String(config.visionModel || '').trim(),
     apiKey: config.apiKey || '',
     mode: config.mode === 'relay' ? 'relay' : 'direct',
     updatedAt: new Date().toISOString(),

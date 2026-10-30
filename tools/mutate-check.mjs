@@ -127,6 +127,10 @@ const MUTATIONS = [
   // ── 第十一轮：AI 设置留空密钥 + 「只填热量」──
   { file: 'js/providers.js', from: "const apiKey = askedKey || (presetChanged ? '' : (existing?.apiKey || ''));", to: 'const apiKey = askedKey;', why: '输入框留空（空字符串）必须沿用已保存的密钥，不能报「密钥没填」' },
   { file: 'js/providers.js', from: "const presetChanged = Boolean(existing?.apiKey && existing.presetId && preset.id !== existing.presetId);", to: 'const presetChanged = false;', why: '换了服务商不能沿用上一家的密钥（等于把钥匙递给第三方）' },
+  // v48（#21）：拍照读表单独用看图模型 —— 三条都不许写反
+  { file: 'js/providers.js', from: "  return own || String(config?.model || '').trim();", to: "  return String(config?.model || '').trim();", why: '单独配了看图模型就得真的用它（不然等于没配）' },
+  { file: 'js/providers.js', from: "      visionModel: presetChanged ? '' : askedVision,", to: '      visionModel: askedVision,', why: '换了服务商不能沿用上一家的看图模型（那个名字在别家不存在）' },
+  { file: 'js/providers.js', from: "const askedVision = String(input.visionModel ?? existing?.visionModel ?? '').trim();", to: "const askedVision = String(input.visionModel || existing?.visionModel || '').trim();", why: '看图模型要能真的清空回「跟随」（空串不能退回旧值）' },
   { file: 'js/foods.js', from: "if (!Number.isFinite(k) || k <= 0) return { ok: false, error: '热量要填一个大于 0 的数字（kcal）。' };", to: 'if (!Number.isFinite(k)) return { ok: false };', why: '「只填热量」要挡住 0 / 负数（否则会记一条 0 kcal 的空记录）' },
   { file: 'js/foods.js', from: 'if (k > 5000) return { ok: false', to: 'if (k > 99999) return { ok: false', why: '「只填热量」要挡住明显多填一位的数字' },
   { file: 'js/store.js', from: '      if (e.food.kcalOnly) continue;', to: '      if (false) continue;', why: '「只填热量」的条目不该出现在「常吃的」里（否则变成 100 克 = 650 kcal 的怪快捷项）' },

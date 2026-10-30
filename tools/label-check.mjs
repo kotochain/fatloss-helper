@@ -4,11 +4,13 @@
  * 场景对应用户真实需求：包装上印的是「能量 349 千焦 / 蛋白 13.7 / 脂肪 0.7 / 碳水 5.3」，
  * 而食物库里的「鸡胸肉（生）」是 118 kcal —— 两者不是同一种东西（预制调理含水/淀粉）。
  *
- * 这个脚本验证四件事（全走真实界面，只看用户看得到的东西）：
+ * 这个脚本验证五件事（全走真实界面，只看用户看得到的东西）：
  *  1) 手动照包装填：千焦自动换算成 83.4 kcal，对账通过，能存成「我的食物」并按克数记上；
  *  2) 拍照读表：用假服务商（零费用）返回读数，字段要自动填好，但用户还得点保存；
  *  3) 模型看不了图时：说人话，不崩，手动填照样能用；
- *  4) 模型读回离谱数字（5000 kcal）时：本地拦下来，绝不允许存进记录。
+ *  4) 模型读回离谱数字（5000 kcal）时：本地拦下来，绝不允许存进记录；
+ *  5) 解析用「看不了图」的便宜模型时，只要在设置里单独填了「拍照读表用的模型」，读表照样能用
+ *     —— 这一条是 issue #21 的验收：两个模型各管各的。
  *
  * 用法：node tools/label-check.mjs
  */
@@ -42,6 +44,8 @@ const fail = (m) => { console.log(`❌ ${m}`); problems.push(m); };
 
 /* ── 假服务商：看请求里有没有图片，按场景返回 ─────────── */
 let scenario = 'ok';
+/** 上一次读表请求用的是哪个模型（用来验证「单独配的看图模型真的被用上了」） */
+let lastLabelModel = null;
 const LABEL_REPLY = JSON.stringify({
   name: '低脂鸡胸肉', baseGrams: 100,
   energy: { value: 349, unit: 'kJ' },
@@ -70,6 +74,13 @@ function startFakeProvider() {
       if (!hasImage) {
         res.writeHead(400, { ...cors, 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: { message: 'expected image' } }));
+        return;
+      }
+      lastLabelModel = String(body?.model || '');
+      // mock-text = 「只会解析文字、看不了图」的便宜模型。真服务商对带图片的请求就是这么拒的。
+      if (lastLabelModel === 'mock-text') {
+        res.writeHead(400, { ...cors, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: 'This model does not support image input' } }));
         return;
       }
       if (scenario === 'bad-model') {
@@ -160,12 +171,15 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 
 async function boot(client) {
   await client.send('Page.navigate', { url: `http://127.0.0.1:${STATIC_PORT}/` });
+  // 新文档落地前，下面那句判断会命中**上一页**（上一页的 __appReady 还是 true），
+  // 于是「重新登录了一个配置」其实没生效。先等一下再等启动。
+  await sleep(350);
   await waitFor(() => ev(client, `window.__appReady === true`), '页面启动');
   await sleep(400);
 }
 
 /** 预置一个「已完成引导、AI 直连已配置」的存档（不碰真实配置，只写这个测试浏览器的 localStorage） */
-async function seed(client) {
+async function seed(client, { model = 'mock-vl', visionModel = '' } = {}) {
   await ev(client, `(() => {
     const st = {
       version: 4, schemaVersion: 4,
@@ -178,7 +192,8 @@ async function seed(client) {
     localStorage.setItem('fatloss.ai.v1', JSON.stringify({
       presetId: 'custom',
       baseUrl: 'http://127.0.0.1:${FAKE_PORT}/v1',
-      model: 'mock-vl',
+      model: ${JSON.stringify(model)},
+      visionModel: ${JSON.stringify(visionModel)},
       apiKey: 'sk-label-check-fake', // secret-scan:allow 假密钥，只写进测试浏览器的 localStorage
       mode: 'direct',
       updatedAt: new Date().toISOString(),
@@ -496,8 +511,47 @@ async function main() {
     else if (!/太高|千焦|太/.test(afterSave.toast)) fail(`拒绝保存时提示不清楚：${afterSave.toast}`);
     else pass('离谱数字被本地拦下，没有落库');
 
-    /* ── 五、全程异常 ── */
-    console.log('\n=== 五、全程异常 ===');
+    /* ── 五、解析用看不了图的便宜模型，读表单独配看图模型（issue #21） ── */
+    console.log('\n=== 五、解析用文字模型，读表单独用看图模型 ===');
+    scenario = 'ok'; // 上一节把假服务商设成了「返回离谱数字」，这一节要正常读数
+    // 先证明「不配就真的不行」：不这样，后面那条成功就不能说明是这个新开关起作用
+    await seed(client, { model: 'mock-text' });
+    await boot(client);
+    await openLabelSheet(client);
+    await injectPhoto(client, fixture);
+    await waitFor(
+      () => ev(client, `/(没读出来|看不了图片)/.test(document.getElementById('labelShotHint')?.textContent || '')`),
+      '只配文字模型时读表应当失败',
+    );
+    const onlyText = await ev(client, `document.getElementById('labelShotHint')?.textContent || ''`);
+    console.log(`   ${onlyText}`);
+    if (!/看不了图片/.test(onlyText)) fail(`解析模型看不了图时，提示没说清「看不了图片」：${onlyText}`);
+    else pass('只配文字模型：读表老实说「看不了图片」，没有假装成功');
+    await ev(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+
+    // 再证明「配上就行了」：主模型仍然是那个看不了图的 mock-text
+    await seed(client, { model: 'mock-text', visionModel: 'mock-vl' });
+    await boot(client);
+    await openLabelSheet(client);
+    lastLabelModel = null;
+    await injectPhoto(client, fixture);
+    await waitFor(() => ev(client, `document.getElementById('labelEnergy').value === '349'`), '单独配了看图模型后读表成功');
+    const withVision = await ev(client, `({
+      能量: document.getElementById('labelEnergy').value,
+      单位: [...document.querySelectorAll('#labelUnit [data-unit]')].find((b) => b.classList.contains('on'))?.dataset.unit,
+      蛋白: document.getElementById('labelProtein').value,
+      hint: document.getElementById('labelShotHint')?.textContent || '',
+    })`);
+    console.log(`   读出：${withVision.能量} ${withVision.单位}｜蛋白 ${withVision.蛋白}｜请求发给的模型：${lastLabelModel}`);
+    if (lastLabelModel !== 'mock-vl') fail(`读表没用「拍照读表用的模型」，实际发给了 ${lastLabelModel}`);
+    else if (withVision.能量 !== '349' || withVision.蛋白 !== '13.7') fail(`单独配看图模型后读出来的数字不对：${JSON.stringify(withVision)}`);
+    else pass('解析用文字模型、读表用看图模型：各用各的，读表正常');
+    await ev(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+
+    /* ── 六、全程异常 ── */
+    console.log('\n=== 六、全程异常 ===');
     const errs = client.errors.filter((e) => !/favicon/i.test(e));
     if (errs.length) fail(`页面上有未捕获异常：${errs[0].slice(0, 160)}`);
     else pass('全程没有未捕获异常');

@@ -2492,7 +2492,8 @@ function openLabelSheet(mealKey = null) {
         <p class="tiny muted" id="labelShotHint" style="margin:8px 0 0">照片只会发给你在设置里配置的 AI 服务商。读出来先核对，再保存。</p>
       ` : `
         <p class="tiny" style="margin:0 0 12px;color:var(--ink-3)">
-          拍照自动读需要先在「我的 → 设置 → AI 设置」配一个<b>支持看图的模型</b>（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
+          拍照自动读要先在「我的 → 设置 → AI 设置」配一个<b>能看图的模型</b>（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
+          解析用的那个看不了图也没关系：在设置里「拍照读表用的模型」单独填一个就行，两个各管各的。
           手动照包装填也一样准。
         </p>
       `}
@@ -3667,6 +3668,14 @@ function drawAiSettings(cfg, relay, then = null) {
       <div id="modelPick" class="chips" style="margin-top:6px"></div>
     </label>
 
+    <label class="field"><span>拍照读表用的模型（可选）</span>
+      <input type="text" id="aiVisionModel" value="${esc(cfg.visionModel || '')}" placeholder="不填就跟上面那个模型一样" list="aiModelList" autocomplete="off">
+      <div class="tiny muted" style="margin-top:4px">
+        拍营养成分表要「能看图」的模型（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
+        <b>留空就用上面那个</b>；上面那个看不了图、又不想换掉它时，才需要在这里单独填一个。
+      </div>
+    </label>
+
     <label class="field"><span>密钥（只存在这台手机上）</span>
       <input type="text" id="aiKey" placeholder="${cfg.keyMasked ? `已保存：${esc(cfg.keyMasked)}（留空则不改）` : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
     </label>
@@ -3716,7 +3725,7 @@ function drawAiSettings(cfg, relay, then = null) {
     <div id="modeNote" class="tiny muted" style="margin:-6px 0 12px"></div>
 
     <div id="aiSettingsMsg"></div>
-    ${cfg.configured ? `<div class="small muted">当前生效：${esc(cfg.presetName || '')} · ${esc(cfg.model || '')} · 密钥 ${esc(cfg.keyMasked || '')}</div>` : ''}
+    ${cfg.configured ? `<div class="small muted">当前生效：${esc(cfg.presetName || '')} · ${esc(cfg.model || '')}${cfg.visionModel ? `（拍照读表用 ${esc(cfg.visionModel)}）` : ''} · 密钥 ${esc(cfg.keyMasked || '')}</div>` : ''}
     <div class="tiny muted" style="margin-top:8px" id="relayInfo">
       本机中转服务：${relay.available ? (relay.configured ? '在运行且已配置' : '在运行但没配密钥') : '没在运行（不影响手机直连）'}
     </div>
@@ -3769,6 +3778,8 @@ function drawAiSettings(cfg, relay, then = null) {
     if (overwrite) {
       if (p.baseUrl) $('#aiBaseUrl').value = p.baseUrl;
       if (p.model) $('#aiModel').value = p.model;
+      // 换了服务商，上一家的看图模型名在别家不存在，留着就是必然报错 —— 和密钥同一条道理
+      if ($('#aiVisionModel')) $('#aiVisionModel').value = '';
       $('#aiKey').placeholder = keyPlaceholder(p);
       if (p.directCall === false) {
         pickedMode = 'relay';
@@ -3843,6 +3854,7 @@ function drawAiSettings(cfg, relay, then = null) {
     presetId: bodyEl.querySelector('#presetChips .chip.on')?.dataset.preset || 'custom',
     baseUrl: $('#aiBaseUrl').value.trim(),
     model: $('#aiModel').value.trim(),
+    visionModel: $('#aiVisionModel').value.trim(),
     apiKey: $('#aiKey').value.trim(),
     mode: pickedMode,
   });

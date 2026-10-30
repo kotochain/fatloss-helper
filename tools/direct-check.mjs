@@ -310,11 +310,25 @@ async function main() {
   if (!keyGuide.有登录说明) problems.push('教程没写怎么登录（手机号 + 验证码）');
   // R59：钱的事必须说清 —— API 是服务商官方收费，跟我们无关
   if (!keyGuide.有收费归属) problems.push('教程没说清「API 的钱不给我们」');
+
+  // v48（#21）：拍照读表可以单独用一个看图模型，留空就跟解析用同一个
+  const visionField = await evaluate(`(() => {
+    const el = document.querySelector('#aiVisionModel');
+    return {
+      存在: Boolean(el),
+      提示: el?.placeholder || '',
+      说明: (el?.closest('label')?.textContent || '').replace(/\\s+/g, ' ').trim(),
+    };
+  })()`);
+  console.log('看图模型那一栏 →', JSON.stringify(visionField));
+  if (!visionField.存在) problems.push('AI 设置里没有「拍照读表用的模型」这一栏');
+  if (!/不填|留空/.test(visionField.提示 + visionField.说明)) problems.push('看图模型那一栏没说清「不填就跟解析用同一个」');
   await evaluate(`document.querySelector('#presetChips [data-preset="custom"]').click()`);
   await sleep(200);
   await evaluate(`(() => {
     document.querySelector('#aiBaseUrl').value = 'http://127.0.0.1:${FAKE_PORT}/v1';
     document.querySelector('#aiKey').value = 'sk-direct-mode-fake' /* secret-scan:allow 假密钥 */;
+    document.querySelector('#aiVisionModel').value = 'mock-vl-1';
     document.querySelector('#aiFetchModels').click();
   })()`);
   await sleep(2500);
@@ -345,11 +359,13 @@ async function main() {
   const stored = await evaluate(`(() => {
     const raw = localStorage.getItem('fatloss.ai.v1');
     const fake = 'sk-direct-mode-fake'; // secret-scan:allow 自检用的假密钥
-    return { 已保存: !!raw, 模式: raw ? JSON.parse(raw).mode : null, 含密钥: raw ? raw.includes(fake) : false };
+    const cfg = raw ? JSON.parse(raw) : null;
+    return { 已保存: !!raw, 模式: cfg ? cfg.mode : null, 含密钥: raw ? raw.includes(fake) : false, 看图模型: cfg ? cfg.visionModel : null };
   })()`);
   console.log('本机保存的配置：', JSON.stringify(stored));
   if (!stored.已保存) problems.push('配置没有保存到本机');
   if (stored.模式 !== 'direct') problems.push(`模式不是直连，实际 ${stored.模式}`);
+  if (stored.看图模型 !== 'mock-vl-1') problems.push(`「拍照读表用的模型」没跟着保存，实际 ${stored.看图模型}`);
 
   console.log('\n=== 二·二、留空密钥 = 沿用已保存的那把（用户遇到的「密钥没填」） ===');
   // 输入框上写着「已保存：sk-***（留空则不改）」，那就必须真的不改。

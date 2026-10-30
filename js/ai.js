@@ -9,7 +9,7 @@
  * 产品没有「离线解析」这条路（v42 删掉普通模式，v43 把解析代码也删了）。
  */
 
-import { publicAiConfig, normalizeAiConfigInput, findPreset } from './providers.js';
+import { publicAiConfig, normalizeAiConfigInput, findPreset, labelVisionModel } from './providers.js';
 import { readAiConfig, writeAiConfig, clearAiConfig, defaultStorage } from './ai-config.js';
 import { requestParse, requestPing, requestModels, requestLabelParse, requestCoach } from './ai-core.js';
 
@@ -71,13 +71,25 @@ export async function readLabelImage(imageDataUrl) {
   if (local.mode === 'relay') {
     return { ok: false, error: '拍照读表需要「手机直连」模式（图片不经过电脑中转）。也可以手动填。' };
   }
+  /*
+   * 用哪个模型：设置里单独填了「拍照读表用的模型」就用它，没填就跟解析用同一个。
+   * 为什么需要单独一个：解析要快、要便宜（文字模型足够），读表必须能看图 ——
+   * 两者共用一个模型时，用户只能二选一：配便宜的读不了表，配能看图的解析又慢又贵。
+   */
+  const model = labelVisionModel(local);
+  const separate = Boolean(local.visionModel) && local.visionModel !== local.model;
   try {
     const r = await requestLabelParse({
       imageDataUrl,
-      config: { baseUrl: local.baseUrl, model: local.model, apiKey: local.apiKey },
+      config: { baseUrl: local.baseUrl, model, apiKey: local.apiKey },
     });
-    return { ok: true, ...r };
+    return { ok: true, model, ...r };
   } catch (err) {
+    const msg = String(err?.message || '');
+    // 单独配的看图模型自己也看不了图时说清楚是「哪一栏」要改，别让用户去猜
+    if (separate && /看不了图片/.test(msg)) {
+      return { ok: false, error: `${msg}（设置里「拍照读表用的模型」填的是 ${model}；换成能看图的，或者清空它，就会跟着「${local.model}」走）` };
+    }
     return { ok: false, error: err.message };
   }
 }

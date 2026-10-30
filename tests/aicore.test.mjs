@@ -87,6 +87,15 @@ test('配置能存到本机、读回来、清掉', () => {
   assert.equal(readAiConfig(st), null);
 });
 
+test('看图模型跟着配置一起存/读（老配置没有这一栏就是「跟随」）', () => {
+  const st = fakeStorage();
+  writeAiConfig({ presetId: 'ollama', baseUrl: 'https://x', model: 'm', apiKey: 'k', visionModel: ' vl-1 ' }, st);
+  assert.equal(readAiConfig(st).visionModel, 'vl-1', '前后空格要去掉');
+  // 老版本存下来的配置里根本没有这一栏 —— 读出来要是空串（= 跟随主模型），不能是 undefined
+  st.setItem(AI_CONFIG_KEY, JSON.stringify({ baseUrl: 'https://x', model: 'm', apiKey: 'k' }));
+  assert.equal(readAiConfig(st).visionModel, '');
+});
+
 test('配置坏掉时返回 null，而不是抛错让页面白屏', () => {
   const st = fakeStorage();
   st.setItem(AI_CONFIG_KEY, '{不是 JSON');

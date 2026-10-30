@@ -160,6 +160,17 @@ export function findPreset(id) {
   return PRESETS.find((p) => p.id === id) || PRESETS.find((p) => p.id === 'custom');
 }
 
+/**
+ * 拍照读表实际用哪个模型：单独填了就用它，没填跟随解析用的模型。
+ *
+ * 为什么单独成一个函数：这条规则一旦写反（例如没填时返回空、或者反过来把解析也换成看图模型），
+ * 用户看到的是「换个便宜模型以后读表就坏了」，很难一眼看出问题。抽出来就能被测试守住。
+ */
+export function labelVisionModel(config) {
+  const own = String(config?.visionModel || '').trim();
+  return own || String(config?.model || '').trim();
+}
+
 /** 密钥掩码：只留头尾，用来在界面上确认「填的是哪一个」，同时不泄露完整内容 */
 export function maskKey(key) {
   if (!key) return '';
@@ -173,6 +184,9 @@ export function normalizeAiConfigInput(input = {}, existing = null) {
   const preset = findPreset(input.presetId || existing?.presetId || 'custom');
   const baseUrl = String(input.baseUrl ?? existing?.baseUrl ?? preset.baseUrl ?? '').trim().replace(/\/+$/, '');
   const model = String(input.model ?? existing?.model ?? preset.model ?? '').trim();
+  // 拍照读表用的看图模型：留空 = 跟随上面的 model（这是默认，也是最省事的用法）。
+  // 「留空则跟随」必须能真的留空 —— 所以空串也当「清掉」，不能退回旧值。
+  const askedVision = String(input.visionModel ?? existing?.visionModel ?? '').trim();
   // 「留空则不改」是输入框上写着的承诺 —— 空串（以及只有空格）和「没传」都是留空。
   // 以前这里只认 undefined，而界面拿到的是 ''，于是用户清空输入框点保存会看到「密钥没填」。
   const askedKey = input.apiKey === undefined || input.apiKey === null
@@ -196,6 +210,8 @@ export function normalizeAiConfigInput(input = {}, existing = null) {
       presetId: preset.id,
       baseUrl,
       model,
+      // 换服务商时同样不能沿用上一家的模型名（那家的模型名在别家不存在，填着就是必然报错）
+      visionModel: presetChanged ? '' : askedVision,
       apiKey,
       mode,
       updatedAt: new Date().toISOString(),
@@ -207,7 +223,7 @@ export function normalizeAiConfigInput(input = {}, existing = null) {
 /** 给界面用的安全版本：绝不包含密钥本身 */
 export function publicAiConfig(config) {
   if (!config) {
-    return { configured: false, presetId: null, presetName: null, baseUrl: null, model: null, keyMasked: null, updatedAt: null };
+    return { configured: false, presetId: null, presetName: null, baseUrl: null, model: null, visionModel: null, keyMasked: null, updatedAt: null };
   }
   const preset = findPreset(config.presetId);
   return {
@@ -216,6 +232,8 @@ export function publicAiConfig(config) {
     presetName: preset.name,
     baseUrl: config.baseUrl || null,
     model: config.model || null,
+    // null = 没单独配，拍照读表跟 model 用同一个（界面上不要显示成「空」）
+    visionModel: config.visionModel || null,
     keyMasked: maskKey(config.apiKey),
     mode: config.mode || (preset.directCall === false ? 'relay' : 'direct'),
     directCall: preset.directCall !== false,

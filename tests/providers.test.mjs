@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PRESETS, findPreset, maskKey, normalizeAiConfigInput, publicAiConfig } from '../js/providers.js';
+import { PRESETS, findPreset, maskKey, normalizeAiConfigInput, publicAiConfig, labelVisionModel } from '../js/providers.js';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-ai-cfg-'));
 process.env.FATLOSS_CONFIG_DIR = TMP; // 独立目录：不会写到用户真实的配置文件里
@@ -93,6 +93,34 @@ test('换了服务商就不沿用上一家的密钥（既不通用，也等于�
   // 填了新的当然用新的
   const r2 = normalizeAiConfigInput({ presetId: 'dashscope', apiKey: 'sk-new-key-0002' /* secret-scan:allow 假密钥，仅用于测试 */ }, existing);
   assert.equal(r2.config.apiKey, 'sk-new-key-0002' /* secret-scan:allow 假密钥，仅用于测试 */);
+});
+
+test('看图模型：留空就跟随解析用的模型，单独填了就各用各的', () => {
+  const base = { presetId: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' };
+
+  const follow = normalizeAiConfigInput({ ...base }).config;
+  assert.equal(follow.visionModel, '', '没填就是不单独配');
+  assert.equal(publicAiConfig(follow).visionModel, null, '界面上要显示成「没单独配」，不是空串');
+  assert.equal(labelVisionModel(follow), 'qwen2.5:7b', '没填时读表用解析那个模型');
+
+  const own = normalizeAiConfigInput({ ...base, visionModel: ' qwen2.5-vl:7b ' }).config;
+  assert.equal(own.visionModel, 'qwen2.5-vl:7b', '前后空格要去掉');
+  assert.equal(own.model, 'qwen2.5:7b', '单独配看图模型不能把解析的模型换掉');
+  assert.equal(publicAiConfig(own).visionModel, 'qwen2.5-vl:7b');
+  assert.equal(labelVisionModel(own), 'qwen2.5-vl:7b', '读表要用单独配的那个');
+});
+
+test('看图模型能真的清空回「跟随」（不能留着上次填的）', () => {
+  const existing = { presetId: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b', apiKey: 'ollama', visionModel: 'qwen2.5-vl:7b' };
+  const { config } = normalizeAiConfigInput({ presetId: 'ollama', baseUrl: existing.baseUrl, model: 'qwen2.5:7b', visionModel: '' }, existing);
+  assert.equal(config.visionModel, '', '用户把这一栏清空，就该跟着主模型走');
+  assert.equal(labelVisionModel(config), 'qwen2.5:7b');
+});
+
+test('换了服务商不沿用上一家的看图模型（那个模型名在别家不存在）', () => {
+  const existing = { presetId: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b', apiKey: 'ollama', visionModel: 'qwen2.5-vl:7b' };
+  const { config } = normalizeAiConfigInput({ presetId: 'zhipu', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash', apiKey: 'k' }, existing);
+  assert.equal(config.visionModel, '', '换了服务商，看图模型要清空');
 });
 
 test('掩码只露头尾，中间打星', () => {
