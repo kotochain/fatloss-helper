@@ -27,6 +27,8 @@ function runtimeFiles() {
   // 根目录的其它 html 也算运行时文件（update.html 就漏发过一次：代码在仓库里、
   // 发布脚本没带上，线上打开是 404，而这份检查只问清单里的文件，所以当时没发现）。
   for (const f of fs.readdirSync(root)) {
+    // 跳过 macOS 的 `._文件名` 影子文件：它不是页面，也不该被拿去线上比对
+    if (f.startsWith('.')) continue;
     if (f.endsWith('.html') && !out.includes(f)) out.push(f);
   }
   const walk = (dir) => {

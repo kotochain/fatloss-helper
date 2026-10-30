@@ -76,7 +76,7 @@ const now = () => Date.now();
 function snapshotCodeVersions() {
   const files = ['index.html', 'css/style.css', 'sw.js'];
   const jsDir = path.join(ROOT, 'js');
-  for (const name of fs.readdirSync(jsDir).filter((f) => f.endsWith('.js')).sort()) files.push('js/' + name);
+  for (const name of fs.readdirSync(jsDir).filter((f) => f.endsWith('.js') && !f.startsWith('.')).sort()) files.push('js/' + name);
   const out = {};
   let combined = '';
   for (const rel of files) {

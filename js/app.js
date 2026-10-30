@@ -45,7 +45,7 @@ import { pendingUpdates } from './whatsnew.js';
 import { hasNewerVersion, canRefreshNow, updateBannerText, AUTO_UPDATE_FLAG } from './update.js';
 import {
   SCHEMA_VERSION, STATE_KEY, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
-  readUnreadable,
+  readUnreadable, attachUnreadable, splitUnreadable, restoreUnreadable,
 } from './schema.js';
 import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
@@ -3077,6 +3077,10 @@ function openBackupSheet() {
         <b>为什么要有备份</b><br>
         换手机、清浏览器缓存、卸载重装都会把本地记录清掉。导出一份存到微信收藏或网盘里最稳妥。
       </div>
+      ${readUnreadable(localStorage) ? `
+        <div class="warn info" style="margin-top:10px">
+          这台设备上还留着一份「读不出来的记录」的原文，导出备份时会一起带上，换设备也不会丢。
+        </div>` : ''}
       <button class="btn block" id="doExport">导出备份文件</button>
       <div class="btn-row">
         <button class="btn ghost grow" id="doImport">从文件导入</button>
@@ -4077,9 +4081,20 @@ function downloadText(filename, text) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * 导出备份。
+ *
+ * 备份里连「读不出来的存档」原文一起带走（#22）：换手机时最怕的就是
+ * 旧手机那份坏掉的记录既看不见、也没地方捞 —— 而单独那个导出按钮
+ * 只在这份原文存在时才出现，用户很容易漏掉。
+ */
 function exportData() {
-  downloadText(`减脂记录-${todayKey()}.json`, JSON.stringify(state, null, 2));
-  toast('已导出。文件在手机的「下载」里，换设备时用「导入存档」恢复。');
+  const kept = readUnreadable(localStorage);
+  const payload = attachUnreadable(state, kept);
+  downloadText(`减脂记录-${todayKey()}.json`, JSON.stringify(payload, null, 2));
+  toast(kept
+    ? '已导出。那份读不出来的记录原文也一起放进去了，换设备也不会丢。'
+    : '已导出。文件在手机的「下载」里，换设备时用「导入存档」恢复。');
 }
 
 /**
@@ -4093,6 +4108,14 @@ function exportUnreadable() {
   toast('已导出原始文件。可以把它发给我看看能不能救回来。');
 }
 
+/** 导入后「读不出来的记录」处理结果的说明；没这回事就一个字都不多说 */
+function importUnreadableNote(result) {
+  if (result === 'restored') return '备份里那份读不出来的记录也一起带回来了。';
+  if (result === 'kept-local') return '备份里还带了一份读不出来的记录，这台设备上已经有一份，没有覆盖它。';
+  if (result === 'failed') return '备份里那份读不出来的记录没能存下（手机空间不够），备份文件本身还在你手上。';
+  return '';
+}
+
 function importData() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -4104,7 +4127,10 @@ function importData() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result));
-        const migrated = migrateToCurrent(parsed);
+        // 保留字段先摘掉：它是「留底」，不是记录（#22）。晚摘会让它混进 state，
+        // 之后每次读写都要带着这坨几百 KB 的原文。
+        const { data: fileData, unreadable: keptInFile } = splitUnreadable(parsed);
+        const migrated = migrateToCurrent(fileData);
         if (!migrated.ok) {
           toast(migrated.error);
           return;
@@ -4117,8 +4143,11 @@ function importData() {
         if (hadData) saveBackup(localStorage, state, '导入之前的自动快照');
         state = migrated.data;
         save();
+        // 备份文件里带来的「读不出来的记录」原文放回本机（本机已有一份时不覆盖）
+        const restored = restoreUnreadable(localStorage, keptInFile);
         render();
-        toast(hadData ? '导入完成。之前的记录留了快照，可以在「数据与备份」里回滚。' : '导入完成。');
+        const base = hadData ? '导入完成。之前的记录留了快照，可以在「数据与备份」里回滚。' : '导入完成。';
+        toast(base + importUnreadableNote(restored));
       } catch (err) {
         toast('这个文件读不出来，可能不是导出的存档。');
         console.error(err);

@@ -10,8 +10,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { listAppFiles } from './_files.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const jsDir = path.join(root, 'js');
@@ -38,6 +40,17 @@ function importedFrom(src) {
   return out;
 }
 
+test('扫目录时跳过 macOS 的影子文件（否则「本机红、CI 绿」，白查半天）', () => {
+  // 项目放在移动硬盘（exFAT）上时，macOS 会给每个文件写一份 `._文件名`。
+  // 它和真文件同后缀：会被当成没进缓存清单的 js，也会被 import 成二进制报错。
+  // 这里造一个假目录验：只认真文件。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-files-'));
+  for (const f of ['app.js', 'store.js', '._app.js', '._store.js', '.DS_Store']) {
+    fs.writeFileSync(path.join(dir, f), '');
+  }
+  assert.deepEqual(listAppFiles(dir), ['app.js', 'store.js'], `扫到的文件不对：${listAppFiles(dir).join('、')}`);
+});
+
 test('app.js 里每个具名导入都能在对应模块里找到导出', () => {
   const app = fs.readFileSync(path.join(jsDir, 'app.js'), 'utf8');
   const problems = [];
@@ -61,7 +74,9 @@ test('离线缓存清单必须覆盖所有 js 文件（漏一个断网就打不�
   // 结果断网时新代码加载不了。这里把 CI 的检查搬到单元测试里，本地也能拦住。
   const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
   const list = [...sw.matchAll(/'(\.\/[^']+)'/g)].map((m) => m[1].replace('./', ''));
-  const jsFiles = fs.readdirSync(jsDir).map((f) => `js/${f}`);
+  // 只数真正的 js：macOS 在移动硬盘上会生成 `js/._app.js` 这样的影子文件，
+  // 它不是代码、也不该进缓存清单（见 tests/_files.mjs 的说明）。
+  const jsFiles = listAppFiles(jsDir).map((f) => `js/${f}`);
   const missing = jsFiles.filter((f) => !list.includes(f));
   assert.deepEqual(missing, [], `这些 js 文件没进离线缓存清单：${missing.join('、')}`);
   const notExist = list.filter((f) => !fs.existsSync(path.join(root, f)));
@@ -69,7 +84,7 @@ test('离线缓存清单必须覆盖所有 js 文件（漏一个断网就打不�
 });
 
 test('每个 js 模块都能被 Node 正常加载（语法与顶层代码没问题）', async () => {
-  const files = fs.readdirSync(jsDir).filter((f) => f.endsWith('.js'));
+  const files = listAppFiles(jsDir, '.js');
   assert.ok(files.length >= 5, `js 目录下只有 ${files.length} 个文件，是不是路径错了`);
   const failed = [];
   for (const f of files) {
@@ -86,7 +101,7 @@ test('每个 js 模块都能被 Node 正常加载（语法与顶层代码没问�
 test('测试文件的导入同样对账（防止改了导出名而测试悄悄跳过）', () => {
   const testsDir = path.join(root, 'tests');
   const problems = [];
-  for (const f of fs.readdirSync(testsDir).filter((x) => x.endsWith('.test.mjs'))) {
+  for (const f of listAppFiles(testsDir, '.test.mjs')) {
     const src = fs.readFileSync(path.join(testsDir, f), 'utf8');
     for (const { names, from } of importedFrom(src)) {
       if (!from.startsWith('../js/')) continue;

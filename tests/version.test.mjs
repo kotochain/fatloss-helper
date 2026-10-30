@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP_VERSION, CHANGELOG } from '../js/version.js';
 import { versionNumber, isNewerVersion, updatesAfter, pendingUpdates } from '../js/whatsnew.js';
+import { listNames } from './_files.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const swSource = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
@@ -112,7 +113,7 @@ test('界面文案里不许再出现第三人称「\u5979」—— 使用者是�
     // 沙箱（反向验证的临时副本）里可能只复制了一部分目录：没有就跳过，
     // 否则 readdirSync 直接抛错，会让「所有变异都被抓到」—— 又一个假绿灯。
     if (!fs.existsSync(dir)) continue;
-    for (const f of fs.readdirSync(dir)) {
+    for (const f of listNames(dir)) {
       if (/\.(js|mjs|md|css)$/.test(f)) files.push(path.join(dir, f));
     }
   }
@@ -143,7 +144,7 @@ test('发布脚本必须把根目录的页面都带上（update.html 漏发过�
   const copyLine = pages.split('\n').find((l) => /^\s*cp\s+-r\s/.test(l) && l.includes('_site'));
   assert.ok(copyLine, '发布脚本里找不到打包命令（cp -r … _site/）');
 
-  const pagesInRoot = fs.readdirSync(root).filter((f) => f.endsWith('.html')).sort();
+  const pagesInRoot = listNames(root).filter((f) => f.endsWith('.html')).sort();
   assert.ok(pagesInRoot.includes('index.html') && pagesInRoot.includes('update.html'),
     `根目录的页面不对：${pagesInRoot.join('、')}`);
   // 两种写法都算过：显式列出每个 html，或者用通配符把根目录 html 全打进去。

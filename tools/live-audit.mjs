@@ -42,6 +42,44 @@ function fail(msg) { console.log(`❌ ${msg}`); problems.push(msg); }
 function warn(msg) { console.log(`⚠️  ${msg}`); warnings.push(msg); }
 function skip(msg) { console.log(`⬜ ${msg}`); untested.push(msg); }
 
+/**
+ * 下载目录里真正的 json 文件。
+ * 必须跳过 macOS 的 `._文件名` 影子文件：它和真文件同后缀、按字母序还排在前面，
+ * `files[0]` 拿到的就是它 —— JSON.parse 失败 → 误报「导出的文件结构不对」。
+ * （项目放在移动硬盘/网络盘上时必现；CI 在 Linux 上没有这个问题，所以是「本机红、CI 绿」。）
+ */
+function downloadedJson(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.json') && !f.startsWith('._'));
+}
+
+/**
+ * 用 CDP 把一份真实文件塞进页面的文件输入框（无头浏览器里点不了系统文件框）。
+ * 比伪造 FileList 更接近真实流程：走的是应用自己的 change 事件。
+ * 调用前页面上必须已经装过 FILE_INPUT_HOOK（见「四、数据安全」）。
+ */
+async function injectImportFile(client, filePath) {
+  try {
+    const doc = await client.send('DOM.getDocument', { depth: -1 });
+    const nodeIds = [];
+    const walk = (n) => {
+      if (n.nodeName === 'INPUT') nodeIds.push(n.nodeId);
+      for (const c of n.children || []) walk(c);
+    };
+    walk(doc.root);
+    // 从最后一个开始试：页面里可能残留更早的文件框，最新的那个才是这次导入要用的
+    for (const nodeId of nodeIds.reverse()) {
+      try {
+        await client.send('DOM.setFileInputFiles', { nodeId, files: [filePath] });
+        return true;
+      } catch { /* 不是文件输入就跳过 */ }
+    }
+  } catch (err) {
+    console.log(`   塞文件进导入框失败：${err.message}`);
+  }
+  return false;
+}
+
 async function freePortAndWait(port) {
   if (!(await portAlive(port))) return;
   freePort(port);
@@ -463,6 +501,31 @@ async function main() {
     }
 
     console.log('\n=== 四、数据安全：导出 → 导入 往返（这是唯一的跨设备/救援通道） ===');
+    /*
+     * 导入用的是「临时建一个 input type=file 再点它」，无头浏览器里会卡在文件选择框。
+     * 这段把文件输入拦住并挂到 window.__fileInput，之后用 CDP 把真实文件塞进去 ——
+     * 走的还是应用自己的导入代码，不是模拟。页面重载后要重装，所以单独抽出来。
+     */
+    const FILE_INPUT_HOOK = `(() => {
+      const origCreate = document.createElement.bind(document);
+      document.createElement = function (tag, ...rest) {
+        const el = origCreate(tag, ...rest);
+        if (String(tag).toLowerCase() === 'input') {
+          // 同一个页面里导入第二次时，上一个选择框还在 DOM 里 —— 不摘掉的话
+          // CDP 会把文件塞进**旧**框，新框里是空的，导入静默什么都没发生。
+          if (window.__fileInput && window.__fileInput.parentNode) window.__fileInput.parentNode.removeChild(window.__fileInput);
+          window.__fileInput = el;
+          document.body.appendChild(el);
+        }
+        return el;
+      };
+      const origClick = HTMLInputElement.prototype.click;
+      HTMLInputElement.prototype.click = function (...args) {
+        if (this.type === 'file') return;   // 别真弹选择框
+        return origClick.apply(this, args);
+      };
+      return true;
+    })()`;
     await evaluate(client, `(() => { localStorage.clear(); return true; })()`);
     await boot(client);
     // 先造一份有内容的存档：示例数据 + 一笔吃的
@@ -492,7 +555,7 @@ async function main() {
     console.log(`   点导出 → 提示「${exportToast}」`);
     let exported = null;
     for (let i = 0; i < 40; i++) {
-      const files = fs.readdirSync(path.join(outDir, 'downloads')).filter((f) => f.endsWith('.json'));
+      const files = downloadedJson(path.join(outDir, 'downloads'));
       if (files.length) { exported = path.join(outDir, 'downloads', files[0]); break; }
       await sleep(250);
     }
@@ -506,26 +569,8 @@ async function main() {
       console.log(`   导出文件：${path.basename(exported)}，${text.length} 字节，结构 ${okShape ? '正常' : '不对'}`);
       if (!okShape) fail('线上导出的文件结构不对（不是能再导入的存档）');
       // 把导出的文件原样导回去，记录数必须一致
-      await evaluate(client, `(() => {
-        window.confirm = () => true;
-        // 导入用的是「临时建一个 input type=file 再点它」，无头浏览器里会卡在文件选择框。
-        // 这里把文件输入拦住并挂到页面上，等一下用 CDP 把真实文件塞进去 —— 走的还是应用自己的代码。
-        const origCreate = document.createElement.bind(document);
-        document.createElement = function (tag, ...rest) {
-          const el = origCreate(tag, ...rest);
-          if (String(tag).toLowerCase() === 'input') {
-            window.__fileInput = el;
-            document.body.appendChild(el);
-          }
-          return el;
-        };
-        const origClick = HTMLInputElement.prototype.click;
-        HTMLInputElement.prototype.click = function (...args) {
-          if (this.type === 'file') return;   // 别真弹选择框
-          return origClick.apply(this, args);
-        };
-        return true;
-      })()`);
+      await evaluate(client, `(() => { window.confirm = () => true; return true; })()`);
+      await evaluate(client, FILE_INPUT_HOOK);
       await evaluate(client, `document.querySelector('.tab[data-view="progress"]')?.click()`);
       await sleep(400);
       await evaluate(client, `document.querySelector('[data-act="import"]')?.click()`);
@@ -535,25 +580,7 @@ async function main() {
         fail('线上点「导入存档」没有创建文件选择框（导入功能可能已经坏了）');
       } else {
         // 用 CDP 把文件塞进 input（比伪造 FileList 更接近真实流程）
-        let injected = false;
-        try {
-          const doc = await client.send('DOM.getDocument', { depth: -1 });
-          const nodeIds = [];
-          const walk = (n) => {
-            if (n.nodeName === 'INPUT') nodeIds.push(n.nodeId);
-            for (const c of n.children || []) walk(c);
-          };
-          walk(doc.root);
-          for (const nodeId of nodeIds) {
-            try {
-              await client.send('DOM.setFileInputFiles', { nodeId, files: [exported] });
-              injected = true;
-              break;
-            } catch { /* 不是文件输入就跳过 */ }
-          }
-        } catch (err) {
-          console.log(`   塞文件进导入框失败：${err.message}`);
-        }
+        const injected = await injectImportFile(client, exported);
         if (!injected) {
           skip('导出文件拿到了，但没能把文件塞回导入框（导入流程未验证）');
         } else {
@@ -565,6 +592,60 @@ async function main() {
           if (!same) fail(`导出再导入后记录变了：导出前 ${JSON.stringify(beforeExport)}，导入后 ${JSON.stringify(afterImport)}`);
           else pass('导出 → 导入往返，记录一条没少');
         }
+      }
+    }
+
+    /*
+     * ── 四·二：备份里必须带着「读不出来的存档」原文（#22）──
+     * 用户换手机时最怕的就是「旧手机那份记录读不出来，新手机里也根本没有」。
+     * 所以：导出 → 文件里要有原文（一字不差）→ 本机删掉 → 导入 → 原文要回来，
+     * 而且不能混进记录本体（否则每次读写都拖着一坨原文）。
+     */
+    console.log('\n=== 四·二、备份带上「读不出来的存档」原文（换手机唯一的救命绳） ===');
+    const RAW_BAD = '{"days":{"2026-10-01":{"meals":坏掉的原始内容';
+    await evaluate(client, `(() => {
+      localStorage.setItem('fatloss.state.unreadable', JSON.stringify({ savedAt: '2026-10-30T00:00:00.000Z', reason: '存档格式不对', raw: ${JSON.stringify(RAW_BAD)} }));
+      return true;
+    })()`);
+    for (const f of fs.readdirSync(dlDir)) fs.rmSync(path.join(dlDir, f), { force: true });
+    await evaluate(client, `document.querySelector('.tab[data-view="progress"]')?.click()`);
+    await sleep(400);
+    await evaluate(client, `document.querySelector('[data-act="export"]')?.click()`);
+    let fileWithRaw = null;
+    for (let i = 0; i < 40; i++) {
+      const files = downloadedJson(dlDir);
+      if (files.length) { fileWithRaw = path.join(dlDir, files[0]); break; }
+      await sleep(250);
+    }
+    if (!fileWithRaw) {
+      fail('首页留着「读不出来的存档」时点导出，没有生成文件');
+    } else {
+      let payload = null;
+      try { payload = JSON.parse(fs.readFileSync(fileWithRaw, 'utf8')); } catch { /* 下面判 */ }
+      const gotRaw = payload?.unreadable?.raw;
+      if (!gotRaw) fail('导出的备份里没有「读不出来的存档」原文（换手机时它就真的没了）');
+      else if (gotRaw !== RAW_BAD) fail(`备份里的原文被改动了（必须一字不改）：${String(gotRaw).slice(0, 40)}`);
+      else pass('备份里带着「读不出来的存档」原文，一字不差');
+
+      // 换设备：本机没有这份原文 → 导入备份 → 原文要回到本机，且不混进记录
+      await evaluate(client, `(() => { localStorage.removeItem('fatloss.state.unreadable'); return true; })()`);
+      await evaluate(client, `document.querySelector('[data-act="import"]')?.click()`);
+      await sleep(400);
+      const okInject = await injectImportFile(client, fileWithRaw);
+      if (!okInject) {
+        skip('备份文件拿到了，但没能塞回导入框（原文回本机这一步未验证）');
+      } else {
+        await evaluate(client, `window.__fileInput.dispatchEvent(new Event('change'))`);
+        await sleep(1200);
+        const after = await evaluate(client, `(() => {
+          let kept = null, state = null;
+          try { kept = JSON.parse(localStorage.getItem('fatloss.state.unreadable') || 'null'); } catch { /* 坏的就是坏的 */ }
+          try { state = JSON.parse(localStorage.getItem('fatloss.state.v2') || 'null'); } catch { /* 同上 */ }
+          return { 原文字: kept?.raw || null, 原文原因: kept?.reason || null, 记录里混进原文: !!(state && 'unreadable' in state), 提示: document.querySelector('.toast')?.textContent || null };
+        })()`);
+        if (after.原文字 !== RAW_BAD) fail(`导入备份后，本机没有拿回那份原文（拿到的是「${String(after.原文字).slice(0, 30)}」，提示：「${after.提示}」）`);
+        else if (after.记录里混进原文) fail('原文混进了记录本体（以后每次读写都会拖着这坨内容）');
+        else pass('换设备导入后，那份原文也回到了本机，且没混进记录');
       }
     }
 

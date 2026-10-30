@@ -13,7 +13,8 @@ import path from 'node:path';
 import {
   SCHEMA_VERSION, STATE_KEY, BACKUP_KEY, LEGACY_KEYS, MIGRATIONS,
   migrateToCurrent, detectVersion, looksLikeState, loadState, saveBackup, readBackup,
-  clearBackup, describeMigration, readUnreadable,
+  clearBackup, describeMigration, readUnreadable, keepUnreadable,
+  attachUnreadable, splitUnreadable, restoreUnreadable,
 } from '../js/schema.js';
 import { emptyState, addFoodEntry, addWeight, demoProfile, todayKey } from '../js/store.js';
 import { findFood } from '../js/foods.js';
@@ -231,6 +232,61 @@ test('留不下的情况不能反过来把应用弄崩（存储写满）', () =>
   const r = loadState(st);
   assert.equal(r.ok, false, '存不下也要照常返回「读不出来」');
   assert.equal(readUnreadable(st), null, '没留下就是没有，别假装有');
+});
+
+test('备份会带上「读不出来的存档」原文，一字不改（#22：换手机时最怕没地方捞）', () => {
+  const st = fakeStorage();
+  const raw = '{"days":{"2026-10-01":{"meals":坏掉的内容';
+  assert.equal(keepUnreadable(st, raw, '存档格式不对'), true);
+  const kept = readUnreadable(st);
+
+  const payload = attachUnreadable(emptyState(), kept);
+  assert.equal(payload.unreadable.raw, raw, '原文必须一字不改地放进去，改一个字都可能救不回来');
+  assert.equal(payload.unreadable.reason, '存档格式不对', '原因要一起带上，日后才知道它坏在哪一步');
+  assert.equal(typeof payload.days, 'object', '记录本体还在，备份首要目的还是记录');
+  assert.equal(typeof payload.unreadable.savedAt, 'string');
+
+  // 没有原文时不许凭空多一个空字段：老备份的文件形态保持不变
+  assert.equal(attachUnreadable(emptyState(), null).unreadable, undefined);
+  assert.equal(attachUnreadable(emptyState(), { raw: '' }).unreadable, undefined);
+});
+
+test('导入时保留字段被摘掉，原文不会混进记录（否则每次读写都拖着一坨原文）', () => {
+  const file = {
+    ...emptyState(),
+    schemaVersion: SCHEMA_VERSION,
+    unreadable: { savedAt: '2026-10-30T00:00:00.000Z', reason: '来自更新版本', raw: '坏掉的内容' },
+  };
+  const { data, unreadable } = splitUnreadable(file);
+  assert.equal(unreadable.raw, '坏掉的内容', '原文要交回给调用方，不能就这么扔了');
+  assert.equal('unreadable' in data, false, '摘得不干净：原文会跟着 state 一起存进 localStorage');
+
+  const migrated = migrateToCurrent(data);
+  assert.equal(migrated.ok, true);
+  assert.equal('unreadable' in migrated.data, false);
+
+  // 手改过的备份（raw 不是字符串）当作没有这一项，不许把奇怪东西塞进 state
+  assert.equal(splitUnreadable({ ...emptyState(), unreadable: { raw: 42 } }).unreadable, null);
+});
+
+test('导入后原文回到新设备；本机已经有一份时不覆盖（两份都可能是唯一的数据）', () => {
+  const fresh = fakeStorage();
+  assert.equal(restoreUnreadable(fresh, { raw: 'A', reason: '存档坏了' }), 'restored');
+  assert.equal(readUnreadable(fresh).raw, 'A', '换手机后原文必须真的能捞回来');
+  assert.equal(readUnreadable(fresh).reason, '存档坏了');
+
+  // 同一份再导一次：认得出是同一份，不重复写
+  assert.equal(restoreUnreadable(fresh, { raw: 'A' }), 'same');
+
+  // 本机有 B、文件里是 A：保留本机的 B —— 覆盖任何一份都是悄悄丢数据
+  const local = fakeStorage();
+  keepUnreadable(local, 'B');
+  assert.equal(restoreUnreadable(local, { raw: 'A' }), 'kept-local');
+  assert.equal(readUnreadable(local).raw, 'B');
+
+  // 空间不够时老实说存不下，不能假装存好了
+  const full = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); } };
+  assert.equal(restoreUnreadable(full, { raw: 'A' }), 'failed');
 });
 
 test('读取存档：没有存档时返回空，而不是报错', () => {

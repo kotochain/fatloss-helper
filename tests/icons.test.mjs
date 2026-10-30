@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { icon, hasIcon, iconNames, badgeGlyphNames, badgeGlyph } from '../js/icons.js';
 import { ACHIEVEMENTS, PLANT_STAGES, MILESTONES, weeklyHighlight } from '../js/achievements.js';
 import { EQUIPMENT } from '../js/cardio.js';
+import { listNames } from './_files.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const jsDir = path.join(root, 'js');
@@ -165,7 +166,7 @@ test('源码里不再有 emoji（含注释），index.html 也算', () => {
   // 不查箭头、×、› 这类排版字符 —— 它们是文字，不是图标。
   const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/u;
   const files = [
-    ...fs.readdirSync(jsDir).filter((f) => f.endsWith('.js')).map((f) => path.join(jsDir, f)),
+    ...listNames(jsDir).filter((f) => f.endsWith('.js')).map((f) => path.join(jsDir, f)),
     path.join(root, 'index.html'),
   ];
   const hits = [];

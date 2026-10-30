@@ -21,7 +21,7 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-mutate-'));
 // 根目录的 html 全部拷过去（v38 就是这么又踩了一次：新加 update.html 没拷，
 // tests/version.test.mjs 的「发布脚本不漏页面」测试在沙箱里每条变异都红，
 // 把 4 条标注为「等价变异」的改坏也误判成抓到了 —— 假红也是假，必须让沙箱等于仓库）。
-const rootHtml = fs.readdirSync(source).filter((f) => f.endsWith('.html'));
+const rootHtml = fs.readdirSync(source).filter((f) => f.endsWith('.html') && !f.startsWith('.'));
 for (const entry of ['js', 'tests', 'tools', 'package.json', 'sw.js', 'css', 'icons', 'manifest.webmanifest', 'README.md', 'HANDOFF.md', 'docs', '.github', ...rootHtml]) {
   fs.cpSync(path.join(source, entry), path.join(sandbox, entry), { recursive: true });
 }
@@ -171,6 +171,11 @@ const MUTATIONS = [
   { file: 'js/achievements.js', from: '  if (state?.settings?.yesterdayNudgeSkipped === today) return null;', to: '  if (false) return null;', why: '「今天不补」要真的跳过当天（否则一直问）' },
   { file: 'js/achievements.js', from: '  const hasHistory = Object.keys(state?.days || {}).some((k) => k < yesterday && hasLog(state, k));', to: '  const hasHistory = true;', why: '第一次用的人不该被问「昨天怎么没记」' },
 
+  // ── v47：#22 备份带上「读不出来的存档」+ 扫目录跳过系统影子文件 ──
+  { file: 'js/schema.js', from: "  if (!kept || typeof kept.raw !== 'string' || !kept.raw) return state;", to: '  return state;', why: '导出的备份必须真的把读不出来的存档原文带上（不然换手机就没了）' },
+  { file: 'js/schema.js', from: '  return { data, unreadable: ok ? unreadable : null };', to: '  return { data: parsed, unreadable: ok ? unreadable : null };', why: '导入时保留字段要摘干净（不摘会跟着 state 一起存进 localStorage）' },
+  { file: 'js/schema.js', from: "  if (here) return here.raw === kept.raw ? 'same' : 'kept-local';", to: "  if (here) return 'same';", why: '本机已经有一份读不出来的存档时不能覆盖（两份都可能是唯一的数据）' },
+  { file: 'tests/_files.mjs', from: "  return name.startsWith('._') || name === '.DS_Store' || name === 'Thumbs.db';", to: '  return false;', why: '扫目录要跳过 macOS 影子文件（否则是本机红、CI 绿的假红）' },
 ];
 
 // 先自己检查一遍：每条变异锚点必须在文件里找得到，

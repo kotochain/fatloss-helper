@@ -217,6 +217,61 @@ export function readUnreadable(storage) {
 }
 
 /**
+ * 导出备份时，把「读不出来的存档」原文一起带上（issue #22）。
+ *
+ * 为什么：换手机时最怕的是「旧手机里那份读不出来的记录，新手机根本没有」。
+ * 以前它只能从一个单独的按钮导出（那个按钮只在这份原文存在时才出现在首页），
+ * 用户很容易漏掉，一换机就真没了。挂进正常备份里，就跟着备份一起被存进微信收藏/网盘。
+ *
+ * 挂成保留字段 `unreadable`：导入前会被 splitUnreadable 摘掉，
+ * 不会混进记录 —— 记录里每多一个字段，以后每次读写都要多考虑一次。
+ */
+export function attachUnreadable(state, kept) {
+  if (!kept || typeof kept.raw !== 'string' || !kept.raw) return state;
+  return {
+    ...state,
+    unreadable: {
+      savedAt: typeof kept.savedAt === 'string' ? kept.savedAt : '',
+      reason: typeof kept.reason === 'string' ? kept.reason : '',
+      raw: kept.raw,
+    },
+  };
+}
+
+/**
+ * 导入前把保留字段摘下来：它不属于「记录」，属于「留底」。
+ * 顺手校验形状 —— 备份文件可能是手改过的，raw 不是非空字符串就当没有这一项。
+ *
+ * @returns {{data:any, unreadable:{savedAt?:string, reason?:string, raw:string}|null}}
+ */
+export function splitUnreadable(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { data: parsed, unreadable: null };
+  const { unreadable, ...data } = parsed;
+  const ok = unreadable
+    && typeof unreadable === 'object'
+    && !Array.isArray(unreadable)
+    && typeof unreadable.raw === 'string'
+    && unreadable.raw;
+  return { data, unreadable: ok ? unreadable : null };
+}
+
+/**
+ * 导入之后，把备份文件里带来的原文放回本机。
+ *
+ * 规则：**本机已经有一份就不覆盖**。两份都可能是用户唯一的数据
+ * （本机这份是这台设备自己出事时留下的，文件里那份是另一台设备的），
+ * 覆盖任何一份都是「悄悄丢数据」。文件本身还在用户手上，不算真的丢了。
+ *
+ * @returns {'none'|'restored'|'same'|'kept-local'|'failed'}
+ */
+export function restoreUnreadable(storage, kept) {
+  if (!kept || typeof kept.raw !== 'string' || !kept.raw) return 'none';
+  const here = readUnreadable(storage);
+  if (here) return here.raw === kept.raw ? 'same' : 'kept-local';
+  return keepUnreadable(storage, kept.raw, kept.reason || '从备份文件带回来的') ? 'restored' : 'failed';
+}
+
+/**
  * 从存储里读存档并迁移到当前版本。
  * 会顺带处理：老键名、坏 JSON、未来版本、迁移前备份。
  */
