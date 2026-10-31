@@ -52,6 +52,28 @@ export function shiftDate(key, deltaDays) {
   return todayKey(dt);
 }
 
+/**
+ * 页面一直开着跨过 0 点时，「今天」要不要跟着换（v49）。
+ *
+ * 为什么需要：`dateKey` 是**打开那一刻**算死的（app.js 的 `let dateKey = todayKey()`），
+ * 之后再没更新过 —— 晚上开着页面、过了 0 点继续记，记录会掉进昨天，
+ * 「今天还能吃多少」也停在昨天。日期是记录的唯一归属，错一天就是记错一天。
+ *
+ * 规则只有两条：
+ *  1) 用户本来就在看「今天」→ 跟着换到新的今天（最常见）；
+ *  2) 用户自己翻到了历史某一天 → **不动他的视线**（他可能正在补记 10 月 28 日，
+ *     页面突然跳到今天会让那一笔记错地方）。
+ *
+ * @param {{viewing:string, lastToday:string, today:string}} p
+ * @returns {{dateKey:string, followed:boolean}}
+ */
+export function followToday({ viewing, lastToday, today } = {}) {
+  if (!viewing || !lastToday || !today) return { dateKey: viewing, followed: false };
+  if (viewing !== lastToday) return { dateKey: viewing, followed: false };
+  if (viewing === today) return { dateKey: viewing, followed: false };
+  return { dateKey: today, followed: true };
+}
+
 /** 取某天的数据；没有就建一个空的（懒加载，不用预填一堆空日子） */
 export function getDay(state, key) {
   if (!state.days[key]) {

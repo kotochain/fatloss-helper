@@ -679,7 +679,43 @@ async function main() {
     const profilePreview = await evaluate(client, `document.querySelector('#profilePreview').textContent.trim().slice(0, 80)`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-5-profile.png`));
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest };
+    /*
+     * 第十步（只在第一个尺寸跑一次）：页面一直开着、跨过 0 点，日期要跟着换（v49）。
+     * 真机上的场景就是「晚上开着没关，第二天早上拿起来继续记」——
+     * 以前 dateKey 是打开那一刻算死的，第二天记的东西会掉进昨天。
+     */
+    let midnight = null;
+    if (size === SIZES[0]) {
+      await evaluate(client, `localStorage.clear(); location.reload();`);
+      await sleep(1200);
+      await evaluate(client, `document.querySelector('[data-act="demo"]')?.click()`);
+      await sleep(900);
+      const before = await evaluate(client, `({ 日期: window.__appState?.dateKey || null })`);
+      // 把页面里的 Date 往前拨一天，模拟「过了 0 点」（不用等真的到第二天）
+      await evaluate(client, `(() => {
+        const Real = Date;
+        const OFFSET = 24 * 60 * 60 * 1000;
+        window.Date = class extends Real {
+          constructor(...a) { if (a.length === 0) super(Real.now() + OFFSET); else super(...a); }
+          static now() { return Real.now() + OFFSET; }
+        };
+        return true;
+      })()`);
+      // 切回前台（真机上就是锁屏一夜后重新打开）。不用 visibilitychange：无头窗口可能被判 hidden。
+      await evaluate(client, `window.dispatchEvent(new Event('focus'))`);
+      await sleep(800);
+      midnight = await evaluate(client, `({
+        换天前: ${JSON.stringify(before.日期)},
+        换天后: window.__appState?.dateKey || null,
+        今天按应用算: window.__appState?.today || null,
+        // 前面「看示例」的提示还挂在屏幕上，toast 是往上叠的 —— 取最后一条才是换天那条
+        提示: [...document.querySelectorAll('.toast')].map((t) => t.textContent.trim()).join(' ｜ '),
+      })`);
+      await evaluate(client, `location.reload()`);
+      await sleep(900);
+    }
+
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest, midnight };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -738,6 +774,16 @@ function printReport(report) {
     console.log(`  PWA 清单：${r.manifest.name}｜display=${r.manifest.display}｜start_url=${r.manifest.start_url}｜图标 ${r.manifest.icons.join(' ')}`);
     console.log(`  控制台报错：${s.consoleErrors.length ? s.consoleErrors.join(' | ') : '无'}`);
     const iconBad = r.manifest.icons.some((x) => x.includes('❌'));
+    // v49：跨过 0 点必须换天（换的是「今天」，不是把用户在看的历史那天也拽走）
+    const midnightBad = r.midnight
+      ? (!r.midnight.换天后
+        || r.midnight.换天后 === r.midnight.换天前
+        || r.midnight.换天后 !== r.midnight.今天按应用算
+        || !/0\s*点/.test(r.midnight.提示))
+      : false;
+    if (r.midnight) {
+      console.log(`  跨 0 点：${r.midnight.换天前} → ${r.midnight.换天后}（应用认为今天是 ${r.midnight.今天按应用算}）｜提示「${r.midnight.提示}」`);
+    }
     // 图标这轮（v27）新增三条：徽章要有名字、徽章和设置图标要真的放大到看得清
     const uiIconBad = r.iconAudit.emoji行.length > 0 || r.iconAudit.兜底方块.length > 0 || r.iconAudit.缺尺寸 > 0
       || r.growth.植物 !== 1 || r.growth.兜底 > 0 || r.growth.空标签 > 0
@@ -769,7 +815,7 @@ function printReport(report) {
       || !r.refresh.横幅.有横幅 || !r.refresh.横幅.文字.includes(r.refresh.假版本);
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
-      || uiIconBad) problems += 1;
+      || uiIconBad || midnightBad) problems += 1;
   }
   console.log(`\n${problems === 0 ? '✅ 浏览器自检全部通过' : `❌ 浏览器自检有 ${problems} 处问题`}`);
   console.log(`截图与报告在 ${outDir}`);

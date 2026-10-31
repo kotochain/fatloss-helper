@@ -131,6 +131,9 @@ const MUTATIONS = [
   { file: 'js/providers.js', from: "  return own || String(config?.model || '').trim();", to: "  return String(config?.model || '').trim();", why: '单独配了看图模型就得真的用它（不然等于没配）' },
   { file: 'js/providers.js', from: "      visionModel: presetChanged ? '' : askedVision,", to: '      visionModel: askedVision,', why: '换了服务商不能沿用上一家的看图模型（那个名字在别家不存在）' },
   { file: 'js/providers.js', from: "const askedVision = String(input.visionModel ?? existing?.visionModel ?? '').trim();", to: "const askedVision = String(input.visionModel || existing?.visionModel || '').trim();", why: '看图模型要能真的清空回「跟随」（空串不能退回旧值）' },
+  // v49：页面开着跨过 0 点要换天
+  { file: 'js/store.js', from: '  if (viewing !== lastToday) return { dateKey: viewing, followed: false };', to: '  if (false) return { dateKey: viewing, followed: false };', why: '用户正在看历史某天时，跨 0 点不能把他的视线拽到今天（那一笔会记错地方）' },
+  { file: 'js/store.js', from: '  return { dateKey: today, followed: true };', to: '  return { dateKey: viewing, followed: true };', why: '跨过 0 点后「今天」要真的换成新的一天（否则记录还是写进昨天）' },
   { file: 'js/foods.js', from: "if (!Number.isFinite(k) || k <= 0) return { ok: false, error: '热量要填一个大于 0 的数字（kcal）。' };", to: 'if (!Number.isFinite(k)) return { ok: false };', why: '「只填热量」要挡住 0 / 负数（否则会记一条 0 kcal 的空记录）' },
   { file: 'js/foods.js', from: 'if (k > 5000) return { ok: false', to: 'if (k > 99999) return { ok: false', why: '「只填热量」要挡住明显多填一位的数字' },
   { file: 'js/store.js', from: '      if (e.food.kcalOnly) continue;', to: '      if (false) continue;', why: '「只填热量」的条目不该出现在「常吃的」里（否则变成 100 克 = 650 kcal 的怪快捷项）' },

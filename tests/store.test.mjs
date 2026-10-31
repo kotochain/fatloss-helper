@@ -8,7 +8,7 @@ import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   updateFoodEntry, addExercise, removeExercise, addWeight, addCustomFood,
   weightTrend, analyzeProgress, demoProfile, demoEntries, STATE_VERSION, frequentFoods,
-  recordedDays, hasUserData,
+  recordedDays, hasUserData, followToday,
 } from '../js/store.js';
 import { migrate } from '../js/schema.js';
 import { calcTargets, calcEntry } from '../js/calc.js';
@@ -369,4 +369,24 @@ test('v34：「我的食物」存来源和原句，同名再存只更新不重�
   // 手动加的不带 source 时按 manual 记
   const manual = addCustomFood(s, { name: '某牌蛋白棒', kcal: 380, protein: 30, fat: 12, carb: 35, baseGrams: 40 });
   assert.equal(manual.source, 'manual');
+});
+
+test('页面开着跨过 0 点：「今天」要跟着换，但正在看历史时不能乱跳（v49）', () => {
+  // 最常见：本来就在看今天 → 换到新的今天
+  assert.deepEqual(
+    followToday({ viewing: '2026-10-30', lastToday: '2026-10-30', today: '2026-10-31' }),
+    { dateKey: '2026-10-31', followed: true },
+  );
+  // 用户自己翻到 28 号在补记 → 不许把他的视线拽走，否则那一笔会记到今天
+  assert.deepEqual(
+    followToday({ viewing: '2026-10-28', lastToday: '2026-10-30', today: '2026-10-31' }),
+    { dateKey: '2026-10-28', followed: false },
+  );
+  // 没跨天：什么都不做
+  assert.deepEqual(
+    followToday({ viewing: '2026-10-30', lastToday: '2026-10-30', today: '2026-10-30' }),
+    { dateKey: '2026-10-30', followed: false },
+  );
+  // 参数不全时不要抛错（启动早期可能还没算好）
+  assert.deepEqual(followToday({}), { dateKey: undefined, followed: false });
 });

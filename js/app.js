@@ -50,7 +50,7 @@ import {
 import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   addExercise, removeExercise, addWeight, addCustomFood, weightTrend, analyzeProgress,
-  demoProfile, demoEntries, frequentFoods, recordedDays, hasUserData,
+  demoProfile, demoEntries, frequentFoods, recordedDays, hasUserData, followToday,
 } from './store.js';
 
 const STORAGE_KEY = STATE_KEY; // 键名只有一份定义（schema.js），别在两处写字面量
@@ -87,6 +87,13 @@ if (state && state.profile && !isProfileUsable(state.profile)) {
 }
 let view = 'today';
 let dateKey = todayKey();
+/**
+ * 上一次「我们认为的今天」（v49）。
+ *
+ * 为什么不能直接用 dateKey：用户点「前一天」时 dateKey 会变，那就没法区分
+ * 「他在看今天」和「他翻到了历史」。跨过 0 点时只有前一种要跟着换天。
+ */
+let lastKnownToday = dateKey;
 let planSeed = 0;
 let pendingFood = null;
 /** 「说一句」流程的临时状态：解析出来的条目等用户确认 */
@@ -401,7 +408,30 @@ function renderCrash(err, which) {
 
 /* ── 主渲染 ──────────────────────────────── */
 
+/**
+ * 页面一直开着跨过 0 点时，把「今天」跟上来（v49）。
+ *
+ * 以前 `dateKey` 是打开那一刻算死的，之后再没更新过：晚上开着页面、过了 0 点继续记，
+ * 记录会掉进昨天，「今天还能吃多少」也停在昨天。日期是记录的唯一归属，错一天就是记错一天。
+ *
+ * 触发点：每次渲染前、切回前台、窗口重新获得焦点、每分钟一次定时器。
+ * @returns {boolean} 是否真的换了天（换了才需要重绘）
+ */
+function syncToday() {
+  const today = todayKey();
+  if (today === lastKnownToday) return false;
+  const next = followToday({ viewing: dateKey, lastToday: lastKnownToday, today });
+  lastKnownToday = today;
+  if (!next.followed) return false; // 用户自己翻到了历史某天，不动他的视线
+  dateKey = next.dateKey;
+  // 日期突然变了要说一句，不然用户会以为是自己点错了
+  const [, mm, dd] = dateKey.split('-');
+  setTimeout(() => toast(`过 0 点了，帮你切到 ${Number(mm)}月${Number(dd)}日 继续记。`), 200);
+  return true;
+}
+
 function render() {
+  syncToday();
   const dn = $('#dateText');
   if (dn) dn.textContent = dateLabel();
   else $('#dateLabel').textContent = dateLabel();
@@ -4322,6 +4352,15 @@ document.addEventListener('visibilitychange', () => {
   checkForUpdate().catch(() => {});
 });
 
+/*
+ * v49：跨过 0 点要换天。
+ * 定时器兜住「一直开着、没切走、也没点任何东西」的情况；
+ * 切回前台 / 窗口重新获得焦点时立刻纠正一次（手机锁屏放到第二天早上是最常见的场景）。
+ */
+setInterval(() => { if (syncToday()) render(); }, 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && syncToday()) render(); });
+window.addEventListener('focus', () => { if (syncToday()) render(); });
+
 // 启动成功的标记：浏览器自检靠它判断「模块有没有炸掉导致白屏」
 /**
  * 给自检用的只读快照。
@@ -4334,6 +4373,10 @@ function syncTestState() {
   window.__appState = {
     aiConfigured: aiOn(),
     aiChecked: Boolean(ai.checked),
+    // v49：跨午夜自检要能读到「现在算哪天」（只读，不改任何东西）
+    dateKey,
+    lastKnownToday,
+    today: todayKey(),
   };
 }
 
