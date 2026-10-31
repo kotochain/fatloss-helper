@@ -279,6 +279,31 @@ async function main() {
     entry.steps.push({ at: '示例数据·今天页', ...(await evaluate(client, DIAGNOSTIC)) });
     // v50：先记一次圆环（示例数据刚好把目标吃满 → 应该是「空环 + 还剩 0」）
     const ringStart = await ringOf(client);
+
+    // v51：翻到别的日子，顶部要一直显示「正在看哪一天」，并且能一键回到今天
+    const dayCtx = await evaluate(client, `(() => {
+      document.querySelector('#prevDay').click();
+      const box = document.querySelector('#dayContext');
+      const text = box ? box.textContent.replace(/\s+/g, ' ').trim() : '';
+      const shown = box ? !box.hidden : false;
+      // 320 宽 + 大字号时这条不能横向溢出（文字允许换行，按钮不能被挤出去）
+      const overflow = box ? box.scrollWidth > box.clientWidth + 1 : false;
+      // 计划页的写入按钮也必须说真实日期（以前固定写「今天」，实际写进选中的那一天）
+      document.querySelector('.tab[data-view="plan"]')?.click();
+      const planBtn = document.querySelector('[data-act="use-plan"]')?.textContent || '';
+      document.querySelector('#backToToday')?.click();
+      const after = document.querySelector('#dayContext');
+      const backDate = document.querySelector('#dateText')?.textContent || '';
+      document.querySelector('.tab[data-view="today"]')?.click();
+      return {
+        翻到昨天时显示: shown,
+        文案: text,
+        计划按钮: planBtn,
+        顶部条横向溢出: overflow,
+        回到今天后隐藏: after ? after.hidden : false,
+        日期标签: backDate,
+      };
+    })()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-2-today.png`));
 
     // 第三步：打开「加食物」弹层并搜索
@@ -326,6 +351,19 @@ async function main() {
 
     // v50：加完一条之后再看一眼圆环（必须和中间数字同源）
     const ringAfter = await ringOf(client);
+
+    // v51：已记食物必须能改份量（以前只能删了重记，但界面还承诺「之后可以改」）
+    const editEntry = await evaluate(client, `(() => {
+      const btn = document.querySelector('[data-act="edit-food"]');
+      if (!btn) return { 有改按钮: false };
+      btn.click();
+      const title = document.querySelector('#sheetTitle')?.textContent || '';
+      const input = document.querySelector('#amountInput');
+      const foot = document.querySelector('#confirmAmount')?.textContent || '';
+      const value = input ? input.value : null;
+      document.querySelector('#sheetClose')?.click();
+      return { 有改按钮: true, 标题: title, 预填: value, 按钮: foot };
+    })()`);
 
     // 第四步半（v31）：AI 认出来了、但本地库里没有的菜 —— 必须按同类均值先记上，
     // 标明「按同类估算」、能删；不能再出现「一条都记不上」的死胡同。
@@ -750,7 +788,7 @@ async function main() {
       await sleep(900);
     }
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest, midnight, ringStart, ringAfter };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest, midnight, ringStart, ringAfter, dayCtx, editEntry };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -822,9 +860,20 @@ function printReport(report) {
     // v50：圆环画的比例必须等于「还剩 / 目标」，和中间那个数字同源
     const ringOk = (x) => x?.有圆环 && x.应为 != null && Math.abs(x.环比例 - x.应为) <= 0.03;
     const ringBad = !ringOk(r.ringStart) || !ringOk(r.ringAfter);
+    // v51：补记的日期提示必须真的出现并给出回今天的出口；已记食物必须能点开改份量
+    const dateBad = !r.dayCtx?.翻到昨天时显示
+      || !/正在看/.test(r.dayCtx.文案)
+      || !r.dayCtx.回到今天后隐藏
+      || /今天/.test(r.dayCtx.计划按钮 || '');   // 在看昨天时按钮不许再写「今天」
+    const editBad = !r.editEntry?.有改按钮
+      || !/改/.test(r.editEntry.标题)
+      || !r.editEntry.预填
+      || !/保存修改/.test(r.editEntry.按钮);
     const fmtRing = (x) => x?.有圆环
       ? `画到 ${(x.环比例 * 100).toFixed(0)}% / 应 ${x.应为 == null ? '?' : `${(x.应为 * 100).toFixed(0)}%`}（中间「${x.中间数字} ${x.说明}」，已吃 ${x.已吃}/${x.目标}）`
       : '没找到圆环';
+    console.log(`  历史日期提示：翻到昨天时 ${r.dayCtx?.翻到昨天时显示 ? '出现' : '没出现'}「${r.dayCtx?.文案 || ''}」｜计划按钮「${r.dayCtx?.计划按钮 || ''}」｜回到今天后 ${r.dayCtx?.回到今天后隐藏 ? '隐藏' : '还挂着'}｜日期「${r.dayCtx?.日期标签 || ''}」`);
+    console.log(`  改份量入口：${r.editEntry?.有改按钮 ? '有' : '缺'}｜弹层标题「${r.editEntry?.标题 || ''}」｜预填 ${r.editEntry?.预填 ?? '—'}｜按钮「${r.editEntry?.按钮 || ''}」`);
     console.log(`  圆环·示例数据：${fmtRing(r.ringStart)}`);
     console.log(`  圆环·加完一条：${fmtRing(r.ringAfter)}`);
     // 图标这轮（v27）新增三条：徽章要有名字、徽章和设置图标要真的放大到看得清
@@ -858,7 +907,7 @@ function printReport(report) {
       || !r.refresh.横幅.有横幅 || !r.refresh.横幅.文字.includes(r.refresh.假版本);
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
-      || uiIconBad || midnightBad || ringBad) problems += 1;
+      || uiIconBad || midnightBad || ringBad || dateBad || editBad) problems += 1;
   }
   console.log(`\n${problems === 0 ? '✅ 浏览器自检全部通过' : `❌ 浏览器自检有 ${problems} 处问题`}`);
   console.log(`截图与报告在 ${outDir}`);

@@ -8,7 +8,7 @@ import {
   emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
   updateFoodEntry, addExercise, removeExercise, addWeight, addCustomFood,
   weightTrend, analyzeProgress, demoProfile, demoEntries, STATE_VERSION, frequentFoods,
-  recordedDays, hasUserData, followToday,
+  recordedDays, hasUserData, followToday, isCurrentWeightDate,
 } from '../js/store.js';
 import { migrate } from '../js/schema.js';
 import { calcTargets, calcEntry } from '../js/calc.js';
@@ -389,4 +389,34 @@ test('页面开着跨过 0 点：「今天」要跟着换，但正在看历史�
   );
   // 参数不全时不要抛错（启动早期可能还没算好）
   assert.deepEqual(followToday({}), { dateKey: undefined, followed: false });
+});
+
+test('改已记食物：改了餐次就真的搬到那一餐（v51）', () => {
+  const s = emptyState();
+  const e = addFoodEntry(s, '2026-10-16', 'lunch', rice, 150);
+  const updated = updateFoodEntry(s, '2026-10-16', e.id, { grams: 120, meal: 'dinner' });
+
+  assert.equal(updated.id, e.id);
+  assert.equal(updated.grams, 120);
+  assert.equal(updated.meal, 'dinner');
+  // 关键：不能只改 meal 字段、条目还留在午餐数组里（界面按数组分组，用户会看到「没搬过去」）
+  assert.equal(getDay(s, '2026-10-16').meals.lunch.length, 0);
+  assert.equal(getDay(s, '2026-10-16').meals.dinner.length, 1);
+  assert.equal(getDay(s, '2026-10-16').meals.dinner[0].id, e.id);
+
+  // 只改份量、不改餐次：留在原地
+  updateFoodEntry(s, '2026-10-16', e.id, { grams: 80 });
+  assert.equal(getDay(s, '2026-10-16').meals.dinner[0].grams, 80);
+
+  // 找不到的记录不许「假装改成功」
+  assert.equal(updateFoodEntry(s, '2026-10-16', 'not_exist', { grams: 100 }), null);
+  // 份量非法时 store 要拦住，不能写进一个 NaN
+  assert.throws(() => updateFoodEntry(s, '2026-10-16', e.id, { grams: 0 }), /份量/);
+});
+
+
+test('补记历史体重不更新当前体重（否则今天的目标会被旧数据改掉，v51）', () => {
+  assert.equal(isCurrentWeightDate('2026-10-31', '2026-10-31'), true);
+  assert.equal(isCurrentWeightDate('2026-10-24', '2026-10-31'), false, '补记上周的体重不能改当前目标');
+  assert.equal(isCurrentWeightDate('2026-11-01', '2026-10-31'), false, '翻到明天记体重也不算今天');
 });

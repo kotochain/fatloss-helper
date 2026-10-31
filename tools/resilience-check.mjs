@@ -1269,6 +1269,10 @@ async function scenarioStorageWipeDeletesSnapshot(group) {
       exercises: [], note: '',
     };
     localStorage.setItem('fatloss.state.v2', JSON.stringify(st));
+    // v51：清除弹层承诺「全部设置」，那 AI 密钥也必须一起走（以前只删主存档和快照）
+    localStorage.setItem('fatloss.ai.v1', JSON.stringify({
+      presetId: 'custom', baseUrl: 'http://127.0.0.1:9/v1', model: 'mock', apiKey: 'sk-wipe-check-fake', mode: 'direct',
+    })); // secret-scan:allow 假密钥，只写进这个测试浏览器
   `;
   await setupStorage(fixture);
   const before = await readMainState();
@@ -1298,6 +1302,8 @@ async function scenarioStorageWipeDeletesSnapshot(group) {
   sc.shots.push(await shot('storage-wipe-after'));
   chk(sc, '清除确实清空了记录', after.entries.length === 0, '记录清零', `${after.entries.length} 条`, '严重');
   chk(sc, '清除后快照也删掉（不留残影）', !backupAfterWipe, 'fatloss.backup 已删除', backupAfterWipe ? '快照还在（没清干净）' : '已删除', '一般');
+  const aiAfterWipe = await evalJs(`localStorage.getItem('fatloss.ai.v1')`);
+  chk(sc, '彻底清除连 AI 密钥一起删掉', !aiAfterWipe, 'fatloss.ai.v1 已删除', aiAfterWipe ? '密钥还在（文案说全部但没清）' : '已删除', '严重');
   // 尝试找回：关掉引导弹层，进欢迎页的找回记录
   await closeSheet();
   await dismissCelebrate();
@@ -1331,6 +1337,9 @@ async function scenarioStorageWipeGuard(group) {
     };
     st.days[today] = { meals: { breakfast: [], lunch: [{ id: 'e1', meal: 'lunch', food: ${JSON.stringify(FOOD_BEEF_NOODLE)}, grams: 600 }], dinner: [], snack: [] }, exercises: [] };
     localStorage.setItem('fatloss.state.v2', JSON.stringify(st));
+    localStorage.setItem('fatloss.ai.v1', JSON.stringify({
+      presetId: 'custom', baseUrl: 'http://127.0.0.1:9/v1', model: 'mock', apiKey: 'sk-wipe-keep-fake', mode: 'direct',
+    })); // secret-scan:allow 假密钥，用来验证「只清记录」不会把它带走
   `;
   await setupStorage(fixture);
   const before = await readMainState();
@@ -1356,14 +1365,19 @@ async function scenarioStorageWipeGuard(group) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   })()`);
-  const rightState = await evalJs(`({ disabled: document.querySelector('#wipeGo')?.disabled })`);
-  chk(sc, '输对时按钮才可用', rightState.disabled === false, '#wipeGo disabled=false', `disabled=${rightState.disabled}`);
-  await evalJs(`document.querySelector('#wipeGo').click(); true`);
+  const rightState = await evalJs(`({ disabled: document.querySelector('#wipeGo')?.disabled, keepDisabled: document.querySelector('#wipeKeepAi')?.disabled })`);
+  chk(sc, '输对时按钮才可用', rightState.disabled === false && rightState.keepDisabled === false,
+    '两个清除按钮都 disabled=false', `disabled=${rightState.disabled} / keep=${rightState.keepDisabled}`);
+  // 这条场景走「只清记录」：记录要没，AI 密钥要留（彻底清除的密钥验证在 S-7）
+  await evalJs(`document.querySelector('#wipeKeepAi').click(); true`);
   await sleep(700);
   const afterRight = await readMainState();
   const toasts = await readToasts();
   chk(sc, '输对后真的清空', afterRight.entries.length === 0, '记录清零', `${afterRight.entries.length} 条`, '严重');
-  chk(sc, '清空有明确提示', toasts.some((t) => /已经清空/.test(t)), '出现「已经清空，我们从头来一遍」', `toast：${JSON.stringify(toasts)}`);
+  chk(sc, '清空有明确提示', toasts.some((t) => /已经清空/.test(t)), '出现「记录已经清空…」', `toast：${JSON.stringify(toasts)}`);
+  const aiKept = await evalJs(`localStorage.getItem('fatloss.ai.v1')`);
+  chk(sc, '只清记录时 AI 设置要留着', Boolean(aiKept), 'fatloss.ai.v1 仍在',
+    aiKept ? '仍在' : '被一起删了（和按钮承诺不一致）', '严重');
   await closeSheet();
   await dismissCelebrate();
   endScenario(sc, `输「清除吧」按钮不可用、点不动（记录仍 ${afterWrong.entries.length} 条）；输「清除」后才清空`);

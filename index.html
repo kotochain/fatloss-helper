@@ -41,7 +41,7 @@
 </div>
 <script>
 (function () {
-  var HERE = 'v50';
+  var HERE = 'v51';
   var bar = document.getElementById('verBar');
   var txt = document.getElementById('verBarText');
   if (!bar || !txt) return;
@@ -191,6 +191,13 @@
   <span id="nameTag" class="name-tag">小繁</span>
   <button id="profileBtn" class="avatar" aria-label="我的资料">我</button>
 </header>
+
+<!-- 翻到历史日期时的常驻提示（v51）：补记最容易记错日子，不能只靠一句会消失的 toast。
+     放在 header 外面：塞进顶栏会让长日期/长昵称时顶栏多折一行，占掉小屏高度。 -->
+<div id="dayContext" class="day-context" hidden>
+  <span id="dayContextText"></span>
+  <button id="backToToday" class="day-context-back">回到今天</button>
+</div>
 
 <main id="app"></main>
 

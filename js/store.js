@@ -164,14 +164,31 @@ export function removeFoodEntry(state, dateKey, entryId) {
   return false;
 }
 
-export function updateFoodEntry(state, dateKey, entryId, patch) {
+/**
+ * 修改一条已记的食物：份量、餐次（v51）。
+ *
+ * 以前只 Object.assign，光把 meal 改成「晚餐」并不会把条目从午餐数组搬到晚餐数组 ——
+ * 界面按餐分组，用户会看到「说改了但还在原来的餐里」。
+ * 所以餐次变化时必须真的换桶，并把记录里的 meal 字段一起改掉。
+ *
+ * @returns {object|null} 改好的条目；找不到就返回 null（由界面提示）
+ */
+export function updateFoodEntry(state, dateKey, entryId, patch = {}) {
   const day = getDay(state, dateKey);
   for (const k of Object.keys(day.meals)) {
-    const e = day.meals[k].find((x) => x.id === entryId);
-    if (e) {
-      Object.assign(e, patch);
-      return e;
+    const list = day.meals[k];
+    const idx = list.findIndex((x) => x.id === entryId);
+    if (idx < 0) continue;
+    const entry = list[idx];
+    const nextMeal = patch.meal && day.meals[patch.meal] ? patch.meal : k;
+    const next = { ...patch, meal: nextMeal };
+    if (patch.grams !== undefined) next.grams = normalizeGrams(patch.grams);
+    if (nextMeal !== k) {
+      list.splice(idx, 1);
+      day.meals[nextMeal].push(entry);
     }
+    Object.assign(entry, next);
+    return entry;
   }
   return null;
 }
@@ -203,6 +220,16 @@ export function removeExercise(state, dateKey, id) {
     return true;
   }
   return false;
+}
+
+/**
+ * 记的这次体重该不该更新「当前体重」（v51）。
+ *
+ * 补记上周的体重只是在补历史，不应该把今天的目标热量改掉；
+ * 只有记的是今天，才代表「我现在多重」。界面和测试都走这一条。
+ */
+export function isCurrentWeightDate(dateKey, today) {
+  return dateKey === today;
 }
 
 export function addWeight(state, dateKey, kg) {

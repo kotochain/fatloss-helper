@@ -126,6 +126,9 @@ const MUTATIONS = [
   { file: 'js/cardio.js', from: "  return Object.prototype.hasOwnProperty.call(GOALS, key) ? key : 'fat_burn';", to: '  return key;', why: '训练目标认不出来要回「燃脂」（否则推荐拿不到目标）' },
   // ── 第十一轮：AI 设置留空密钥 + 「只填热量」──
   { file: 'js/providers.js', from: "const apiKey = askedKey || (presetChanged ? '' : (existing?.apiKey || ''));", to: 'const apiKey = askedKey;', why: '输入框留空（空字符串）必须沿用已保存的密钥，不能报「密钥没填」' },
+  // v51：补记历史体重却改了当前目标 / 改餐次只改字段没搬桶 / 「全部清除」漏掉密钥
+  { file: 'js/store.js', from: 'return dateKey === today;', to: 'return true;', why: '只有记的是今天，才更新当前体重' },
+  { file: 'js/store.js', from: 'if (nextMeal !== k) {', to: 'if (false) {', why: '改餐次要真的把条目搬到那一餐' },
   // v50：今天页圆环画反（画成「已吃/目标」）时，单测必须红 —— 这是用户最容易反着理解的一处
   { file: 'js/calc.js', from: 'const pct = Math.max(0, Math.min(1, remaining / budget));', to: 'const pct = Math.max(0, Math.min(1, 1 - remaining / budget));', why: '圆环画的是「还剩多少」，不是「已吃多少」' },
   { file: 'js/providers.js', from: "const presetChanged = Boolean(existing?.apiKey && existing.presetId && preset.id !== existing.presetId);", to: 'const presetChanged = false;', why: '换了服务商不能沿用上一家的密钥（等于把钥匙递给第三方）' },

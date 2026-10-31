@@ -236,6 +236,41 @@ body {
 /* 头像看起来还是 32px，但手指点到周围 4px 也算——手机上实际更好点 */
 .avatar::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; } /* 热区 48px */
 
+/* 历史日期常驻条（v51）：翻到别的日子时一直可见，避免补记记错天 */
+/* 独立一条、贴在顶栏下面（不塞进顶栏）：长日期 + 长昵称时顶栏本来就很挤，
+   再往里加一行会把小屏顶掉 100 多像素（v51 排版自检抓到过）。 */
+.day-context {
+  position: sticky;
+  top: 53px;
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 4px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: #FFF4E8;
+  border: 1px solid #F0DCC2;
+  color: #7A4A2E;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 2px 8px rgba(120, 82, 40, 0.06);
+}
+.day-context[hidden] { display: none; }
+.day-context span { flex: 1; min-width: 0; }
+.day-context-back {
+  flex: 0 0 auto;
+  border: 0;
+  background: #fff;
+  color: var(--rose-deep);
+  font: inherit;
+  font-weight: 600;
+  padding: 5px 10px;
+  min-height: 32px;
+  border-radius: 99px;
+  cursor: pointer;
+}
+
 /* 新版本提示条 */
 .update-toast {
   display: flex;
@@ -623,6 +658,13 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .draft-line .del { color: var(--ink-2); }
 .draft-note, .draft-warn { display: block; font-size: 11.5px; color: var(--ink-3); font-weight: 400; margin-top: 3px; line-height: 1.45; }
 .draft-warn { color: #92400e; }
+/* 「改」和「×」并排：改份量是主操作，用品牌色；删除仍是灰的（别让误删更容易） */
+.entry .del.edit {
+  color: var(--rose-deep);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 .entry .del {
   border: 0; background: transparent; color: var(--ink-3);
   font-size: 16px; cursor: pointer;

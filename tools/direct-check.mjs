@@ -896,17 +896,16 @@ async function main() {
     await new Promise((r) => setTimeout(r, 600));
     const btn = document.querySelector('[data-act="log-weight"]');
     const hasBtn = !!btn;
-    btn?.click();
-    await new Promise((r) => setTimeout(r, 500));
-    const input = document.querySelector('#wInput');
-    const sheetOpen = !document.querySelector('#sheetRoot').classList.contains('hidden');
+    // v51：行内「记下」直接保存，不许再弹出第二个体重窗
+    const input = document.querySelector('#weightInput');
     if (input) {
       input.value = '60.1';
       input.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    const inputNow = document.querySelector('#wInput')?.value;
-    document.querySelector('#wSave')?.click();
+    const inputNow = input ? input.value : null;
+    btn?.click();
     await new Promise((r) => setTimeout(r, 900));
+    const sheetOpen = !document.querySelector('#sheetRoot').classList.contains('hidden');
     const rawAfter = localStorage.getItem('fatloss.state.v2') || '';
     const toasts = [...document.querySelectorAll('.toast')].map((t) => t.textContent).join(' | ');
     return {
@@ -921,6 +920,7 @@ async function main() {
   console.log('另一个窗口写过、本页再保存 →', JSON.stringify(conflict));
   if (!conflict.存储里还有对方记录) problems.push('别的窗口写过记录后，本页保存把它整个盖掉了');
   if (!conflict.我们的体重没写进去) problems.push('本页用旧数据保存成功 —— 应该让路而不是覆盖');
+  if (conflict.面板开着) problems.push('行内「记下」又弹出了第二个体重窗（一次点击不该有两套行为）');
   if (!/没记上/.test(conflict.提示)) problems.push('保存被另一个窗口的数据挡住时，没有说清「这一笔没记上」');
 
   console.log('\n=== 结论 ===');

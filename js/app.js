@@ -47,9 +47,10 @@ import {
   SCHEMA_VERSION, STATE_KEY, loadState, migrateToCurrent, migrate, readBackup, clearBackup, saveBackup, describeMigration,
   readUnreadable, attachUnreadable, splitUnreadable, restoreUnreadable,
 } from './schema.js';
+import { AI_CONFIG_KEY } from './ai-config.js';
 import {
-  emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry,
-  addExercise, removeExercise, addWeight, addCustomFood, weightTrend, analyzeProgress,
+  emptyState, todayKey, shiftDate, getDay, addFoodEntry, removeFoodEntry, updateFoodEntry,
+  addExercise, removeExercise, addWeight, isCurrentWeightDate, addCustomFood, weightTrend, analyzeProgress,
   demoProfile, demoEntries, frequentFoods, recordedDays, hasUserData, followToday,
 } from './store.js';
 
@@ -194,6 +195,7 @@ function adoptExternalState(message = '') {
         state = migrate(parsed);
         lastWrittenRaw = raw;
         hideSyncBanner();
+        hideSaveBanner();   // 已经换成存储里的那份，别再挂着「没存进本机」
         render();
       }
     } catch {
@@ -203,6 +205,36 @@ function adoptExternalState(message = '') {
   }
   toast(message || '另一个窗口改了记录，已换成最新的那份。');
 }
+
+/**
+ * 存不进本机时的那条常驻提示（v51）。
+ *
+ * 为什么不是只弹一句 toast：记录已经在内存里、界面也显示出来了，但刷新就会没。
+ * toast 三五秒就消失，用户很容易以为「已经记上了」。这条会一直挂在底栏上方，
+ * 直到真的存进去为止 —— 点「重试」就是在内存数据上再写一次。
+ */
+let saveBanner = null;
+function showSaveBanner() {
+  if (saveBanner) return;
+  const el = document.createElement('div');
+  el.className = 'sync-banner save-banner';
+  const text = document.createElement('span');
+  text.textContent = '这一笔还没存进本机，先别关页面';
+  const btn = document.createElement('button');
+  btn.className = 'btn ghost';
+  btn.textContent = '重试保存';
+  btn.addEventListener('click', () => {
+    if (save()) {
+      hideSaveBanner();
+      render();
+      toast('存进去了。');
+    }
+  });
+  el.append(text, btn);
+  document.body.appendChild(el);
+  saveBanner = el;
+}
+function hideSaveBanner() { if (saveBanner) { saveBanner.remove(); saveBanner = null; } }
 
 function save() {
   try {
@@ -222,10 +254,12 @@ function save() {
     localStorage.setItem(STORAGE_KEY, json);
     lastWrittenRaw = json;
     lastSaveOk = true;
+    hideSaveBanner();
     return true;
   } catch (err) {
     // 存不进手机（存储满/隐私模式）时，只报这一句实话；后面不许再弹「记上了」。
     lastSaveOk = false;
+    showSaveBanner();
     toast('存不进去了（浏览器存储可能满了），请到「我的 → 数据与备份」导出，再清理一下空间。');
     console.error(err);
     return false;
@@ -382,6 +416,7 @@ $('.sheet-mask').addEventListener('click', closeSheet);
 /* ── 顶部与标签栏 ────────────────────────── */
 
 $('#prevDay').addEventListener('click', () => { dateKey = shiftDate(dateKey, -1); render(); });
+$('#backToToday').addEventListener('click', () => { dateKey = todayKey(); render(); window.scrollTo({ top: 0 }); });
 $('#nextDay').addEventListener('click', () => { dateKey = shiftDate(dateKey, 1); render(); });
 $('#dateLabel').addEventListener('click', openCalendarSheet);
 $('#profileBtn').addEventListener('click', openSettingsSheet);
@@ -454,6 +489,7 @@ function render() {
   const dn = $('#dateText');
   if (dn) dn.textContent = dateLabel();
   else $('#dateLabel').textContent = dateLabel();
+  syncDayContext();
   const nameTag = $('#nameTag');
   if (nameTag) {
     const who = nickname(state);
@@ -494,6 +530,24 @@ function render() {
     bindQuickLog();
   }
   syncTestState();
+}
+
+/**
+ * 翻到历史日期时，顶部一直挂着「正在看哪一天」（v51）。
+ *
+ * 为什么必须常驻：补记昨天之后，toast 两三秒就没了；之后切到记录/计划/我的，
+ * 日期仍然停在昨天，用户很容易继续记，结果全落到那一天（计划和体重尤其危险）。
+ * 这条不拦截操作，只把「现在写哪一天」摆在眼前，并给一个直接回今天的出口。
+ */
+function syncDayContext() {
+  const box = $('#dayContext');
+  const text = $('#dayContextText');
+  if (!box || !text) return;
+  const isToday = dateKey === todayKey();
+  box.hidden = isToday;
+  if (isToday) return;
+  const [, mm, dd] = dateKey.split('-');
+  text.textContent = `正在看 ${dayLabel(dateKey)}（${Number(mm)}月${Number(dd)}日）· 在这页记的东西会写到这一天`;
 }
 
 /**
@@ -576,6 +630,13 @@ function handleAction(act, data) {
       app.querySelector('[data-act="more-cardio"]')?.remove();
       break;
     }
+    case 'edit-food': {
+      const day = getDay(state, dateKey);
+      const entry = Object.values(day.meals).flat().find((e) => e.id === data.id);
+      if (!entry) return toast('这条记录找不到了，可能已经在别处删掉。');
+      // 历史日期也能改：改的是这一天这条记录，日期不变
+      return openAmountSheet(entry.food, entry.meal, entry);
+    }
     case 'del-food': {
       const day = getDay(state, dateKey);
       const entry = Object.values(day.meals).flat().find((e) => e.id === data.id);
@@ -598,7 +659,14 @@ function handleAction(act, data) {
     case 'use-plan': return usePlanForToday();
     case 'next-plan': planSeed += 1; render(); return;
     case 'edit-profile': return openProfileSheet();
-    case 'log-weight': return openWeightSheet();
+    case 'log-weight': {
+      // 「我的」行内填了数字就保存；没填就打开弹层（不给一句「请填数字」打发人）。
+      // 关键是**一次点击只走一条路**：以前这个按钮上还挂了第二个监听，填了数字也会再弹一个空窗。
+      const input = $('#weightInput');
+      if (!input) return openWeightSheet();
+      const typed = String(input.value || '').trim();
+      return typed ? recordWeight(typed) : openWeightSheet();
+    }
     case 'export': return exportData();
     case 'import': return importData();
     case 'demo': return requestDemo();
@@ -746,10 +814,10 @@ function onboardFirst(review = false) {
 /** 引导只做一次；记在存档里，换设备要重新走（数据不在，走了才有意义） */
 function finishOnboarding(review = false) {
   state.settings = { ...(state.settings || {}), onboarded: true, lastSeenVersion: APP_VERSION };
-  save();
+  const stored = save();
   closeSheet();
   render();
-  if (review) return; // 重看一遍不需要再提示一遍目标
+  if (!stored || review) return; // 存不进去就别再说「记一笔试试」
   setTimeout(() => {
     const t = targets();
     if (t) toast(`记一笔试试。你今天的目标是约 ${Math.round(t.targetCalories / 10) * 10} kcal。`);
@@ -850,10 +918,11 @@ function startDemo() {
   demoEntries(state, todayKey(), t);
   addWeight(state, shiftDate(todayKey(), -14), 59.2);
   addWeight(state, todayKey(), 58);
-  save();
+  const stored = save();
   view = 'today';
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
   render();
+  if (!stored) return;
   toast(hadData
     ? '已填入示例数据。你原来的记录留了快照，看完在「我的 → 数据与备份」里能回滚。'
     : '已填入一份示例数据（26 岁女性 163cm 58kg），可以随便改。');
@@ -1041,6 +1110,7 @@ function renderToday() {
           return `<div class="entry">
             <span class="name">${esc(e.food.name)}<em>${e.food.kcalOnly ? '按热量记' : `${e.grams} 克`}</em></span>
             <span class="kcal">${Math.round(f.kcal)} kcal</span>
+            ${e.food.kcalOnly ? '' : `<button class="del edit" data-act="edit-food" data-id="${e.id}" aria-label="改份量">改</button>`}
             <button class="del" data-act="del-food" data-id="${e.id}" aria-label="删除">${icon('close', { size: 14 })}</button>
           </div>`;
         }).join('') || '<div class="tiny muted">还没记</div>'}
@@ -1463,7 +1533,9 @@ function openDraftSheet() {
   openSheet({
     // 一条都没认出来时，标题不能还问「这样记对吗？」
     title: draft.items.length ? '这样记对吗？' : '这句没能解析',
-    body: '<div id="draftHost"></div>',
+    body: `${draft.dateKey && draft.dateKey !== todayKey()
+      ? `<div class="warn info" style="margin:0 0 10px">这一段会记到<b>${dayLabel(draft.dateKey)}</b>，不是今天。</div>`
+      : ''}<div id="draftHost"></div>`,
     onMount: () => {
       drawDraft();
     },
@@ -1471,8 +1543,11 @@ function openDraftSheet() {
 }
 
 async function runQuickParse(text, mealOverride = null) {
-  // 餐次优先级：调用方指定（「加到午餐」里说的）> 今天页那个按钮带的提示 > 按时钟猜
+  // 餐次优先级：调用方指定（「加到午餐」里说的）> 刚点的餐次提示 > 按时钟猜。
+  // 餐次提示是一次性的：用完就清掉。留着会让下一次从「记录」页直接解析的话
+  // 仍然落到上一次点的那一餐（用户看不见任何提示）。
   const meal = mealOverride || quickMealHint || guessMeal();
+  quickMealHint = null;
   let items = [];
   let questions = [];
   // AI 的追问和本地「份量没说清」的问题分开存：前者可以答「不知道」让 AI 自己估，
@@ -1491,6 +1566,8 @@ async function runQuickParse(text, mealOverride = null) {
     draft = {
       text,
       meal,
+      // 解析时的日期固定下来：保存时不能读当下的 dateKey（中途换天/翻日期会记错日子）
+      dateKey,
       items: [],
       questions: [],
       aiQuestions: [],
@@ -1560,6 +1637,7 @@ async function runQuickParse(text, mealOverride = null) {
   draft = {
     text,
     meal,
+    dateKey,
     items,
     questions: [...new Set(questions)].slice(0, 4),
     aiQuestions: [...new Set(aiQuestions)].slice(0, 2),
@@ -1827,12 +1905,13 @@ function drawDraft() {
     const items = draft.items;
     const savedMeal = draft.meal;
     const savedText = draft.text;
+    const savedDate = draft.dateKey || dateKey;
     draft = null;
     let cachedCount = 0;
     for (const it of items) {
       // 每 100 克的数字：记录本身和「我的食物」都用它（换算只有一份：calc#toPer100）
       const per100 = it.grams > 0 ? toPer100(it, it.grams) : null;
-      addFoodEntry(state, dateKey, savedMeal, {
+      addFoodEntry(state, savedDate, savedMeal, {
         id: `draft_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name: it.name,
         category: 'custom',
@@ -1867,7 +1946,7 @@ function drawDraft() {
     // 存了「我的食物」时要说清：不然用户不知道下次为什么不用再等 AI
     const extra = cachedCount ? `（${cachedCount} 样 AI 估的营养已存进「我的食物」，下次直接认得）` : '';
     // 补记昨天时，保存反馈要写清「记到昨天了」——不然用户不知道这一笔落在哪一天
-    toast(dateKey === todayKey() ? `${msg.text}${extra}` : `${msg.text}（记到${dayLabel(dateKey)}）${extra}`, msg.icon);
+    toast(savedDate === todayKey() ? `${msg.text}${extra}` : `${msg.text}（记到${dayLabel(savedDate)}）${extra}`, msg.icon);
     checkNewAchievements();
   });
   $('#draftCancel', box)?.addEventListener('click', () => {
@@ -1913,10 +1992,10 @@ function renderPlan() {
           <ul>${m.items.map((it) => `<li>${esc(it.food.name)} ${esc(it.desc)}${it.clampedBy ? ' <span class="tag amber">已按热量封顶</span>' : ''}</li>`).join('')}</ul>
         </div>`).join('')}
       <div class="btn-row">
-        <button class="btn grow" data-act="use-plan">按这个餐单记入今天</button>
+        <button class="btn grow" data-act="use-plan">按这个餐单记到${dayLabel(dateKey)}</button>
         <button class="btn ghost" data-act="next-plan">换一套</button>
       </div>
-      <p class="tiny muted" style="margin:8px 0 0">「记入今天」只是把食物写进今天的记录里，之后可以按实际吃的改份量或删掉。</p>
+      <p class="tiny muted" style="margin:8px 0 0">只是把食物写进${dayLabel(dateKey)}的记录里，之后可以点条目改份量或删掉。</p>
     </div>
 
     ${renderCardioCard()}
@@ -2020,7 +2099,7 @@ function renderCardioCard() {
               <li>要点：${esc(p.cue)}</li>
               <li>注意：${esc(p.note)}</li>
             </ul>
-            <button class="add-line" data-log-cardio="${p.id}">今天就做这个（记入记录）</button>
+            <button class="add-line" data-log-cardio="${p.id}">${dateKey === todayKey() ? '今天就做这个' : `记到${dayLabel(dateKey)}`}（写入记录）</button>
           </div>`).join('')}
         <details style="margin-top:6px">
           <summary class="small" style="cursor:pointer">想做的机器没空？点这里看替代方案</summary>
@@ -2050,9 +2129,11 @@ function logRecommendCardio(cardioId, minutes) {
   try {
     const item = logTraining(state, dateKey, { cardioId, minutes });
     const saved = describeTraining(item, state.profile?.weightKg ?? 60);
-    save();
+    const stored = save();
     render();
-    toast(`记上了：${saved.name} ${saved.minutes} 分钟，大约 ${saved.kcal} kcal。`);
+    if (!stored) return;
+    const when = dateKey === todayKey() ? '' : `（记到${dayLabel(dateKey)}）`;
+    toast(`记上了：${saved.name} ${saved.minutes} 分钟，大约 ${saved.kcal} kcal${when}。`);
   } catch (err) {
     toast(err.message);
   }
@@ -2134,18 +2215,46 @@ function usePlanForToday() {
   const t = targets();
   const plan = buildMealPlan(t, { seed: planSeed });
   const day = getDay(state, dateKey);
-  if (Object.values(day.meals).flat().length && !confirm('今天已经有记录了，继续会把餐单加在现有记录后面。要继续吗？')) return;
+  const when = dayLabel(dateKey);
+  if (Object.values(day.meals).flat().length
+    && !confirm(`${when}已经有记录了，继续会把餐单加在现有记录后面。要继续吗？`)) return;
   for (const m of plan.meals) {
     for (const it of m.items) addFoodEntry(state, dateKey, m.key, it.food, it.grams);
   }
-  save();
+  const stored = save();
   view = 'today';
   document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
   render();
-  toast('已经把餐单记进今天的记录，按实际吃的改份量就行。');
+  if (!stored) return;
+  toast(`已经把餐单记到${when}，按实际吃的改份量就行。`);
 }
 
 /* ── 体重页 ──────────────────────────────── */
+
+/**
+ * 记一次体重（v51）。
+ *
+ * 两个入口（「我的」行内、记体重弹层）走同一份逻辑：
+ *  - 体重记到**当前选中的日期**，不是永远记到今天；
+ *  - 只有记的是今天，才同步更新资料里的当前体重 —— 补记上周的体重
+ *    不应该把今天的目标热量改掉（以前会，而且界面不说）；
+ *  - 存不进去就不报喜。
+ */
+function recordWeight(kg) {
+  const v = Number(kg);
+  if (!(v > 20 && v < 300)) { toast('体重请填 20~300 之间的数字。'); return false; }
+  addWeight(state, dateKey, v);
+  const isToday = isCurrentWeightDate(dateKey, todayKey());
+  if (isToday && state.profile) state.profile.weightKg = v;
+  const stored = save();
+  render();
+  if (!stored) return false;
+  toast(isToday
+    ? '记上了。目标热量会跟着新体重重算。'
+    : `记到${dayLabel(dateKey)}了。这是补记，当前目标不变。`);
+  checkNewAchievements();
+  return true;
+}
 
 function renderProgress() {
   const t = state.profile ? targets() : null;
@@ -2226,22 +2335,7 @@ function renderProgress() {
     </div>`;
 
   const wi = $('#weightInput');
-  if (wi) {
-    wi.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveWeight(); });
-    const btn = app.querySelector('[data-act="log-weight"]');
-    if (btn) btn.addEventListener('click', saveWeight, { once: true });
-  }
-  function saveWeight() {
-    const v = Number($('#weightInput').value);
-    if (!(v > 20 && v < 300)) return toast('体重请填 20~300 之间的数字。');
-    addWeight(state, dateKey, v);
-    if (state.profile) state.profile.weightKg = v; // 体重变了，目标跟着重算
-    const stored = save();
-    render();
-    if (!stored) return;   // 存不进去就别报喜
-    toast('记上了。目标热量会跟着新体重重算。');
-    checkNewAchievements();
-  }
+  if (wi) wi.addEventListener('keydown', (e) => { if (e.key === 'Enter') recordWeight(wi.value); });
 }
 
 /* ── 弹层：加食物 ────────────────────────── */
@@ -2387,18 +2481,20 @@ function openFoodSheet(mealKey, initialSay = '') {
   });
 }
 
-function openAmountSheet(food, mealKey) {
-  pendingFood = { food, mealKey };
+function openAmountSheet(food, mealKey, editing = null) {
+  // 日期也一起固定：弹层开着跨过 0 点，这一笔仍应落在打开它的那一天
+  pendingFood = { food, mealKey, editId: editing?.id || null, dateKey };
   const slot = MEAL_SLOTS.find((s) => s.key === mealKey) || MEAL_SLOTS[0];
+  const servings = Array.isArray(food.servings) && food.servings.length ? food.servings : [['一份', 100]];
   openSheet({
-    title: `${food.name} → ${slot.label}`,
+    title: editing ? `改「${food.name}」` : `${food.name} → ${slot.label}`,
     body: `
       <p class="small muted" style="margin:0 0 10px">每 100 克：${food.kcal} kcal · 蛋白 ${food.protein} g · 脂肪 ${food.fat} g · 碳水 ${food.carb} g</p>
       <label class="field"><span>吃了多少？（可写「150克」「2个」「一小碗」）</span>
-        <input type="text" id="amountInput" inputmode="text" value="${food.servings[0][1]}" autocomplete="off">
+        <input type="text" id="amountInput" inputmode="text" value="${editing ? editing.grams : servings[0][1]}" autocomplete="off">
       </label>
       <div class="chips" id="amountChips">
-        ${food.servings.map(([label, g]) => `<button class="chip" data-grams="${g}">${label}（${g}g）</button>`).join('')}
+        ${servings.map(([label, g]) => `<button class="chip" data-grams="${g}">${label}（${g}g）</button>`).join('')}
       </div>
       <label class="field" style="margin-top:12px"><span>记到哪一餐</span>
         <div class="chips" id="mealChips">
@@ -2406,7 +2502,7 @@ function openAmountSheet(food, mealKey) {
         </div>
       </label>
       <div id="amountPreview" class="warn info"></div>`,
-    foot: '<button class="btn block" id="confirmAmount">加入记录</button>',
+    foot: `<button class="btn block" id="confirmAmount">${editing ? '保存修改' : '加入记录'}</button>`, 
     onMount: (body) => {
       const input = $('#amountInput', body);
       const preview = $('#amountPreview', body);
@@ -2434,11 +2530,25 @@ function openAmountSheet(food, mealKey) {
         const g = parseAmount(input.value, food);
         if (!g || g <= 0) return toast('份量没填对，试试直接写克数。');
         if (g > 3000) return toast('一次超过 3000 克，确认一下单位（斤/两/克）。');
-        addFoodEntry(state, dateKey, pendingFood.mealKey, food, g);
-        save();
+        const targetDate = pendingFood.dateKey || dateKey;
+        if (pendingFood.editId) {
+          // 修改已有记录：换餐次时要真的搬到那一餐（store.js#updateFoodEntry）
+          const changed = updateFoodEntry(state, targetDate, pendingFood.editId, { grams: g, meal: pendingFood.mealKey });
+          if (!changed) { closeSheet(); render(); return toast('这条记录找不到了，可能已经在别处删掉。'); }
+          const stored = save();
+          closeSheet();
+          render();
+          if (stored) toast(`改好了：${food.name} ${Math.round(g)} 克`);
+          return;
+        }
+        addFoodEntry(state, targetDate, pendingFood.mealKey, food, g);
+        const stored = save();
         closeSheet();
         render();
-        toast(`已记：${food.name} ${Math.round(g)} 克`);
+        if (!stored) return;   // 已在内存里，界面能看到；但不许说「已记」
+        toast(targetDate === todayKey()
+          ? `已记：${food.name} ${Math.round(g)} 克`
+          : `已记到${dayLabel(targetDate)}：${food.name} ${Math.round(g)} 克`);
       });
       setTimeout(() => { input.focus(); input.select(); }, 60);
     },
@@ -2449,6 +2559,7 @@ function openAmountSheet(food, mealKey) {
 
 function openExerciseSheet() {
   const list = listExercises();
+  const targetDate = dateKey;   // 弹层开着跨过 0 点，仍记到打开它的那一天
   openSheet({
     title: '加运动',
     body: `
@@ -2486,7 +2597,7 @@ function openExerciseSheet() {
       $('#confirmEx').addEventListener('click', () => {
         try {
           // 走和记录页同一条路：时长不合法时 store 会拒绝，这里把原因原样说出来
-          logTraining(state, dateKey, { exerciseKey: picked, minutes: Number(minutes.value) });
+          logTraining(state, targetDate, { exerciseKey: picked, minutes: Number(minutes.value) });
         } catch (err) {
           return toast(err.message);
         }
@@ -2912,9 +3023,10 @@ function openRecoverSheet() {
             if (!confirm('用这份快照覆盖现在的记录？（当前内容会先导出保存）')) return;
             exportData();
             state = migrated.data;
-            save();
+            const stored = save();
             closeSheet();
             render();
+            if (!stored) return undefined;
             return toast('已从快照恢复。');
           }
           if (how === 'reload') {
@@ -2922,9 +3034,10 @@ function openRecoverSheet() {
             if (!res.ok) return toast(res.error);
             if (!res.data) return toast('这台手机上确实没有记录。');
             state = res.data;
-            save();
+            const stored = save();
             closeSheet();
             render();
+            if (!stored) return undefined;
             return toast('读到了，记录已经回来。');
           }
           if (how === 'import') { closeSheet(); return importData(); }
@@ -2942,6 +3055,33 @@ function openRecoverSheet() {
  * 想干净地走一遍新手引导，就必须能清。
  * 但它会删掉真实记录，所以**要求输入「清除」两个字**，而不是点一下 confirm 就没了。
  */
+/**
+ * 清掉本应用在这台设备上的数据（v51）。
+ *
+ * 以前只删主存档和快照，但文案写着「全部记录、设置」——
+ * AI 密钥、读不出来的原始存档、旧版键都还留在浏览器里。
+ * 现在按前缀扫一遍，两个粒度：
+ *   · keepAi=true  → 只清记录，密钥留着（换手机前重置记录用得上）；
+ *   · keepAi=false → 连密钥一起清（转手设备/不想留任何东西）。
+ */
+function clearAppStorage({ keepAi = false } = {}) {
+  const keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('fatloss')) keys.push(key);
+    }
+    for (const key of keys) {
+      if (keepAi && key === AI_CONFIG_KEY) continue;
+      localStorage.removeItem(key);
+    }
+    return true;
+  } catch (err) {
+    console.error('清除本机数据失败：', err);
+    return false;
+  }
+}
+
 function openWipeSheet() {
   const found = inspectStorage();
   const totalDays = found.reduce((a, f) => a + f.days, 0);
@@ -2950,7 +3090,8 @@ function openWipeSheet() {
     body: `
       <div class="warn">
         这会删掉这台手机上的<b>全部记录</b>：${totalDays ? `${totalDays} 天的饮食和运动、` : ''}体重、徽章、设置，
-        还有升级前自动留的那份快照（「找回记录」里会一起没有）。
+        还有升级前自动留的那份快照、读不出来的原始存档（「找回记录」里会一起没有）。
+        <br>「彻底清除」还会删掉 <b>AI 密钥</b> —— 转手设备、不想留任何东西时选这个。
         <br>删掉之后不能撤销。
       </div>
       <div class="set-note">
@@ -2962,29 +3103,35 @@ function openWipeSheet() {
       <label class="field"><span>确认的话，输入「清除」两个字</span>
         <input type="text" id="wipeConfirm" placeholder="清除" autocomplete="off">
       </label>`,
-    foot: '<button class="btn ghost block" id="wipeGo" disabled>清除全部记录，从头开始</button>',
+    foot: `
+      <button class="btn ghost block" id="wipeKeepAi" disabled>只清记录，保留 AI 设置</button>
+      <button class="btn block" id="wipeGo" disabled style="margin-top:8px">彻底清除记录与 AI 密钥</button>`,
     onMount: (body, foot) => {
       const input = $('#wipeConfirm', body);
       const go = $('#wipeGo', foot);
+      const keepAi = $('#wipeKeepAi', foot);
       body.querySelector('[data-wipe="export"]').addEventListener('click', exportData);
-      input.addEventListener('input', () => { go.disabled = input.value.trim() !== '清除'; });
-      go.addEventListener('click', () => {
+      const sync = () => {
+        const ok = input.value.trim() === '清除';
+        go.disabled = !ok;
+        keepAi.disabled = !ok;
+      };
+      input.addEventListener('input', sync);
+
+      const finish = (preserveAi) => {
         if (input.value.trim() !== '清除') return;
-        try {
-          localStorage.removeItem(STORAGE_KEY);
-          clearBackup(localStorage);
-        } catch (err) {
-          return toast(`没能清掉：${err.message}`);
-        }
+        if (!clearAppStorage({ keepAi: preserveAi })) return toast('没能完全清掉，可以再试一次。');
+        if (!preserveAi) ai = { configured: false, checked: false, reason: null };
         state = emptyState();
         save();
         closeSheet();
         // 清完直接进新手引导 —— 用户的目的就是「从头开始」
         render();
-        toast('已经清空，我们从头来一遍。');
+        toast(preserveAi ? '记录已经清空，AI 设置留着。' : '已经清空，包括 AI 密钥。');
         setTimeout(() => onboard({ step: 'intro' }), 400);
-        return undefined;
-      });
+      };
+      go.addEventListener('click', () => finish(false));
+      keepAi.addEventListener('click', () => finish(true));
     },
   });
 }
@@ -3191,10 +3338,10 @@ function openBackupSheet() {
         if (!migrated.ok) return toast(migrated.error);
         exportData();
         state = migrated.data;
-        save();
+        const stored = save();
         closeSheet();
         render();
-        toast('已回滚到快照。');
+        if (stored) toast('已回滚到快照。');
       });
       $('#doForget', body)?.addEventListener('click', () => {
         if (!confirm('删除这份快照？删掉就不能回滚了。')) return;
@@ -4116,7 +4263,8 @@ function openProfileSheet({ firstTime = false, onSaved = null } = {}) {
           if (!hasProfile && !state.settings?.lastSeenVersion) {
             state.settings = { ...(state.settings || {}), lastSeenVersion: APP_VERSION };
           }
-          save();
+          const stored = save();
+          if (!stored) return;   // 存不进去就留在弹层里，输入还在
           closeSheet();
           view = 'today';
           document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.view === 'today'));
@@ -4136,20 +4284,15 @@ function openProfileSheet({ firstTime = false, onSaved = null } = {}) {
 
 function openWeightSheet() {
   openSheet({
-    title: '记体重',
+    // 翻到历史日期时标题直接写清记到哪一天，别让人以为是「今天」
+    title: dateKey === todayKey() ? '记体重' : `记体重 · ${dayLabel(dateKey)}`,
     body: `<label class="field"><span>体重（kg）</span><input type="number" id="wInput" step="0.1" inputmode="decimal" placeholder="57.8"></label>
            <p class="tiny muted">建议早上空腹、穿同样衣服称。</p>`,
     foot: '<button class="btn block" id="wSave">保存</button>',
     onMount: (body, foot) => {
       $('#wSave', foot).addEventListener('click', () => {
-        const v = Number($('#wInput', body).value);
-        if (!(v > 20 && v < 300)) return toast('体重请填 20~300 之间的数字。');
-        addWeight(state, todayKey(), v);
-        if (state.profile) state.profile.weightKg = v;
-        save();
+        if (!recordWeight($('#wInput', body).value)) return;
         closeSheet();
-        render();
-        checkNewAchievements();
       });
     },
   });
@@ -4229,10 +4372,12 @@ function importData() {
         // 覆盖前先留底：导入是唯一一个「用旧文件换掉现状」的入口，不留底就是不可恢复
         if (hadData) saveBackup(localStorage, state, '导入之前的自动快照');
         state = migrated.data;
-        save();
+        const stored = save();
+        render();
+        // 存不进去时不许说「导入完成」：数据只在内存里，关掉页面就回到导入前
+        if (!stored) return;
         // 备份文件里带来的「读不出来的记录」原文放回本机（本机已有一份时不覆盖）
         const restored = restoreUnreadable(localStorage, keptInFile);
-        render();
         const base = hadData ? '导入完成。之前的记录留了快照，可以在「数据与备份」里回滚。' : '导入完成。';
         toast(base + importUnreadableNote(restored));
       } catch (err) {
