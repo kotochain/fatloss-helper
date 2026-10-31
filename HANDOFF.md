@@ -1259,6 +1259,15 @@ THIRD_PARTY_NOTICES.md 第三方素材许可（徽章字形来自 Phosphor Icons
     同一次还踩了第 14 条的重演：这个新测试读根目录 `update.html`，而 `mutate-check` 的沙箱只拷 `index.html`
     → 每条变异都因为这条测试失败被判「抓到」，4 条等价变异也被误判；修法是沙箱把根目录 html 全拷。
     **教训：任何新测试只要读文件，就要同步反向验证脚本的沙箱清单，并跑一次 `mutate-check` 确认基线不对齐。**
+23. **自检往用户的「下载」文件夹里扔垃圾**（2026-10-31 用户在自己文件夹里看到那批 json）：
+    「导出备份」的检查会触发真下载。原来靠 CDP 的 `setDownloadBehavior` 指定下载目录 ——
+    但它只在**浏览器级** target 上可靠，而这些脚本连的是**页面级** target，命令可能被静默忽略，
+    Chrome 就用了系统默认下载目录，于是 `减脂记录-2026-10-30.json` 一个接一个掉进 `~/Downloads`
+    （用户看到的是 `(1)` `(2)` 好几个副本）。现在：`chrome-launch.mjs#writeDownloadPrefs` 在启动前
+    把下载目录写进 profile 的 `Preferences`，浏览器一启动就生效，不依赖 CDP；`live-audit` 自己 spawn
+    Chrome 的地方也补了同一句；`sweep` 传 `downloadDir`。`tests/downloads.test.mjs` 守着「下载目录不能是
+    `~/Downloads`」。**教训：测试产物一律落在项目里（`.audit/`），绝不能落到用户自己的文件夹。**
+    发现时留下的一批已移到废纸篓。
 
 ## 十一、安全与隐私底线（不可协商）
 - 绝不把真实密钥写进仓库、测试里也不行；假密钥必须**同一行**写 `// secret-scan:allow`。

@@ -21,12 +21,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { armWatchdog } from './watchdog.mjs';
 import { findChrome } from './chrome-path.mjs';
-import { portAlive, freePort } from './chrome-launch.mjs';
+import { portAlive, freePort, writeDownloadPrefs } from './chrome-launch.mjs';
 import { appVersion } from './app-version.mjs';
 
 const BASE = (process.argv[2] || 'https://kotochain.github.io/fatloss-helper').replace(/\/$/, '');
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, '.audit', 'live');
+/** 点了「导出备份」的文件要落在这里 —— 绝不能掉进用户自己的「下载」文件夹 */
+const dlDir = path.join(outDir, 'downloads');
 /** 每次都用全新的浏览器资料夹：审计要从「一个干净的新用户」开始，复用旧资料夹会带着用户的本地数据（出现过误报） */
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fatloss-live-profile-'));
 const CDP_PORT = 9420;
@@ -213,6 +215,10 @@ async function main() {
   await waitForLive();
   fs.mkdirSync(outDir, { recursive: true });
   await freePortAndWait(CDP_PORT);
+
+  // 下载目录写进 profile：光靠 CDP 的 setDownloadBehavior 在页面级连接上不保证生效，
+  // 一旦不生效文件就掉进 ~/Downloads（2026-10-31 用户在自己文件夹里看到了那批 json）
+  writeDownloadPrefs(profileDir, dlDir);
 
   const chrome = spawn(CHROME, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -536,10 +542,8 @@ async function main() {
     console.log(`   导出前：${beforeExport.有内容的天} 天有内容（存档里共 ${beforeExport.天数} 个日期）/ ${beforeExport.条数} 条 / 体重 ${beforeExport.体重记录} 条`);
     if (beforeExport.有内容的天 !== 1) fail(`示例数据应当只有 1 天有内容，实际 ${beforeExport.有内容的天} 天`);
     if (beforeExport.天数 > 2) fail(`只看了一眼页面，存档里就多出 ${beforeExport.天数} 个日期（空日子被写进存档）`);
-    fs.mkdirSync(path.join(outDir, 'downloads'), { recursive: true });
-    // 下载目录用浏览器级命令设置（Page.setDownloadBehavior 在新版 Chrome 已经不生效了，
-    // 表现是文件落到系统「下载」里，检查却报「没生成文件」——被这个假红骗过一次）
-    const dlDir = path.join(outDir, 'downloads');
+    fs.mkdirSync(dlDir, { recursive: true });
+    // CDP 这条只是双保险（页面级连接上不保证生效）；真正生效的是启动时写进 profile 的 Preferences
     try {
       await client.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: dlDir, eventsEnabled: true });
     } catch {

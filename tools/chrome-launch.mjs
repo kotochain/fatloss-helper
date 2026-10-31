@@ -9,9 +9,34 @@
 
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { findChrome } from './chrome-path.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 让无头 Chrome 的下载落进它自己的临时资料夹，而不是用户的「下载」文件夹。
+ *
+ * 为什么必须写在 profile 的 Preferences 里，而不是靠 CDP：
+ *   以前用 `Browser.setDownloadBehavior`，但它只在**浏览器级** target 上可靠；
+ *   这些脚本连的是**页面级** target，命令可能被静默忽略，然后 Chrome 老老实实把文件
+ *   存进 `~/Downloads` —— 用户会在自己的文件夹里看到一堆「减脂记录-2026-10-30.json」，
+ *   2026-10-31 就是被这批垃圾找上门的。写进 Preferences 是浏览器启动时就读的，不依赖 CDP。
+ *
+ * @returns {string} 这个 profile 的下载目录（调用方要找下载文件就找这里）
+ */
+export function writeDownloadPrefs(userDataDir, downloadDir = path.join(userDataDir, 'downloads')) {
+  const dir = path.resolve(downloadDir);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(userDataDir, 'Default'), { recursive: true });
+  const prefs = {
+    download: { default_directory: dir, prompt_for_download: false, directory_upgrade: true },
+    // 别让 Chrome 弹「要不要保存这个文件」之类的拦路框（无头环境下没人点）
+    profile: { default_content_setting_values: { automatic_downloads: 1 } },
+  };
+  fs.writeFileSync(path.join(userDataDir, 'Default', 'Preferences'), JSON.stringify(prefs));
+  return dir;
+}
 
 /** 端口上是不是有东西在响应（不管是谁） */
 async function portAlive(port) {
@@ -42,6 +67,7 @@ function freePort(port) {
 export async function launchChrome({
   port,
   userDataDir,
+  downloadDir = null,
   window = '390,844',
   timeoutMs = 40000,
   extraArgs = [],
@@ -59,6 +85,9 @@ export async function launchChrome({
   // 2) 上一次的 profile 目录如果是脏的，也清掉（Chrome 有时会因此拒绝启动）
   try { fs.rmSync(userDataDir, { recursive: true, force: true, maxRetries: 2 }); } catch { /* 清不掉就继续 */ }
   fs.mkdirSync(userDataDir, { recursive: true });
+
+  // 3) 下载目录钉在 profile 里：不这么做的话，点了「导出备份」的文件会掉进 ~/Downloads
+  const downloads = writeDownloadPrefs(userDataDir, downloadDir || path.join(userDataDir, 'downloads'));
 
   // 3) 启动
   const chrome = spawn(findChrome(), [
@@ -81,7 +110,7 @@ export async function launchChrome({
   while (Date.now() < deadline) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1500) });
-      if (res.ok) return { chrome, version: await res.json(), kill: killChrome };
+      if (res.ok) return { chrome, version: await res.json(), kill: killChrome, downloadDir: downloads };
     } catch (err) { lastErr = err.message; }
     await sleep(300);
   }

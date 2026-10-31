@@ -2108,7 +2108,7 @@ async function main() {
   logLine(`静态服务已就绪：${BASE}`);
 
   logLine('启动无头 Chrome…');
-  const launched = await launchChrome({ port: CDP_PORT, userDataDir: PROFILE_DIR, window: '390,844' });
+  const launched = await launchChrome({ port: CDP_PORT, userDataDir: PROFILE_DIR, downloadDir: DOWNLOAD_DIR, window: '390,844' });
   ctx.chrome = launched;
   ctx.chromeVersion = (launched.version && launched.version.Browser) || '未知';
   const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
