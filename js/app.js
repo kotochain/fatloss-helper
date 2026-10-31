@@ -6,7 +6,7 @@
 import {
   calcTargets, calcEntry, calcExerciseKcal, diffAgainstTargets, macroSplit,
   defaultTargetWeight, ACTIVITY_LEVELS, GOAL_PACE, LIMITS, round,
-  isProfileUsable, validateProfile, sumEntries, toPer100,
+  isProfileUsable, validateProfile, sumEntries, toPer100, remainingRing,
 } from './calc.js';
 import { FOODS, FOOD_CATEGORIES, findFood, parseAmount, kcalOnlyFood } from './foods.js';
 import { icon } from './icons.js';
@@ -309,6 +309,25 @@ function toast(msg, iconName = '') {
   }, 2800);
 }
 
+/**
+ * 目标里的「警告」其实有两类，不能混着摆（v50 预览）：
+ *  - 真的要提醒的（例如「蛋白质目标偏低」）→ 继续用醒目提示条；
+ *  - 免责说明（「基础代谢用的是身高体重公式，误差 ±10%」）→ 它不是警告，
+ *    是「这些数字怎么来的」，收进折叠，别占首屏。
+ */
+function warningsHtml(list = [], extraStyle = '') {
+  const items = Array.isArray(list) ? list : [];
+  const isFormula = (w) => /Mifflin|身高体重公式/.test(String(w));
+  const real = items.filter((w) => !isFormula(w));
+  const formula = items.filter(isFormula);
+  return `
+    ${real.map((w) => `<div class="warn"${extraStyle ? ` style="${extraStyle}"` : ''}>${esc(w)}</div>`).join('')}
+    ${formula.length ? `<details class="why"${extraStyle ? ` style="${extraStyle}"` : ''}>
+      <summary>这些数字怎么算的</summary>
+      <p>${formula.map((w) => esc(w)).join(' ')}</p>
+    </details>` : ''}`;
+}
+
 function weekdayLabel(key) {
   const [y, m, d] = key.split('-').map(Number);
   const w = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(y, m - 1, d).getDay()];
@@ -549,6 +568,13 @@ function handleAction(act, data) {
       save();
       render();
       return;
+    }
+    // 动作列表默认只露 6 个：13 个胶囊铺满两屏，选一个动作要滚半天（v50 预览）
+    case 'more-cardio': {
+      const box = $('#trainCardio');
+      if (box) box.classList.add('all');
+      app.querySelector('[data-act="more-cardio"]')?.remove();
+      break;
     }
     case 'del-food': {
       const day = getDay(state, dateKey);
@@ -875,9 +901,16 @@ function renderToday() {
 
   const R = 78;                       // 圆环半径
   const CIRC = 2 * Math.PI * R;
-  const ringPct = Math.max(0, Math.min(1, totals.kcal / budget));
+  /*
+   * 圆环画的是「还剩多少」，不是「已吃多少」（v50 预览）。
+   * 以前画的是已吃/目标：吃到 99% 环几乎闭合，中间大字却是「还剩 14」——
+   * 一个看着"吃够了"，一个说"快没了"，两套读法打架。
+   * 现在环和数字同一件事：还剩得多，环就长；快没了，环就短。
+   */
+  const settled = remaining < 0;      // 超了就把圆环走满（换色）
+  // 环画「还剩多少」，和中间那个数字同源（以前画的是「已吃/目标」，两套读法打架）
+  const { pct: ringPct, low } = remainingRing({ remaining, budget });
   const offset = CIRC * (1 - ringPct);
-  const settled = remaining < 0;      // 超了就把圆环走满
   const streak = currentStreak(state);
   const exerciseMin = day.exercises.reduce((a, x) => a + x.minutes, 0);
   const plant = { state: plantState(state), ach: achievements(state, t.proteinG) };
@@ -907,8 +940,8 @@ function renderToday() {
         <svg class="ring" viewBox="0 0 190 190" aria-hidden="true">
           <defs>
             <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="${settled ? '#F2A08A' : '#FF9E7A'}"/>
-              <stop offset="100%" stop-color="${settled ? '#E4572E' : '#E86A82'}"/>
+              <stop offset="0%" stop-color="${low ? '#FFB199' : '#FF9E7A'}"/>
+              <stop offset="100%" stop-color="${low ? '#E4572E' : '#E86A82'}"/>
             </linearGradient>
           </defs>
           <circle class="track" cx="95" cy="95" r="${R}"/>
@@ -922,7 +955,7 @@ function renderToday() {
           <span class="cap">${settled ? '已超出' : '今天还可以吃'}</span>
         </div>
       </div>
-      <div class="sub">已吃 <b>${Math.round(totals.kcal)}</b> / 目标约 ${budget} kcal</div>
+      <div class="sub">已吃 <b>${Math.round(totals.kcal)}</b> / 目标 ${budget} kcal</div>
       ${exerciseKcal >= 30 ? `<div class="bonus-pill"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>今天动了 ${exerciseMin} 分钟 · 约 ${Math.round(exerciseKcal)} kcal（估算，不用吃回来）</div>` : ''}
 
       <div class="macro-list">
@@ -940,14 +973,14 @@ function renderToday() {
       </div>
 
       <div class="stats">
-        ${streak >= 1 ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-fire"/></svg>连续记录 <b>${streak}</b> 天</span>` : ''}
-        ${exerciseMin ? `<span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-today"/></svg>今天运动 <b>${exerciseMin}</b> 分钟</span>` : ''}
-        <span class="stat"><svg viewBox="0 0 24 24" class="ic"><use href="#i-pin"/></svg>蛋白 <b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
+        ${streak >= 1 ? `<span class="stat"><em>连续记录</em><b>${streak} 天</b></span>` : ''}
+        ${exerciseMin ? `<span class="stat"><em>今天运动</em><b>${exerciseMin} 分钟</b></span>` : ''}
+        <span class="stat"><em>蛋白</em><b>${Math.round((totals.protein / t.proteinG) * 100)}%</b></span>
       </div>
     </div>
 
     ${myInsights(3).length || insightHint(state) ? `
-      <div class="card insight-card">
+      <div class="card flat insight-card">
         <div class="card-title">你的规律</div>
         ${myInsights(3).map((x) => `
           <div class="insight">
@@ -961,7 +994,7 @@ function renderToday() {
         ${myInsights(3).length ? `<button class="btn ghost block" style="margin-top:10px" data-act="insights">看全部规律</button>` : ''}
       </div>` : ''}
 
-    <div class="card coach-card">
+    <div class="card flat coach-card">
       <div class="card-title">接下来怎么吃</div>
       <p class="tiny muted" style="margin:0 0 10px">用你今天的记录算的，不猜、不编。</p>
       <button class="btn ghost block" data-act="coach">问教练</button>
@@ -992,7 +1025,7 @@ function renderToday() {
     <button class="btn block big-log" data-act="go-log">
       <span class="big-log-plus">＋</span> 记一笔
     </button>
-    ${t.warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join('')}
+    ${warningsHtml(t.warnings)}
 
     ${MEAL_SLOTS.map((slot) => {
       const list = day.meals[slot.key] || [];
@@ -1260,8 +1293,9 @@ function renderTrainingPane() {
 
       <div class="tiny muted" style="margin:12px 0 6px">练了什么？<span class="muted">（只列出现在勾的器械做得了的动作）</span></div>
       <div class="chips" id="trainCardio">
-        ${actions.cardio.map((e) => `<button class="chip ${trainingPick.cardioId === e.id ? 'on' : ''}" data-train-cardio="${e.id}">${esc(e.name)}</button>`).join('')
+        ${actions.cardio.map((e, i) => `<button class="chip ${trainingPick.cardioId === e.id ? 'on' : ''}${i >= 6 ? ' extra' : ''}" data-train-cardio="${e.id}">${esc(e.name)}</button>`).join('')
           || '<span class="tiny muted">按现在勾的器械没有能做的动作。勾上「徒手/地面」—— 徒手循环和 HIIT 都不需要器械。</span>'}
+        ${actions.cardio.length > 6 ? `<button class="chip more" data-act="more-cardio">还有 ${actions.cardio.length - 6} 个动作</button>` : ''}
       </div>
 
       <div class="tiny muted" style="margin:12px 0 6px">力量训练<span class="muted">（不用器械也能做）</span></div>
@@ -1866,11 +1900,11 @@ function renderPlan() {
         <span>这份餐单合计约 <b>${Math.round(plan.planKcalWithOil / 10) * 10}</b> kcal、蛋白约 <b>${Math.round(plan.planProteinG)}</b> g</span>
         <span class="tag ${Math.abs(plan.deviation) <= 10 ? 'green' : 'amber'}">${plan.deviation > 0 ? '+' : ''}${Math.round(plan.deviation)}%</span>
       </div>
-      ${plan.cookingOilG > 0 ? `<div class="warn info" style="margin-bottom:8px">
-        这份餐单里的菜是按下面这个油量做的：全天<b>烹调油 ${plan.cookingOilG} 克</b>（约 ${plan.cookingOilKcal} kcal），
-        大约 ${plan.meals.filter((m) => m.oilG > 0).map((m) => `${m.name} ${m.oilG} 克`).join('、')}。
-        这个量已经算进上面的总数里了，不用另外再加。
-      </div>` : ''}
+      ${plan.cookingOilG > 0 ? `<details class="why" style="margin-bottom:10px">
+        <summary>烹调油也算进去了（全天 ${plan.cookingOilG} 克，约 ${plan.cookingOilKcal} kcal）</summary>
+        <p>这份餐单里的菜按这个油量做的：${plan.meals.filter((m) => m.oilG > 0).map((m) => `${m.name} ${m.oilG} 克`).join('、')}。
+        已经算进上面的总数，不用另外再加。</p>
+      </details>` : ''}
       <p class="tiny muted" style="margin:0 0 10px">${esc(plan.deviationNote)}</p>
       ${plan.meals.map((m) => `
         <div class="session">
@@ -2150,7 +2184,7 @@ function renderProgress() {
 
         蛋白质约 ${Math.round(t.proteinG)} g · 脂肪约 ${Math.round(t.fatG)} g · 碳水约 ${Math.round(t.carbG)} g。
       </div>
-      ${t.warnings.map((w) => `<div class="warn" style="margin-top:10px">${esc(w)}</div>`).join('')}
+      ${warningsHtml(t.warnings, 'margin-top:10px')}
     </div>` : ''}
 
     <div class="card">
@@ -2238,7 +2272,10 @@ function openFoodSheet(mealKey, initialSay = '') {
 
       <div id="paneSearch">
         <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off" style="margin-top:10px">
-        <p class="tiny muted" style="margin:6px 0 0">肉和鱼默认按「熟重」算；如果你称的是生重，选名字里带「生」的那条。</p>
+        <details class="why" style="margin:4px 0 0">
+          <summary>称的是生重还是熟重？</summary>
+          <p>肉和鱼默认按「熟重」算；如果你称的是生重，选名字里带「生」的那条。</p>
+        </details>
         <div id="foodResults" style="margin-top:6px"></div>
         <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">${icon('clipboard', { size: 16 })} 照包装营养成分表填（更准）</button>
       </div>
@@ -3004,17 +3041,25 @@ function coachBriefNow() {
 
 function coachBody() {
   const v = coachView;
-  const main = v.aiText ? { headline: '教练说的', lines: [v.aiText] } : v.local;
+  const main = v.aiText ? { headline: '教练说的', lines: [v.aiText], notes: [] } : v.local;
+  // 第一句是结论，给足字号；后面是理由和建议，正常段落
+  const [lead, ...rest] = main.lines;
+  const notes = (main.notes || []).slice();
   return `
     <div class="coach-main">
       ${main.headline ? `<p class="coach-headline">${esc(main.headline)}</p>` : ''}
-      ${main.lines.map((line) => `<p>${esc(line)}</p>`).join('')}
+      ${lead ? `<p class="coach-lead">${esc(lead)}</p>` : ''}
+      ${rest.map((line) => `<p>${esc(line)}</p>`).join('')}
     </div>
     ${v.loading ? '<p class="tiny muted coach-note">正在问 AI……（会给服务商发一次请求）</p>' : ''}
     ${v.note ? `<p class="tiny muted coach-note">${esc(v.note)}</p>` : ''}
-    <p class="tiny muted coach-note">${v.aiText
+    <details class="why">
+      <summary>这些数字怎么来的</summary>
+      <p>${v.aiText
     ? '这段话是 AI 组织的，数字还是本地算的（发出来之前已核对过）。'
-    : '数字来自你今天的记录，计算在手机本地完成。'}</p>`;
+    : '数字来自你今天的记录，计算在手机本地完成。'}</p>
+      ${notes.map((x) => `<p>${esc(x)}</p>`).join('')}
+    </details>`;
 }
 
 function coachFoot() {
@@ -3104,10 +3149,10 @@ function openBackupSheet() {
         当前存档：<b>v${SCHEMA_VERSION}</b> · ${days} 天的记录 · 约 ${size} KB<br>
         位置：这台手机的浏览器存储（不上传任何服务器）
       </div>
-      <div class="set-note">
-        <b>为什么要有备份</b><br>
-        换手机、清浏览器缓存、卸载重装都会把本地记录清掉。导出一份存到微信收藏或网盘里最稳妥。
-      </div>
+      <details class="why">
+        <summary>为什么要备份</summary>
+        <p>换手机、清浏览器缓存、卸载重装都会把本地记录清掉。导出一份存到微信收藏或网盘里最稳妥。</p>
+      </details>
       ${readUnreadable(localStorage) ? `
         <div class="warn info" style="margin-top:10px">
           这台设备上还留着一份「读不出来的记录」的原文，导出备份时会一起带上，换设备也不会丢。

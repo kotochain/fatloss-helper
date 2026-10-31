@@ -11,6 +11,7 @@ import {
   calcBMR, calcTDEE, calcBMI, classifyBMI, calcTargets, calcEntry,
   calcExerciseKcal, diffAgainstTargets, macroSplit, KCAL_PER_KG_FAT, round,
   LIMITS, PROFILE_ACCEPT_LEGACY, isProfileUsable, validateProfile,
+  remainingRing,
 } from '../js/calc.js';
 
 const nearly = (a, b, tol = 0.5) => assert.ok(Math.abs(a - b) <= tol, `期望 ${b}，实际 ${a}`);
@@ -310,4 +311,30 @@ test('老存档能不能算：用更宽的范围，不把老数据判成「没�
   assert.equal(isProfileUsable(null), false);
   // 两套范围是**有意**不同，不是分叉：第 17 条测试（body）已确认表单更严。
   assert.ok(PROFILE_ACCEPT_LEGACY.ageYears[0] < LIMITS.ageYears[0], '宽范围必须比表单范围宽，否则老资料会被判成没填');
+});
+
+test('今天页圆环画的是「还剩多少」，和中间那个数字同源（v50）', () => {
+  // 剩 14 / 目标 1479：环几乎空。以前画「已吃/目标」会是 99% 满 —— 和「还剩 14」正好相反
+  const almost = remainingRing({ remaining: 14, budget: 1479 });
+  assert.ok(almost.pct < 0.02, `剩 14 时环几乎该是空的，实际 ${almost.pct}`);
+  assert.equal(almost.low, true);
+  assert.equal(almost.over, false);
+
+  // 一口没吃：满环 + 中间就是目标数
+  assert.deepEqual(remainingRing({ remaining: 1479, budget: 1479 }), { pct: 1, low: false, over: false });
+
+  // 吃超了：环走满（不是负的），并标明已超
+  assert.deepEqual(remainingRing({ remaining: -222, budget: 1479 }), { pct: 1, low: false, over: true });
+
+  // 目标坏掉（0 / 负数 / 未定义）不能画出 NaN，也不能报错
+  for (const budget of [0, -1, undefined, null]) {
+    const r = remainingRing({ remaining: 100, budget });
+    assert.equal(r.pct, 0);
+    assert.equal(Number.isNaN(r.pct), false);
+  }
+
+  // 边界：剩不到两成才换告警色（19.9% 换，正好 20% 不换）
+  assert.equal(remainingRing({ remaining: 295, budget: 1479 }).low, true);
+  assert.equal(remainingRing({ remaining: 295.8, budget: 1479 }).pct, 0.2);
+  assert.equal(remainingRing({ remaining: 295.8, budget: 1479 }).low, false);
 });

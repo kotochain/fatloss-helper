@@ -188,9 +188,12 @@ export function localCoachAdvice(brief) {
     const p = brief.patterns[0];
     lines.push(`你自己记录里的规律：${p.title}${p.detail ? ` —— ${p.detail}` : ''}`);
   }
-  for (const note of brief.safetyNotes) lines.push(note);
-
-  return { headline: '按你今天的记录算的', lines };
+  /*
+   * 安全提醒（比如「基础代谢用的是公式，误差 ±10%」）单独放 notes：
+   * 它们不是建议，是免责说明 —— 混在正文里会把真正的建议淹掉（v50 预览）。
+   * lines 仍然保持原样，老调用方/测试不用改。
+   */
+  return { headline: '按你今天的记录算的', lines, notes: brief.safetyNotes.slice(0, 2) };
 }
 
 /**

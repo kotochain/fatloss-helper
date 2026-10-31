@@ -186,6 +186,7 @@ body {
 }
 .topbar .date-label {
   flex: 1;
+  min-height: 40px;   /* 手指点得准（原来 34px，是排版自检里最常被点偏的一个） */
   min-width: 0;   /* 允许收缩，长日期会省略而不是把顶栏挤成两行 */
   display: flex;
   align-items: center;
@@ -221,7 +222,7 @@ body {
 .icon-btn:active { background: var(--rose-soft); color: var(--rose-deep); }
 .avatar {
   position: relative;
-  width: 32px; height: 32px;
+  width: 36px; height: 36px;
   border-radius: 50%;
   border: 0;
   background: var(--grad);
@@ -233,7 +234,7 @@ body {
   box-shadow: 0 2px 6px rgba(232, 106, 130, 0.35);
 }
 /* 头像看起来还是 32px，但手指点到周围 4px 也算——手机上实际更好点 */
-.avatar::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; }
+.avatar::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; } /* 热区 48px */
 
 /* 新版本提示条 */
 .update-toast {
@@ -369,6 +370,26 @@ main { padding: 12px; }
   .card { animation: none; }
   * { transition: none !important; }
 }
+/* 次级区块：去掉卡片外壳（v50 预览）
+ * 一屏里 4~5 个白卡长得一模一样，眼睛就没有落点了。
+ * 现在只有「主数据卡 / 有列表的卡」保留外壳，说明型区块变轻。 */
+.card.flat {
+  background: transparent;
+  box-shadow: none;
+  padding: 2px 2px 12px;
+  margin-bottom: 4px;
+}
+.card.flat .card-title { margin-bottom: 6px; }
+.card.flat .card-title::before { background: #E7D3D6; }
+.card.flat .btn.ghost { background: #fff; }
+
+/* 主数据卡：整屏唯一一块有渐变和高光的（v50 预览） */
+.card.hero {
+  background: linear-gradient(180deg, #FFFDFC 0%, #FFF6F4 100%);
+  border-radius: 26px;
+  box-shadow: 0 10px 30px rgba(200, 120, 140, .10), 0 2px 6px rgba(200, 120, 140, .05);
+}
+
 .card-title {
   position: relative;
   font-size: 14.5px;
@@ -393,9 +414,40 @@ main { padding: 12px; }
   border-radius: 3px;
   background: var(--grad);
 }
+/* ── 说明性长文一律收进「为什么」折叠（v50 预览）─────────
+   这些内容对少数人有用，但摆在主流程上会把真正的操作挤走：
+   教练一次 6 段、备份 3 段、AI 设置 4 段 —— 首屏全在看解释。 */
+details.why { margin-top: 10px; }
+details.why summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  min-height: 28px;
+}
+details.why summary::-webkit-details-marker { display: none; }
+details.why summary::after {
+  content: '›';
+  display: inline-block;
+  transform: rotate(90deg);
+  transition: transform .18s ease;
+  font-size: 14px;
+  line-height: 1;
+}
+details.why[open] summary::after { transform: rotate(-90deg); }
+details.why > *:not(summary) {
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--ink-3);
+  margin: 6px 0 0;
+}
+
 .muted { color: var(--ink-3); }
-.small { font-size: 12px; line-height: 1.6; }
-.tiny { font-size: 11px; line-height: 1.6; }
+.small { font-size: 12.5px; line-height: 1.65; }
+.tiny { font-size: 11.5px; line-height: 1.65; }
 .right { text-align: right; }
 .row { display: flex; align-items: center; gap: 8px; }
 .row.between { justify-content: space-between; }
@@ -404,9 +456,9 @@ main { padding: 12px; }
 .nowrap { white-space: nowrap; }
 hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 
-/* ── 大数字区：圆环进度 ───────────────────── */
+/* 大数字区：圆环进度 ───────────────────── */
 /* 顶部留出空间：提示条从顶部滑下时会盖住第一行，别让最重要的问候被挡 */
-.hero { text-align: center; padding-top: 8px; }
+.hero { text-align: center; padding: 16px 16px 18px; }
 .ring-wrap { position: relative; width: 190px; height: 190px; margin: 2px auto 6px; }
 .ring { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring .track { fill: none; stroke: #F6ECEE; stroke-width: 13; }
@@ -437,8 +489,8 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .ring-center .unit { font-size: 12.5px; color: var(--ink-3); font-weight: 500; }
 .ring-center .cap { font-size: 11.5px; color: var(--ink-3); }
 
-.hero .sub { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
-.hero .sub b { color: var(--ink); }
+.hero .sub { color: var(--ink-3); font-size: 11.5px; margin-top: 4px; letter-spacing: 0.01em; }
+.hero .sub b { color: var(--ink-2); font-weight: 650; }
 
 /* 运动奖励的小标 */
 .bonus-pill {
@@ -493,19 +545,37 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .macro-row.over .mval b { color: var(--red); }
 .macro-row.over .mbar > i { background: linear-gradient(90deg, #F2A08A, #E4572E); }
 
-/* 顶部小统计 */
-.stats { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
-.stat {
-  background: var(--card);
-  border-radius: 99px;
-  padding: 5px 12px;
-  font-size: 11.5px;
-  color: var(--ink-2);
-  box-shadow: var(--shadow);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+/* 顶部小统计：三等分一行（v50 预览）
+ * 以前是 flex 自动换行：两个一行、第三个孤零零居中，看着像漏了一颗。
+ * 现在固定三列、等宽、同底色，三件事一眼并排看完。 */
+.stats {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
 }
+.stat {
+  background: #FFF4F1;
+  border-radius: 12px;
+  padding: 8px 4px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  min-height: 44px; /* 手指点得准（v50 预览：排版自检里这类偏小有 168 处） */
+  /* 三等分，但最多只占三分之一：只有一两项时居中排，不会被拉成一整条
+     （空白的一天只剩「蛋白 0%」一项，之前被拉满整行，像坏掉了） */
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: calc(100% / 3 - 6px);
+}
+.stat em {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+.stat b { font-size: 13px; font-weight: 680; color: var(--ink); white-space: nowrap; }
 .stat b { color: var(--ink); font-weight: 680; }
 .stat .ic { width: 13px; height: 13px; stroke-width: 2; color: var(--rose); }
 
@@ -566,6 +636,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 }
 .add-line {
   width: 100%;
+  min-height: 40px;
   border: 1.5px dashed #F2D8DE;
   background: #FFFCFC;
   color: var(--rose-deep);
@@ -629,12 +700,20 @@ input:focus, select:focus, textarea:focus {
 }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 动作胶囊默认只露 6 个，其余点「还有 N 个动作」再展开（v50 预览：
+   13 个胶囊铺满两屏，选一个动作要滚半天） */
+#trainCardio:not(.all) .chip.extra { display: none; }
+.chip.more { color: var(--rose-deep); border-style: dashed; border-color: #F2D8DE; background: #FFFCFC; }
+/* 动作胶囊默认只露 6 个，其余点「还有 N 个动作」再展开（v50 预览：
+   13 个胶囊铺满两屏，选一个动作要滚半天） */
+#trainCardio:not(.all) .chip.extra { display: none; }
+.chip.more { color: var(--rose-deep); border-style: dashed; border-color: #F2D8DE; background: #FFFCFC; }
 .chip {
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 99px;
   /* 选项按钮是最常点的东西之一，给到 36px 高（原来是 34px，拇指容易点偏） */
-  min-height: 36px;
+  min-height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -847,6 +926,17 @@ details[open] summary { margin-bottom: 4px; }
   margin-bottom: 6px;
 }
 .coach-note { margin: 10px 0 0; }
+/* 教练正文：第一句是结论，给到 15px；其余段落正常，行距拉开（v50 预览） */
+.coach-main p { font-size: 13.5px; line-height: 1.75; color: var(--ink-2); margin: 0 0 12px; }
+.coach-main p.coach-lead {
+  font-size: 15.5px;
+  line-height: 1.65;
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin-bottom: 10px;
+}
+.coach-main p:last-child { margin-bottom: 0; }
 
 /* 模式切换（普通 / AI） */
 /* 模式胶囊：一眼看出现在用的是哪种模式，点一下就能换（不用进设置） */

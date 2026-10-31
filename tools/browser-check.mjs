@@ -134,6 +134,36 @@ function connect(wsUrl) {
 
 let ERROR_BUCKET = [];
 
+/**
+ * 读今天页的圆环几何 + 中间那个数字，用来验证「环画的是还剩多少」。
+ * 以前环画「已吃/目标」：吃满了环几乎闭合，中间大字却说「还剩 14」——
+ * 两者各说一套，用户得在脑子里换算（v50 改掉，这函数守着别再改回去）。
+ */
+async function ringOf(client) {
+  return evaluate(client, `(() => {
+    const bar = document.querySelector('.ring .bar');
+    if (!bar) return { 有圆环: false };
+    const total = parseFloat(bar.getAttribute('stroke-dasharray'));
+    const offset = parseFloat(bar.getAttribute('stroke-dashoffset')) || 0;
+    const cap = document.querySelector('.ring-center .cap')?.textContent || '';
+    const sub = document.querySelector('.hero .sub')?.textContent || '';
+    // 不用正则的反斜杠：这段话要先穿过模板字符串这一层，\\s 会被吃成 s
+    const nums = sub.split(/[^0-9]+/).filter(Boolean).map(Number);
+    const ate = nums.length >= 2 ? nums[0] : null;
+    const budget = nums.length >= 2 ? nums[1] : null;
+    const over = cap.includes('已超出');
+    return {
+      有圆环: true,
+      环比例: total > 0 ? Number((1 - offset / total).toFixed(3)) : null,
+      中间数字: Number((document.querySelector('.ring-center .big')?.textContent || '').trim()),
+      说明: cap,
+      已吃: ate,
+      目标: budget,
+      应为: over ? 1 : (ate == null || !budget ? null : Number(Math.max(0, Math.min(1, (budget - ate) / budget)).toFixed(3))),
+    };
+  })()`);
+}
+
 async function evaluate(client, expression) {
   const r = await client.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
@@ -247,6 +277,8 @@ async function main() {
     await evaluate(client, `document.querySelector('[data-act="demo"]').click()`);
     await sleep(500);
     entry.steps.push({ at: '示例数据·今天页', ...(await evaluate(client, DIAGNOSTIC)) });
+    // v50：先记一次圆环（示例数据刚好把目标吃满 → 应该是「空环 + 还剩 0」）
+    const ringStart = await ringOf(client);
     await screenshot(client, path.join(outDir, `shot-${size.name}-2-today.png`));
 
     // 第三步：打开「加食物」弹层并搜索
@@ -291,6 +323,9 @@ async function main() {
         弹层已关闭: document.querySelector('#sheetRoot').classList.contains('hidden'),
       };
     })()`);
+
+    // v50：加完一条之后再看一眼圆环（必须和中间数字同源）
+    const ringAfter = await ringOf(client);
 
     // 第四步半（v31）：AI 认出来了、但本地库里没有的菜 —— 必须按同类均值先记上，
     // 标明「按同类估算」、能删；不能再出现「一条都记不上」的死胡同。
@@ -715,7 +750,7 @@ async function main() {
       await sleep(900);
     }
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest, midnight };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest, midnight, ringStart, ringAfter };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -784,6 +819,14 @@ function printReport(report) {
     if (r.midnight) {
       console.log(`  跨 0 点：${r.midnight.换天前} → ${r.midnight.换天后}（应用认为今天是 ${r.midnight.今天按应用算}）｜提示「${r.midnight.提示}」`);
     }
+    // v50：圆环画的比例必须等于「还剩 / 目标」，和中间那个数字同源
+    const ringOk = (x) => x?.有圆环 && x.应为 != null && Math.abs(x.环比例 - x.应为) <= 0.03;
+    const ringBad = !ringOk(r.ringStart) || !ringOk(r.ringAfter);
+    const fmtRing = (x) => x?.有圆环
+      ? `画到 ${(x.环比例 * 100).toFixed(0)}% / 应 ${x.应为 == null ? '?' : `${(x.应为 * 100).toFixed(0)}%`}（中间「${x.中间数字} ${x.说明}」，已吃 ${x.已吃}/${x.目标}）`
+      : '没找到圆环';
+    console.log(`  圆环·示例数据：${fmtRing(r.ringStart)}`);
+    console.log(`  圆环·加完一条：${fmtRing(r.ringAfter)}`);
     // 图标这轮（v27）新增三条：徽章要有名字、徽章和设置图标要真的放大到看得清
     const uiIconBad = r.iconAudit.emoji行.length > 0 || r.iconAudit.兜底方块.length > 0 || r.iconAudit.缺尺寸 > 0
       || r.growth.植物 !== 1 || r.growth.兜底 > 0 || r.growth.空标签 > 0
@@ -815,7 +858,7 @@ function printReport(report) {
       || !r.refresh.横幅.有横幅 || !r.refresh.横幅.文字.includes(r.refresh.假版本);
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
-      || uiIconBad || midnightBad) problems += 1;
+      || uiIconBad || midnightBad || ringBad) problems += 1;
   }
   console.log(`\n${problems === 0 ? '✅ 浏览器自检全部通过' : `❌ 浏览器自检有 ${problems} 处问题`}`);
   console.log(`截图与报告在 ${outDir}`);

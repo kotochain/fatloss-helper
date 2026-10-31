@@ -13,9 +13,9 @@
  * 改动文件后把 CACHE 的版本号加一。
  */
 
-const CACHE = 'fatloss-v49';
+const CACHE = 'fatloss-v50';
 // 版本号同时给页面用（排查「用户手机上到底是哪一版」时，一眼就能看到）
-const APP_VERSION = 'v49';
+const APP_VERSION = 'v50';
 const ASSETS = [
   './',
   './index.html',

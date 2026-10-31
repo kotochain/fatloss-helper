@@ -449,3 +449,21 @@ export function macroSplit(totals) {
     totalKcal: round(total),
   };
 }
+
+/**
+ * 今天页那个圆环画多满 —— 画的是「还剩多少」，和中间那个数字是同一件事。
+ *
+ * 为什么值得单独一个函数：以前环画「已吃 / 目标」，吃满时环几乎闭合，
+ * 中间大字却说「还剩 14」：一个看着吃够了，一个说快没了，用户得在脑子里换算，
+ * 而且很容易反过来理解（v50 改掉）。现在两条口径合并成这一处，有测试守着。
+ *
+ * @param {{remaining:number, budget:number}} input 剩余 kcal 与今日目标
+ * @returns {{pct:number, low:boolean, over:boolean}}
+ *   pct：环该画的比例（1 = 满环）；low：剩不到两成，该换告警色；over：已经吃超
+ */
+export function remainingRing({ remaining, budget }) {
+  const over = remaining < 0;
+  if (!(budget > 0)) return { pct: 0, low: false, over };
+  const pct = Math.max(0, Math.min(1, remaining / budget));
+  return { pct: over ? 1 : pct, low: !over && pct < 0.2, over };
+}
