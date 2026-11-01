@@ -6,7 +6,7 @@
 <!-- 状态栏/浏览器工具栏用界面的奶油底色，跟顶部栏无缝衔接。
      这里以前是绿色 #16a34a（第一版配色），界面换成温暖米粉后忘了改，
      手机上就是「绿色状态栏 + 粉色界面」，很割裂。 -->
-<meta name="theme-color" content="#FFF9F7">
+<meta name="theme-color" content="#F6F3EE">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -36,12 +36,12 @@
   │ 由 tests/version.test.mjs 守着（改版本号漏改这里就红）。            │
   └───────────────────────────────────────────────────────────────────┘
 -->
-<div id="verBar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#E86A82;color:#fff;font:14px/1.5 -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;padding:10px 14px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;-webkit-tap-highlight-color:transparent">
+<div id="verBar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#B7485D;color:#fff;font:14px/1.5 -apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;padding:10px 14px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;-webkit-tap-highlight-color:transparent">
   <span id="verBarText"></span>
 </div>
 <script>
 (function () {
-  var HERE = 'v52';
+  var HERE = 'v53';
   var bar = document.getElementById('verBar');
   var txt = document.getElementById('verBarText');
   if (!bar || !txt) return;

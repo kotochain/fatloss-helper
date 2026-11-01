@@ -847,7 +847,7 @@ function renderWelcome() {
    */
   const trouble = startupNotice?.kind === 'error'
     ? `
-    <div class="card" style="border:1px solid #F3C7CF;background:#FFF6F7">
+    <div class="card warn danger">
       <div class="card-title">${icon('alert', { size: 16 })} 有一份记录没读出来</div>
       <p class="small" style="margin:0 0 8px">${esc(startupNotice.text)}</p>
       <p class="tiny muted" style="margin:0 0 12px">
@@ -1015,8 +1015,8 @@ function renderToday() {
         <svg class="ring" viewBox="0 0 190 190" aria-hidden="true">
           <defs>
             <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="${low ? '#FFB199' : '#FF9E7A'}"/>
-              <stop offset="100%" stop-color="${low ? '#E4572E' : '#E86A82'}"/>
+              <stop offset="0%" stop-color="${low ? '#D98B5F' : '#6FA973'}"/>
+              <stop offset="100%" stop-color="${low ? '#C0553F' : '#427A47'}"/>
             </linearGradient>
           </defs>
           <circle class="track" cx="95" cy="95" r="${R}"/>
@@ -3697,7 +3697,7 @@ function openGrowthSheet() {
       <button class="btn block" id="openRecap" style="margin-top:12px">看最近 30 天的回顾</button>
 
       ${showWeekly ? `
-        <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFCFC;border:1px solid var(--line)">
+        <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFFFF;border:1px solid var(--line)">
           <div class="card-title">这周的小结</div>
           <div class="hl">${icon(hl.icon, { size: 16 })} <b>${esc(hl.text)}</b></div>
           ${review.lines.map((l) => `<div class="small muted" style="margin:4px 0">· ${esc(l)}</div>`).join('')}
@@ -3706,7 +3706,7 @@ function openGrowthSheet() {
           </div>
         </div>` : ''}
 
-      <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFCFC;border:1px solid var(--line)">
+      <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFFFF;border:1px solid var(--line)">
         <div class="card-title">徽章墙 <span class="tiny muted">${a.unlocked.length} / ${a.list.length}</span></div>
         <div class="badge-grid">
           ${a.list.map((x) => `

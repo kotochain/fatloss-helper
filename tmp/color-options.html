@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>主色备选 · 减脂小助手</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #EFEAE6; color: #1C1C1E;
+  padding: 32px 20px 80px; line-height: 1.6;
+}
+.wrap { max-width: 1080px; margin: 0 auto; }
+h1 { font-size: 26px; margin-bottom: 6px; }
+.sub { color: #56565C; font-size: 14px; margin-bottom: 28px; }
+h2 { font-size: 18px; margin-bottom: 4px; padding-left: 12px; border-left: 4px solid #1C1C1E; }
+.note { font-size: 13px; color: #56565C; margin-bottom: 16px; padding-left: 16px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+
+.scheme { background: #fff; border-radius: 18px; overflow: hidden; border: 1px solid #F0E9EA; }
+.scheme > header { padding: 12px 16px; display:flex; justify-content:space-between; align-items:center; }
+.scheme > header b { font-size: 15px; }
+.scheme > header span { font-size: 12px; color: #8E8E93; }
+.body { padding: 16px; border-top: 1px solid #F0E9EA; }
+
+/* 模拟产品片段：按钮 + 选中胶囊 + 状态 + 圆环 */
+.demo { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+.ring { width:64px; height:64px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.ring i { width:46px; height:46px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; font-style:normal; font-weight:700; font-size:14px; }
+.btn { display:inline-block; color:#fff; font-size:14px; font-weight:600; padding:11px 18px; border-radius:13px; }
+.chip { display:inline-block; border-radius:12px; padding:7px 14px; font-size:13px; margin:0 5px 6px 0; }
+.chip.on { font-weight:600; }
+.chip.off { border:1px solid #EDE4E0; color:#56565C; background:#fff; }
+.tag { display:inline-block; border-radius:9px; font-size:11.5px; font-weight:600; padding:3px 9px; margin-right:6px; }
+.scale { display:flex; height:26px; border-radius:9px; overflow:hidden; margin-bottom:12px; }
+.scale div { flex:1; }
+
+footer { text-align:center; color:#8E8E93; font-size:12px; margin-top:48px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>主色备选方案</h1>
+<p class="sub">每个方案都套了同一组产品片段（圆环 / 主按钮 / 选中胶囊 / 状态标签 / 营养素条），在暖米白底上的真实观感。挑一个，或说“X 的感觉但再深一点”。</p>
+
+<!-- ═══ A 珊瑚橘 ═══ -->
+<div class="grid">
+<div class="scheme">
+  <header style="background:#FBEAE0;"><b>A · 暖珊瑚</b><span> energetic · 减脂的“热”感</span></header>
+  <div class="body">
+    <div class="demo">
+      <div class="ring" style="background:conic-gradient(#E8734A 0 70%, #F5E3D8 70% 100%);"><i style="color:#C9582F;">1287</i></div>
+      <div>
+        <span class="btn" style="background:#E8734A;">记一笔</span>
+        <span class="chip on" style="background:#FBEAE0; color:#C05A2E;">水煮蛋</span>
+        <span class="chip off">燕麦片</span>
+      </div>
+    </div>
+    <div class="scale">
+      <div style="background:#E8734A;"></div><div style="background:#F09B72;"></div><div style="background:#F7C3A8;"></div><div style="background:#FBEAE0;"></div>
+    </div>
+    <div><span class="tag" style="background:#E4F3E7;color:#2E7A47;">蛋白 96g</span><span class="tag" style="background:#FDF3E4;color:#B07018;">脂肪 42g</span><span class="tag" style="background:#EAF4EA;color:#3E8A57;">碳水 118g</span></div>
+  </div>
+</div>
+
+<!-- ═══ B 青苔绿 ═══ -->
+<div class="scheme">
+  <header style="background:#E8F0E4;"><b>B · 青苔绿</b><span>健康感 · 与营养绿同族</span></header>
+  <div class="body">
+    <div class="demo">
+      <div class="ring" style="background:conic-gradient(#5E9B62 0 70%, #E4EEE2 70% 100%);"><i style="color:#427A47;">1287</i></div>
+      <div>
+        <span class="btn" style="background:#5E9B62;">记一笔</span>
+        <span class="chip on" style="background:#E8F0E4; color:#427A47;">水煮蛋</span>
+        <span class="chip off">燕麦片</span>
+      </div>
+    </div>
+    <div class="scale">
+      <div style="background:#5E9B62;"></div><div style="background:#85B589;"></div><div style="background:#B4D3B5;"></div><div style="background:#E8F0E4;"></div>
+    </div>
+    <div><span class="tag" style="background:#EAE7F5;color:#6A5BAE;">蛋白 96g</span><span class="tag" style="background:#FDF3E4;color:#B07018;">脂肪 42g</span><span class="tag" style="background:#EAF4EA;color:#3E8A57;">碳水 118g</span></div>
+  </div>
+</div>
+
+<!-- ═══ C 靛蓝 ═══ -->
+<div class="scheme">
+  <header style="background:#E4EBF3;"><b>C · 靛蓝</b><span>冷静克制 · 数据工具感</span></header>
+  <div class="body">
+    <div class="demo">
+      <div class="ring" style="background:conic-gradient(#4A6FA5 0 70%, #E2E9F1 70% 100%);"><i style="color:#385F8E;">1287</i></div>
+      <div>
+        <span class="btn" style="background:#4A6FA5;">记一笔</span>
+        <span class="chip on" style="background:#E4EBF3; color:#385F8E;">水煮蛋</span>
+        <span class="chip off">燕麦片</span>
+      </div>
+    </div>
+    <div class="scale">
+      <div style="background:#4A6FA5;"></div><div style="background:#7393BE;"></div><div style="background:#A9BFD8;"></div><div style="background:#E4EBF3;"></div>
+    </div>
+    <div><span class="tag" style="background:#E4F3E7;color:#2E7A47;">蛋白 96g</span><span class="tag" style="background:#FDF3E4;color:#B07018;">脂肪 42g</span><span class="tag" style="background:#EAF4EA;color:#3E8A57;">碳水 118g</span></div>
+  </div>
+</div>
+
+<!-- ═══ D 深玫瑰（收敛版） ═══ -->
+<div class="scheme">
+  <header style="background:#F5E6E9;"><b>D · 深酒红</b><span>保留现有色系 · 只加深收敛</span></header>
+  <div class="body">
+    <div class="demo">
+      <div class="ring" style="background:conic-gradient(#A34456 0 70%, #F0E1E4 70% 100%);"><i style="color:#8C3245;">1287</i></div>
+      <div>
+        <span class="btn" style="background:#A34456;">记一笔</span>
+        <span class="chip on" style="background:#F5E6E9; color:#8C3245;">水煮蛋</span>
+        <span class="chip off">燕麦片</span>
+      </div>
+    </div>
+    <div class="scale">
+      <div style="background:#A34456;"></div><div style="background:#BE6779;"></div><div style="background:#D99AA7;"></div><div style="background:#F5E6E9;"></div>
+    </div>
+    <div><span class="tag" style="background:#E4F3E7;color:#2E7A47;">蛋白 96g</span><span class="tag" style="background:#FDF3E4;color:#B07018;">脂肪 42g</span><span class="tag" style="background:#EAF4EA;color:#3E8A57;">碳水 118g</span></div>
+  </div>
+</div>
+</div>
+
+<p class="note" style="margin-top:16px;">
+我的倾向：<b>B 青苔绿</b>。理由：健康类产品的主色和营养素绿色天然一致，视觉语言自洽；且它不是纯“健康绿”高饱和那种健身房风，偏灰绿，和你定的暖米白底很合。<br>
+A 珊瑚橘最有食欲但容易显得“外卖 App”；C 靛蓝最耐看但情感上偏冷，和“吃的”这个主题有点远；D 是最保守的选择，等于现有品牌换个更沉稳的表述。
+</p>
+
+<footer>主色备选 · 本地预览用 · 不随版本发布</footer>
+</div>
+</body>
+</html>

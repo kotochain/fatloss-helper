@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视觉系统设计稿 · 减脂小助手 v1</title>
+<style>
+/* ============================================================
+   设计稿页面自身的样式（不是产品 CSS，仅用于展示）
+   ============================================================ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #EFEAE6;
+  color: #1C1C1E;
+  padding: 32px 20px 80px;
+  line-height: 1.6;
+}
+.wrap { max-width: 1080px; margin: 0 auto; }
+h1 { font-size: 26px; margin-bottom: 6px; }
+.sub { color: #56565C; font-size: 14px; margin-bottom: 28px; }
+
+/* 设计稿分节 */
+section { margin-bottom: 40px; }
+h2 {
+  font-size: 18px;
+  margin-bottom: 4px;
+  padding-left: 12px;
+  border-left: 4px solid #D4566F;
+}
+.note { font-size: 13px; color: #56565C; margin-bottom: 14px; padding-left: 16px; }
+
+/* 规格表 */
+table { border-collapse: collapse; width: 100%; background: #fff; border-radius: 12px; overflow: hidden; font-size: 13px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid #F0E9EA; }
+th { background: #F5F0EC; font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td code { background: #F5F0EC; padding: 1px 7px; border-radius: 6px; font-size: 12px; }
+.demo-chip { display: inline-block; width: 26px; height: 26px; border-radius: 8px; vertical-align: middle; margin-right: 8px; border: 1px solid rgba(0,0,0,.06); }
+
+/* 色板 */
+.palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.swatch { background: #fff; border-radius: 12px; overflow: hidden; border: 1px solid #F0E9EA; }
+.swatch .c { height: 58px; }
+.swatch .t { padding: 8px 12px; font-size: 12px; }
+.swatch .t b { display: block; font-size: 12.5px; }
+.swatch .t span { color: #8E8E93; font-size: 11px; }
+
+/* 双栏对比：左 = 现状，右 = 新 */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 860px) { .compare { grid-template-columns: 1fr; } }
+.pane { border-radius: 14px; overflow: hidden; border: 1px solid #E5DCD8; }
+.pane > header { padding: 9px 14px; font-size: 13px; font-weight: 650; }
+.pane.old > header { background: #E8E2DE; color: #56565C; }
+.pane.new > header { background: #D4566F; color: #fff; }
+.pane-body { background: #fff; padding: 16px; }
+
+/* ── 现状样式（模拟现在的产品 CSS） ── */
+.old-body { font-size: 15px; line-height: 1.6; }
+.old-title { font-size: 16px; font-weight: 650; padding-left: 11px; position: relative; margin-bottom: 12px; }
+.old-title::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:3px; height:15px; background:#D4566F; border-radius:3px; }
+.old-meta { font-size: 11.5px; color: #8E8E93; }
+.old-small { font-size: 12.5px; color: #56565C; }
+.old-caption { font-size: 11px; color: #8E8E93; }
+.old-btn { display:inline-block; background:#D4566F; color:#fff; font-size:14px; font-weight:600; padding:11px 15px; border-radius:12px; margin-right:8px; }
+.old-btn.ghost { background:#F5F0EC; color:#56565C; }
+.old-chip { display:inline-block; border:1px solid #F0E9EA; background:#fff; border-radius:99px; padding:7px 13px; font-size:13px; color:#56565C; margin:0 5px 5px 0; }
+.old-chip.on { background:#FBEFF2; border-color:rgba(212,86,111,.28); color:#B94059; font-weight:650; }
+.old-card { background:#FBF7F4; border:1px solid #F0E9EA; border-radius:18px; padding:14px; margin-bottom:10px; }
+.old-stat { font-size:13px; font-weight:680; }
+
+/* ── 新系统样式（设计稿目标） ── */
+.new-body { font-size: 15px; line-height: 1.65; }
+.new-title { font-size: 16px; font-weight: 650; padding-left: 12px; position: relative; margin-bottom: 14px; letter-spacing: .01em; }
+.new-title::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:3.5px; height:16px; background:#D4566F; border-radius:4px; }
+.new-meta { font-size: 12px; color: #8E8E93; }
+.new-small { font-size: 13px; color: #56565C; }
+.new-caption { font-size: 11px; color: #8E8E93; letter-spacing: .02em; }
+.new-btn { display:inline-block; background:#D4566F; color:#fff; font-size:15px; font-weight:600; padding:12px 18px; border-radius:14px; margin-right:8px; letter-spacing:.01em; }
+.new-btn.ghost { background:#F3EDE8; color:#444; }
+.new-btn.sm { font-size:13px; padding:8px 14px; border-radius:11px; }
+.new-chip { display:inline-block; border:1px solid #EDE4E0; background:#fff; border-radius:12px; padding:8px 15px; font-size:13px; color:#56565C; margin:0 5px 6px 0; }
+.new-chip.on { background:#FBEFF2; border-color:#E9B7C2; color:#B94059; font-weight:600; }
+.new-card { background:#FBF7F4; border:1px solid #F0E9EA; border-radius:18px; padding:16px; margin-bottom:12px; }
+.new-stat { font-size:13px; font-weight:700; }
+.new-label { font-size:12px; font-weight:550; color:#56565C; }
+
+/* 契机：字号阶梯演示 */
+.type-scale div { margin-bottom: 8px; }
+.ts-d { font-size: 44px; font-weight: 700; line-height: 1.1; }
+.ts-t { font-size: 17px; font-weight: 650; }
+.ts-b { font-size: 15px; }
+.ts-s { font-size: 13px; color: #56565C; }
+.ts-c { font-size: 11.5px; color: #8E8E93; }
+
+footer { text-align:center; color:#8E8E93; font-size:12px; margin-top:48px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>视觉系统设计稿</h1>
+<p class="sub">减脂小助手 · 2026-11 · 仅设计稿，不影响线上版本（v52）</p>
+
+<!-- ═══════════ 1. 设计原则 ═══════════ -->
+<section>
+  <h2>1. 三条设计原则</h2>
+  <p class="note">先定方向，再定参数。所有具体值都从这里推导。</p>
+  <table>
+    <tr><th style="width:130px">原则</th><th>含义</th></tr>
+    <tr><td><b>一个主角</b></td><td>每屏只有一块是「主角」（圆环 / 大数字 / 主按钮），其他一律降级。颜色、字重、尺寸都围绕这个层级分配。</td></tr>
+    <tr><td><b>少而准</b></td><td>字号 17 种 → 5 种；字重 10 种 → 3 种；圆角 15 种 → 4 种。约束本身带来秩序感。</td></tr>
+    <tr><td><b>暖而不粉</b></td><td>保留现在的暖米白基调，但把粉红「玫瑰色」从背景装饰收敛到「动作与强调」，大面积只用中性色。</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════ 2. 色彩 ═══════════ -->
+<section>
+  <h2>2. 色彩系统</h2>
+  <p class="note">把硬编码的 rgba 变体收敛成语义 token。改主题色只动一行。</p>
+
+  <h3 style="font-size:14px; margin:0 0 8px 16px;">品牌色（动作与强调专用）</h3>
+  <div class="palette">
+    <div class="swatch"><div class="c" style="background:#D4566F"></div><div class="t"><b>--brand</b><span>主按钮、选中态、圆环</span></div></div>
+    <div class="swatch"><div class="c" style="background:#B94059"></div><div class="t"><b>--brand-strong</b><span>品牌文字（对比度更高）</span></div></div>
+    <div class="swatch"><div class="c" style="background:#FBEFF2"></div><div class="t"><b>--brand-soft</b><span>选中底色、柔和强调</span></div></div>
+    <div class="swatch"><div class="c" style="background:#F3EDE8"></div><div class="t"><b>--brand-ghost</b><span>次级按钮底（新）</span></div></div>
+  </div>
+
+  <h3 style="font-size:14px; margin:16px 0 8px 16px;">语义状态色</h3>
+  <div class="palette">
+    <div class="swatch"><div class="c" style="background:#2E9E56"></div><div class="t"><b>--positive</b><span>完成 / 达标 / 植物</span></div></div>
+    <div class="swatch"><div class="c" style="background:#C9761F"></div><div class="t"><b>--warning</b><span>需要注意 / 历史日期</span></div></div>
+    <div class="swatch"><div class="c" style="background:#E0524A"></div><div class="t"><b>--danger</b><span>超量 / 危险操作</span></div></div>
+    <div class="swatch"><div class="c" style="background:#5B8CB8"></div><div class="t"><b>--info</b><span>说明 / 提示</span></div></div>
+  </div>
+
+  <h3 style="font-size:14px; margin:16px 0 8px 16px;">中性色（大面积使用）</h3>
+  <div class="palette">
+    <div class="swatch"><div class="c" style="background:#1C1C1E"></div><div class="t"><b>--ink</b><span>主文字</span></div></div>
+    <div class="swatch"><div class="c" style="background:#56565C"></div><div class="t"><b>--ink-2</b><span>次级文字</span></div></div>
+    <div class="swatch"><div class="c" style="background:#8E8E93"></div><div class="t"><b>--ink-3</b><span>辅助文字</span></div></div>
+    <div class="swatch"><div class="c" style="background:#FBF7F4"></div><div class="t"><b>--bg</b><span>页面底</span></div></div>
+    <div class="swatch"><div class="c" style="background:#FFFFFF"></div><div class="t"><b>--card</b><span>卡片底</span></div></div>
+    <div class="swatch"><div class="c" style="background:#F5F0EC"></div><div class="t"><b>--surface-muted</b><span>次级填充</span></div></div>
+    <div class="swatch"><div class="c" style="background:#F0E9EA"></div><div class="t"><b>--line</b><span>分隔线</span></div></div>
+  </div>
+
+  <h3 style="font-size:14px; margin:16px 0 8px 16px;">营养素三色（图表专用，不再挪作他用）</h3>
+  <div class="palette">
+    <div class="swatch"><div class="c" style="background:#8E7FC4"></div><div class="t"><b>蛋白</b><span>紫</span></div></div>
+    <div class="swatch"><div class="c" style="background:#C98F3B"></div><div class="t"><b>脂肪</b><span>金黄</span></div></div>
+    <div class="swatch"><div class="c" style="background:#4E9A6F"></div><div class="t"><b>碳水</b><span>绿</span></div></div>
+  </div>
+</section>
+
+<!-- ═══════════ 3. 字号字重 ═══════════ -->
+<section>
+  <h2>3. 字号与字重</h2>
+  <p class="note">17 种字号 → 5 种；10 种字重 → 3 种。每一级有明确职责，不允许出现「差不多大」的两级并存。</p>
+
+  <table>
+    <tr><th>Token</th><th>值</th><th>用途</th><th>示例</th></tr>
+    <tr><td><code>--text-display</code></td><td>44px / 700</td><td>圆环中央大数字（全站唯一）</td><td style="font-size:44px; font-weight:700; line-height:1.1;">1287</td></tr>
+    <tr><td><code>--text-title</code></td><td>17px / 650</td><td>卡片标题、弹层标题</td><td style="font-size:17px; font-weight:650;">今天还剩多少</td></tr>
+    <tr><td><code>--text-body</code></td><td>15px / 400~600</td><td>正文、列表项、按钮</td><td style="font-size:15px;">鸡胸肉 150g · 248 千卡</td></tr>
+    <tr><td><code>--text-small</code></td><td>13px / 400~600</td><td>次级说明、胶囊、徽章</td><td style="font-size:13px; color:#56565C;">练 32 分钟 · 231 千卡</td></tr>
+    <tr><td><code>--text-caption</code></td><td>11.5px / 550</td><td>标签、时间戳、图注</td><td style="font-size:11.5px; color:#8E8E93; letter-spacing:.02em;">昨晚 23:41 记录</td></tr>
+  </table>
+
+  <p class="note" style="margin-top:12px;">
+    字重只用三档：<b>Regular 400</b>（正文）、<b>Semibold 600</b>（标题/按钮/选中）、<b>Bold 700</b>（大数字）。
+    现在的 550/620/650/660/680/720 全部归并——中间档在屏幕上根本看不出差别，只会让代码变成抽奖。
+  </p>
+</section>
+
+<!-- ═══════════ 4. 圆角与阴影 ═══════════ -->
+<section>
+  <h2>4. 圆角、阴影与间距</h2>
+  <p class="note">圆角是这套 UI 的「字形」——大 = 容器，中 = 元素，小 = 微件，胶囊 = 标签。4 种，不许出现第 5 种。</p>
+
+  <table>
+    <tr><th>Token</th><th>值</th><th>用于</th></tr>
+    <tr><td><code>--radius-lg</code></td><td>18px</td><td>卡片、hero 大区块</td></tr>
+    <tr><td><code>--radius-md</code></td><td>13px</td><td>按钮、输入框、弹层内分组、图表柱</td></tr>
+    <tr><td><code>--radius-sm</code></td><td>9px</td><td>小徽章、进度条段、色块小格</td></tr>
+    <tr><td><code>--radius-full</code></td><td>999px</td><td>胶囊、标签、头像</td></tr>
+  </table>
+
+  <p class="note" style="margin-top:12px;">
+    间距全部走 4px 网格：<code style="background:#F5F0EC;padding:1px 6px;border-radius:6px;">4 / 8 / 12 / 16 / 20 / 24</code>。
+    现在的 <code style="background:#F5F0EC;padding:1px 6px;border-radius:6px;">9px 6px</code>、<code style="background:#F5F0EC;padding:1px 6px;border-radius:6px;">8px 4px</code> 这类手写组合全部归位到网格。
+  </p>
+
+  <p class="note" style="margin-top:6px;">
+    阴影只留两档：卡片微影（几乎看不见、只做分离）与弹层悬浮影。现在的 <code style="background:#F5F0EC;padding:1px 6px;border-radius:6px;">shadow-lift</code> 和 <code style="background:#F5F0EC;padding:1px 6px;border-radius:6px;">shadow-overlay</code> 已经是这两档，保留。
+  </p>
+</section>
+
+<!-- ═══════════ 5. 对比示例 ═══════════ -->
+<section>
+  <h2>5. 落地效果对比</h2>
+  <p class="note">同一个「食物列表卡」的今昔对照。改动全部来自上面 4 节的 token，没有额外的新样式。</p>
+
+  <div class="compare">
+    <div class="pane old">
+      <header>现状（v52 线上）</header>
+      <div class="pane-body old-body">
+        <div class="old-card">
+          <div class="old-title">早餐</div>
+          <div class="old-meta">已记 3 项</div>
+          <hr style="border:0;border-top:1px dashed #F0E9EA; margin:8px 0;">
+          <div style="font-size:14px; font-weight:550; margin-bottom:4px;">全麦面包 <span style="font-size:12px;color:#8E8E93;font-weight:400;">2 片</span></div>
+          <span style="font-size:12.5px; color:#56565C; background:#F5F0EC; padding:2px 8px; border-radius:99px;">158 千卡</span>
+          <hr style="border:0;border-top:1px dashed #F0E9EA; margin:8px 0;">
+          <div class="old-small" style="margin-bottom:10px;">份量是估的，误差可能到 ±30%</div>
+          <span class="old-btn">记一笔</span><span class="old-btn ghost">改</span>
+          <div style="margin-top:10px;">
+            <span class="old-chip">燕麦片</span><span class="old-chip on">水煮蛋</span><span class="old-chip">无糖豆浆</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pane new">
+      <header>新版（视觉系统 v1）</header>
+      <div class="pane-body new-body">
+        <div class="new-card">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:2px;">
+            <span class="new-title" style="margin-bottom:0;">早餐</span>
+            <span class="new-caption">3 项 · 421 千卡</span>
+          </div>
+          <div style="border-top:1px solid #F0E9EA; padding:12px 0; display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:15px;">全麦面包 <span class="new-caption">2 片</span></span>
+            <span class="new-label" style="font-variant-numeric:tabular-nums;">158 千卡</span>
+          </div>
+          <div class="new-small" style="color:#C9761F; background:#FDF3E4; border-radius:9px; padding:8px 12px; font-size:12px;">份量是估的，误差可能到 ±30%</div>
+          <div style="margin-top:12px;">
+            <span class="new-btn sm">记一笔</span><span class="new-btn ghost sm">改</span>
+          </div>
+          <div style="margin-top:12px;">
+            <span class="new-chip">燕麦片</span><span class="new-chip on">水煮蛋</span><span class="new-chip">无糖豆浆</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note" style="margin-top:12px;">
+    差别在：热量从「灰色药丸」变成右侧对齐的正文数字（扫读更快）；说明底色块换成圆角 9px 的警示色（语义正确）；按钮和胶囊统一到 md 圆角；行与行之间用 1px 实线而不是虚线（虚线全部保留给「草稿/未确认」语义）。
+  </p>
+</section>
+
+<!-- ═══════════ 6. 组件规格 ═══════════ -->
+<section>
+  <h2>6. 关键组件规格</h2>
+  <p class="note">改造时按这张表逐个核对。</p>
+  <table>
+    <tr><th>组件</th><th>规格</th></tr>
+    <tr><td>主按钮</td><td>44px 高 · md 圆角(13) · --brand 底白字 · Semibold 15px</td></tr>
+    <tr><td>次级按钮</td><td>44px 高 · md 圆角 · --brand-ghost 底 · ink-2 文字</td></tr>
+    <tr><td>胶囊选项</td><td>40px 高 · md 圆角(13，不再是 999 全圆) · 未选中 = 白底细边，选中 = brand-soft 底 + brand-strong 字</td></tr>
+    <tr><td>输入框</td><td>44px 高 · md 圆角 · 聚焦 = brand 描边 + 3px brand-soft 外圈</td></tr>
+    <tr><td>卡片</td><td>16px 内边距 · lg 圆角(18) · 1px --line 边 + 微影</td></tr>
+    <tr><td>弹层</td><td>顶部 24px 圆角 · 头部 48px 高 · 拖拽条居中</td></tr>
+    <tr><td>状态标签</td><td>sm 圆角(9) · 11.5px Semibold · 各语义 soft 底 + 深色字</td></tr>
+    <tr><td>分隔</td><td>列表项之间 = 1px 实线；未确认/草稿 = 虚线；区块之间 = 12px 空白，不加线</td></tr>
+  </table>
+</section>
+
+<!-- ═══════════ 7. 不改什么 ═══════════ -->
+<section>
+  <h2>7. 明确不改的部分</h2>
+  <p class="note">视觉系统是「整理」，不是「重设计」。以下保持现状。</p>
+  <table>
+    <tr><td>整体暖米白 + 玫瑰色的品牌气质</td><td>v50~v52 已定的信息架构（折叠、分组、降权）</td></tr>
+    <tr><td>iOS 质感的模糊顶栏与底栏</td><td>所有动效（用户已明确暂缓）</td></tr>
+    <tr><td>图标的线性风格与尺寸</td><td>现有触控尺寸标准（40/44px 最小目标）</td></tr>
+  </table>
+</section>
+
+<footer>设计稿 · 本地预览用 · 不随版本发布</footer>
+</div>
+</body>
+</html>
