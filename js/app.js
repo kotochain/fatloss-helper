@@ -22,7 +22,7 @@ import {
 import {
   askAi, aiStatus, currentAiConfig, saveAiConfigLocal, clearAiConfig,
   testConnection, fetchModels, relayStatus, presetDirectCall,
-  readLabelImage, askCoach,
+  readLabelImage, askCoach, aiLabelOf,
 } from './ai.js';
 import { buildCoachBrief, localCoachAdvice, checkCoachText } from './coach.js';
 import { labelToPer100, checkConsistency, photoRetakeHint } from './label.js';
@@ -99,8 +99,14 @@ let planSeed = 0;
 let pendingFood = null;
 /** 「说一句」流程的临时状态：解析出来的条目等用户确认 */
 let draft = null;
-/** AI 是否可用（进界面时问一次服务端） */
-let ai = { configured: false, checked: false, reason: null };
+/**
+ * AI 状态（进界面时问一次）。
+ *   saved 本机有没有配置（能不能试一次）
+ *   ok    上次检查结论：true 通 / false 没通 / null 还没试过
+ * 以前只有一个 configured：密钥存着但这次没连上时，记录页写「还没配 AI」、
+ * 我的页同一时刻写「已开启」—— 两页各说一套（v52 拆开）。
+ */
+let ai = { saved: false, ok: null, checked: false, reason: null };
 /** 「说一句」是从哪一餐点进来的（界面上的餐次提示，默认按时间猜） */
 let quickMealHint = null;
 /** 教练弹层当前展示什么（本地版 / AI 版 / 正在问 / 失败原因） */
@@ -1185,8 +1191,8 @@ function renderFoodPane() {
   return `
     <div class="card">
       <div class="card-title">说一句就记上
-        <button class="mode-pill" id="usageModeBtn" title="AI 设置">
-          ${ai.configured ? 'AI 已开启' : '还没配 AI'}<span class="mode-pill-go">›</span>
+        <button class="mode-pill ${aiLabel().tone}" id="usageModeBtn" title="${esc(aiLabel().text)}｜AI 设置">
+          ${aiLabel().text}<span class="mode-pill-go">›</span>
         </button>
       </div>
       <textarea id="quickText" rows="3" placeholder="今天吃了什么？例如：中午吃了碗牛肉面，加了个蛋"></textarea>
@@ -1710,7 +1716,7 @@ function drawDraft() {
     // 但真遇到时也不能让用户卡在这儿：给能点的例子 + 直接进食物搜索 + 保留原句重写。
     const original = draft.text || '';
     const examples = ['一碗牛肉面加了个蛋', '半碗米饭、一份红烧肉', '一杯奶茶、一份鸡排'];
-    const canRetry = Boolean(ai.configured);
+    const canRetry = aiOn();
     box.innerHTML = `
       <div class="warn" style="margin-top:10px">
         ${draft.noAi
@@ -2268,11 +2274,11 @@ function renderProgress() {
     <button class="set-row" data-act="ai-settings">
       <span class="set-main">
         <b>AI 设置</b>
-        <em>${aiCfg.configured
-          ? `说一句由 AI 听懂：${esc(aiCfg.model || '已配置')}`
+        <em>${ai.saved
+          ? `说一句由 AI 听懂：${esc(aiCfg.model || '已配置')}${ai.ok === false ? '（上次没连上）' : ''}`
           : '还没配 AI —— 点这里配（手把手教程）'}</em>
       </span>
-      <span class="mode-pill">${aiCfg.configured ? '已开启' : '去配置'}<span class="mode-pill-go">›</span></span>
+      <span class="mode-pill ${aiLabel().tone}">${aiLabel().short}<span class="mode-pill-go">›</span></span>
     </button>
 
     ${t ? `
@@ -2877,9 +2883,18 @@ function myInsights(limit) {
   }
 }
 
-/** 现在会不会真的去调 AI = 密钥配好了。产品只有一种模式，不再有「普通模式」开关。 */
+/**
+ * 能不能走 AI：只要本机存着一份配置就算 —— **不**看上次连通测试的结果。
+ * 上次没连上不代表这次不行（网络恢复、余额充了都常见）；真失败时让解析
+ * 自己把具体错误说出来，比提前把人挡在门外、还说「还没配 AI」好。
+ */
 function aiOn() {
-  return Boolean(ai.configured);
+  return Boolean(ai.saved);
+}
+
+/** 记录页胶囊 / 我的页 / 设置页共用这一句（三处口径必须一致，规则见 js/ai.js#aiLabelOf） */
+function aiLabel() {
+  return aiLabelOf(ai);
 }
 
 function openSettingsSheet() {
@@ -2889,48 +2904,67 @@ function openSettingsSheet() {
   const a = achievements(state, t?.proteinG || 60);
   const backup = readBackup(localStorage);
 
+  /*
+   * v52：7 张同权卡片 → 2 组 + 1 条危险操作。
+   * 以前每行都是一张独立白卡（同圆角、同边框、同图标尺寸），7 张并排时眼睛
+   * 找不到分组，也分不清「关于」和「从头开始」哪个更重。
+   * 现在按「我的 / 数据与帮助」分组，图标颜色从 7 种收到 3 种 + 危险色：
+   * 颜色只用来分区，不再一行一个色当装饰。
+   */
   openSheet({
     title: '设置',
     body: `
-      <button class="set-row" data-set="profile">
-        <span class="set-ico" data-tone="rose">${icon('user', { size: 23 })}</span>
-        <span class="set-main"><b>你的资料</b><em>${state.profile ? `${state.profile.heightCm} cm · ${state.profile.weightKg} kg · ${state.profile.age} 岁` : '还没填'}</em></span>
-        <span class="set-go">›</span>
-      </button>
+      <div class="set-group">
+        <div class="set-group-title">我的</div>
+        <div class="set-group-body">
+          <button class="set-row" data-set="profile">
+            <span class="set-ico" data-tone="rose">${icon('user', { size: 23 })}</span>
+            <span class="set-main"><b>你的资料</b><em>${state.profile ? `${state.profile.heightCm} cm · ${state.profile.weightKg} kg · ${state.profile.age} 岁` : '还没填'}</em></span>
+            <span class="set-go">›</span>
+          </button>
 
-      <button class="set-row" data-set="ai">
-        <span class="set-ico" data-tone="gold">${icon('sparkles', { size: 23 })}</span>
-        <span class="set-main"><b>AI 设置</b><em>${aiCfg.configured ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}` : '还没配（点这里，手把手教程）'}</em></span>
-        <span class="set-go">›</span>
-      </button>
+          <button class="set-row" data-set="growth">
+            <span class="set-ico" data-tone="green">${icon('sprout', { size: 23 })}</span>
+            <span class="set-main"><b>我的成长</b><em>${a.unlocked.length} / ${a.list.length} 个徽章 · ${plant.stage.name}</em></span>
+            <span class="set-go">›</span>
+          </button>
 
-      <button class="set-row" data-set="growth">
-        <span class="set-ico" data-tone="green">${icon('sprout', { size: 23 })}</span>
-        <span class="set-main"><b>我的成长</b><em>${a.unlocked.length} / ${a.list.length} 个徽章 · ${plant.stage.name}</em></span>
-        <span class="set-go">›</span>
-      </button>
+          <button class="set-row" data-set="ai">
+            <span class="set-ico" data-tone="rose">${icon('sparkles', { size: 23 })}</span>
+            <span class="set-main"><b>AI 设置</b><em>${ai.saved
+              ? `${aiCfg.presetName || ''} · ${aiCfg.model || ''}${ai.ok === false ? '（上次没连上）' : ''}`
+              : '还没配（点这里，手把手教程）'}</em></span>
+            <span class="set-go">›</span>
+          </button>
+        </div>
+      </div>
 
-      <button class="set-row" data-set="backup">
-        <span class="set-ico" data-tone="blue">${icon('database', { size: 23 })}</span>
-        <span class="set-main"><b>数据与备份</b><em>存档 v${SCHEMA_VERSION}${backup ? ` · 有升级前快照（${String(backup.savedAt).slice(0, 10)}）` : ''}</em></span>
-        <span class="set-go">›</span>
-      </button>
+      <div class="set-group">
+        <div class="set-group-title">数据与帮助</div>
+        <div class="set-group-body">
+          <button class="set-row" data-set="backup">
+            <span class="set-ico" data-tone="gray">${icon('database', { size: 23 })}</span>
+            <span class="set-main"><b>数据与备份</b><em>存档 v${SCHEMA_VERSION}${backup ? ` · 有升级前快照（${String(backup.savedAt).slice(0, 10)}）` : ''}</em></span>
+            <span class="set-go">›</span>
+          </button>
 
-      <button class="set-row" data-set="wipe">
+          <button class="set-row" data-set="guide">
+            <span class="set-ico" data-tone="gray">${icon('play', { size: 23 })}</span>
+            <span class="set-main"><b>重看新手引导</b><em>忘了怎么用，从这里（不会动你的记录）</em></span>
+            <span class="set-go">›</span>
+          </button>
+
+          <button class="set-row" data-set="about">
+            <span class="set-ico" data-tone="gray">${icon('info', { size: 23 })}</span>
+            <span class="set-main"><b>关于</b><em>算得准不准、数据存在哪、更新怎么生效</em></span>
+            <span class="set-go">›</span>
+          </button>
+        </div>
+      </div>
+
+      <button class="set-row danger" data-set="wipe">
         <span class="set-ico" data-tone="red">${icon('trash', { size: 23 })}</span>
         <span class="set-main"><b>从头开始</b><em>清掉这台手机上的记录，重新走一遍新手引导</em></span>
-        <span class="set-go">›</span>
-      </button>
-
-      <button class="set-row" data-set="guide">
-        <span class="set-ico" data-tone="mauve">${icon('play', { size: 23 })}</span>
-        <span class="set-main"><b>重看新手引导</b><em>忘了怎么用，从这里（不会动你的记录）</em></span>
-        <span class="set-go">›</span>
-      </button>
-
-      <button class="set-row" data-set="about">
-        <span class="set-ico" data-tone="gray">${icon('info', { size: 23 })}</span>
-        <span class="set-main"><b>关于</b><em>算得准不准、数据存在哪、更新怎么生效</em></span>
         <span class="set-go">›</span>
       </button>
 
@@ -3121,7 +3155,7 @@ function openWipeSheet() {
       const finish = (preserveAi) => {
         if (input.value.trim() !== '清除') return;
         if (!clearAppStorage({ keepAi: preserveAi })) return toast('没能完全清掉，可以再试一次。');
-        if (!preserveAi) ai = { configured: false, checked: false, reason: null };
+        if (!preserveAi) ai = { saved: false, ok: null, checked: false, reason: null };
         state = emptyState();
         save();
         closeSheet();
@@ -3305,7 +3339,10 @@ function openBackupSheet() {
           这台设备上还留着一份「读不出来的记录」的原文，导出备份时会一起带上，换设备也不会丢。
         </div>` : ''}
       <button class="btn block" id="doExport">导出备份文件</button>
-      <div class="btn-row">
+      <p class="tiny muted" style="margin:8px 0 0">
+        备份里<b>不含 AI 密钥</b>：换手机后在新手机上重新填一次（约 1 分钟），记录本身不受影响。
+      </p>
+      <div class="btn-row" style="margin-top:10px">
         <button class="btn ghost grow" id="doImport">从文件导入</button>
         <button class="btn ghost grow" id="doSnapshot">现在留一份快照</button>
       </div>
@@ -3868,8 +3905,19 @@ function drawAiSettings(cfg, relay, then = null) {
   const preset = findPreset(presetId);
   const mode = cfg.mode || (preset.directCall === false ? 'relay' : 'direct');
   const directOk = preset.directCall !== false;
+  /*
+   * v52：分成「基础」和「高级」两段。
+   * 以前 5 个输入框平铺（接口地址、模型名、看图模型、密钥、连接方式），
+   * 第一次用的人看不出哪几个是必须的，像一张要填完的表 —— 其实 90% 的人
+   * 只需要「选一家 + 贴密钥」，其余都按预设带出来了。
+   * 高级段只在用户真的改过时才默认展开：自定义服务商（地址/模型得自己填）、
+   * 单独配过看图模型、或选了走中转（否则看不到「为什么还要开电脑」）。
+   */
+  const advancedOpen = presetId === 'custom' || Boolean(cfg.visionModel) || mode === 'relay';
 
   const body = `
+    <div class="ai-state" id="aiStatusCard"></div>
+
     <label class="field"><span>选一个服务商</span>
       <div class="chips" id="presetChips">
         ${PRESETS.map((p) => `
@@ -3878,31 +3926,13 @@ function drawAiSettings(cfg, relay, then = null) {
           </button>`).join('')}
       </div>
     </label>
-    <div id="presetNote" class="small muted" style="margin:-4px 0 12px"></div>
-
-    <label class="field"><span>接口地址</span>
-      <input type="text" id="aiBaseUrl" value="${esc(cfg.baseUrl || preset.baseUrl || '')}" placeholder="https://api.deepseek.com">
-    </label>
-
-    <label class="field"><span>模型名 <button class="btn ghost" id="aiFetchModels" style="padding:2px 8px;font-size:12px;float:right">获取模型列表</button></span>
-      <input type="text" id="aiModel" value="${esc(cfg.model || preset.model || '')}" placeholder="deepseek-flash" list="aiModelList" autocomplete="off">
-      <datalist id="aiModelList">${lastModels.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
-      <div id="modelPick" class="chips" style="margin-top:6px"></div>
-    </label>
-
-    <label class="field"><span>拍照读表用的模型（可选）</span>
-      <input type="text" id="aiVisionModel" value="${esc(cfg.visionModel || '')}" placeholder="不填就跟上面那个模型一样" list="aiModelList" autocomplete="off">
-      <div class="tiny muted" style="margin-top:4px">
-        拍营养成分表要「能看图」的模型（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
-        <b>留空就用上面那个</b>；上面那个看不了图、又不想换掉它时，才需要在这里单独填一个。
-      </div>
-    </label>
+    <div id="presetNote" class="small muted" style="margin:-4px 0 14px"></div>
 
     <label class="field"><span>密钥（只存在这台手机上）</span>
       <input type="text" id="aiKey" placeholder="${cfg.keyMasked ? `已保存：${esc(cfg.keyMasked)}（留空则不改）` : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
     </label>
     <details id="aiKeyGuide" style="margin:-4px 0 12px">
-      <summary style="cursor:pointer;color:var(--rose);font-size:13px">手把手教程：从注册到粘贴（5 分钟）</summary>
+      <summary style="cursor:pointer;color:var(--rose);font-size:13px;min-height:40px;display:flex;align-items:center">手把手教程：从注册到粘贴（5 分钟）</summary>
       <div class="tiny" style="margin-top:8px;line-height:1.75">
         <div class="warn info" style="margin:0 0 10px">
           <b>先把钱的事说清楚</b>：API 是 <b>DeepSeek 官方按用量收费</b>，钱直接付给 DeepSeek。
@@ -3927,7 +3957,7 @@ function drawAiSettings(cfg, relay, then = null) {
           <li><b>回来粘贴</b>：把密钥粘贴到上面的「密钥」输入框，点下面的「保存并测试连通」。
             显示「保存成功，连通正常」就能用了。</li>
           <li><b>密钥安全</b>：只存在这台手机上，不上传、不经过我们的服务器，我们看不到。
-            换手机或清缓存前，在「数据与备份」里导出备份。</li>
+            换手机要在这台新手机上重新填一次（记录可以用备份带过去，密钥不在备份里）。</li>
         </ol>
         <p style="margin:0 0 4px"><b>常见问题</b></p>
         <p style="margin:0">· 提示「密钥无效」：检查是不是复制全了、前后有没有空格。<br>
@@ -3938,23 +3968,42 @@ function drawAiSettings(cfg, relay, then = null) {
       </div>
     </details>
 
-    <label class="field"><span>用哪种方式连接</span>
-      <div class="chips" id="modeChips">
-        <button class="chip ${mode === 'direct' ? 'on' : ''}" data-mode="direct">手机直连（推荐）</button>
-        <button class="chip ${mode === 'relay' ? 'on' : ''}" data-mode="relay">走电脑中转</button>
-      </div>
-    </label>
-    <div id="modeNote" class="tiny muted" style="margin:-6px 0 12px"></div>
+    <details class="adv" id="aiAdvanced"${advancedOpen ? ' open' : ''}>
+      <summary><b>高级设置</b><span>接口地址、模型名、看图模型、连接方式</span></summary>
+      <div class="adv-body">
+        <label class="field"><span>接口地址</span>
+          <input type="text" id="aiBaseUrl" value="${esc(cfg.baseUrl || preset.baseUrl || '')}" placeholder="https://api.deepseek.com">
+        </label>
 
-    <div id="aiSettingsMsg"></div>
-    ${cfg.configured ? `<div class="small muted">当前生效：${esc(cfg.presetName || '')} · ${esc(cfg.model || '')}${cfg.visionModel ? `（拍照读表用 ${esc(cfg.visionModel)}）` : ''} · 密钥 ${esc(cfg.keyMasked || '')}</div>` : ''}
-    <div class="tiny muted" style="margin-top:8px" id="relayInfo">
-      本机中转服务：${relay.available ? (relay.configured ? '在运行且已配置' : '在运行但没配密钥') : '没在运行（不影响手机直连）'}
-    </div>
-    <p class="tiny muted">
-      直连说明：密钥保存在这台手机的浏览器里，只发给上面这个服务商。手机上点「清除密钥」可以随时删掉。
-      换手机或清缓存会丢设置，重新填一次即可（记录本身也有导出备份）。
-    </p>`;
+        <label class="field"><span>模型名 <button class="btn ghost" id="aiFetchModels" style="padding:7px 10px;font-size:12px;float:right">获取模型列表</button></span>
+          <input type="text" id="aiModel" value="${esc(cfg.model || preset.model || '')}" placeholder="deepseek-flash" list="aiModelList" autocomplete="off">
+          <datalist id="aiModelList">${lastModels.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
+          <div id="modelPick" class="chips" style="margin-top:6px"></div>
+        </label>
+
+        <label class="field"><span>拍照读表用的模型（可选）</span>
+          <input type="text" id="aiVisionModel" value="${esc(cfg.visionModel || '')}" placeholder="不填就跟上面那个模型一样" list="aiModelList" autocomplete="off">
+          <div class="tiny muted" style="margin-top:4px">
+            拍营养成分表要「能看图」的模型（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
+            <b>留空就用上面那个</b>；上面那个看不了图、又不想换掉它时，才需要在这里单独填一个。
+          </div>
+        </label>
+
+        <label class="field"><span>连接方式</span>
+          <div class="chips" id="modeChips">
+            <button class="chip ${mode === 'direct' ? 'on' : ''}" data-mode="direct">手机直连（推荐）</button>
+            <button class="chip ${mode === 'relay' ? 'on' : ''}" data-mode="relay">走电脑中转</button>
+          </div>
+        </label>
+        <div id="modeNote" class="tiny muted" style="margin:-6px 0 10px"></div>
+
+        <div class="tiny muted" id="relayInfo">
+          本机中转服务：${relay.available ? (relay.configured ? '在运行且已配置' : '在运行但没配密钥') : '没在运行（不影响手机直连）'}
+        </div>
+      </div>
+    </details>
+
+    <div id="aiSettingsMsg"></div>`;
 
   const foot = `
     <button class="btn block" id="aiSave">保存并测试连通</button>
@@ -3967,6 +4016,28 @@ function drawAiSettings(cfg, relay, then = null) {
   const bodyEl = $('#sheetBody');
   const msg = $('#aiSettingsMsg');
   const show = (html, kind = 'info') => { msg.className = `warn ${kind}`; msg.innerHTML = html; };
+
+  /*
+   * 顶部那张状态卡：把「配置在不在」和「上次通没通」分开说。
+   * 以前配置存在但这次没连上时，这里什么都不显示，反而下面的「当前生效」写着已配置 ——
+   * 用户分不清自己是「填错了」还是「网断了」。
+   * 保存 / 只测连通 / 清除密钥之后都重画一次，别停在打开时那一刻。
+   */
+  const statusCard = $('#aiStatusCard');
+  const paintStatus = () => {
+    if (!statusCard) return;
+    const live = currentAiConfig();
+    const saved = Boolean(ai.saved || live.configured);
+    const label = aiLabelOf({ saved, ok: ai.ok });
+    const detail = !saved
+      ? '选一家服务商、把密钥贴进来就能用，大约 5 分钟。'
+      : (ai.ok === false
+        ? esc(ai.reason || '检查网络或密钥后再试一次')
+        : `当前生效：${esc(live.presetName || '')} · ${esc(live.model || '')}${live.visionModel ? `（拍照读表用 ${esc(live.visionModel)}）` : ''} · 密钥 ${esc(live.keyMasked || '')}`);
+    statusCard.className = `ai-state ${label.tone}`;
+    statusCard.innerHTML = `<b>${esc(label.text)}</b><span>${detail}</span>`;
+  };
+  paintStatus();
 
   let pickedMode = mode;
 
@@ -4092,7 +4163,8 @@ function drawAiSettings(cfg, relay, then = null) {
     const t = await testConnection();
     if (t.ok) {
       show(`${icon('check', { size: 15 })} 保存成功，连通正常（${esc(t.model || '')} 回复：${esc(t.reply || '正常')}）<br>现在「说一句」就能用了。`, 'info');
-      ai = { configured: true, checked: true, mode: currentAiConfig().mode };
+      ai = { saved: true, ok: true, checked: true, mode: currentAiConfig().mode };
+      paintStatus();
       // 保存完把输入框清空，只留占位提示：密钥不该一直明文摊在屏幕上，
       // 也让「留空则不改」这句话在同一个弹层里就变成真的
       $('#aiKey').value = '';
@@ -4106,7 +4178,8 @@ function drawAiSettings(cfg, relay, then = null) {
       if (typeof then === 'function') setTimeout(() => { closeSheet(); then(); }, 600);
     } else {
       show(`设置已保存，但连通测试失败：<b>${esc(t.error)}</b><br>修好之前「说一句」还用不了；搜食物、只填热量、照包装都能正常记。`, '');
-      ai = { configured: false, checked: true, reason: t.error };
+      ai = { saved: true, ok: false, checked: true, reason: t.error };
+      paintStatus();
     }
     render();
   });
@@ -4114,14 +4187,22 @@ function drawAiSettings(cfg, relay, then = null) {
   $('#aiTest')?.addEventListener('click', async () => {
     show('正在测试…（最多 20 秒）', 'info');
     const r = await testConnection();
-    if (r.ok) show(`${icon('check', { size: 15 })} 连通正常（${esc(r.model || '')} 回复：${esc(r.reply || '正常')}）${r.via === 'relay' ? '（走电脑中转）' : ''}`, 'info');
-    else show(`${icon('alert', { size: 15 })} ${esc(r.error)}`, '');
+    if (r.ok) {
+      ai = { ...ai, saved: true, ok: true, checked: true, reason: null };
+      show(`${icon('check', { size: 15 })} 连通正常（${esc(r.model || '')} 回复：${esc(r.reply || '正常')}）${r.via === 'relay' ? '（走电脑中转）' : ''}`, 'info');
+    } else {
+      ai = { ...ai, saved: Boolean(currentAiConfig().configured || ai.saved), ok: false, checked: true, reason: r.error };
+      show(`${icon('alert', { size: 15 })} ${esc(r.error)}`, '');
+    }
+    paintStatus();
+    // 页面后面那个胶囊/设置行也跟着变，否则关掉弹层还是旧说法
+    render();
   });
 
   $('#aiClear')?.addEventListener('click', () => {
     if (!confirm('清除这台手机上保存的 AI 密钥？清除后「说一句」要重新配置才能用。')) return;
     clearAiConfig();
-    ai = { configured: false, checked: true };
+    ai = { saved: false, ok: null, checked: true };
     closeSheet();
     render();
     toast('已清除。说一句话前要重新配置。');
@@ -4563,6 +4644,9 @@ function syncTestState() {
   window.__appState = {
     aiConfigured: aiOn(),
     aiChecked: Boolean(ai.checked),
+    aiSaved: Boolean(ai.saved),
+    aiOk: ai.ok,
+    aiLabel: aiLabel().text,
     // v49：跨午夜自检要能读到「现在算哪天」（只读，不改任何东西）
     dateKey,
     lastKnownToday,

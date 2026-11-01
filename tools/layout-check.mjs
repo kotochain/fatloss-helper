@@ -215,6 +215,10 @@ const PROBE_EXPR = String.raw`(() => {
     if (!el || !el.isConnected || el.getClientRects().length === 0) return false;
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) return false;
+    // 折叠起来的 <details> 内容在 Chrome 里仍有 layout（getClientRects 不为空），
+    // 只有 checkVisibility() 认得出「它没显示」。以前用 rect 判断，会把折叠里的
+    // 最后一行当成「被裁在底部」，报了一堆假严重（v52 抓到，AI 设置的高级区）。
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility()) return false;
     const r = el.getBoundingClientRect();
     return r.width > 0.5 && r.height > 0.5;
   };

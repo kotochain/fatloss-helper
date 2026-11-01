@@ -41,19 +41,52 @@ export async function relayStatus(timeoutMs = 2000) {
   }
 }
 
-/** 给界面用的状态汇总 */
+/**
+ * 给界面用的状态汇总。
+ *
+ * v52 把两件事拆开了（以前混成一个 configured）：
+ *   · saved —— 本机有没有存着配置（能不能「试一次」）
+ *   · ok    —— 上次检查的结论：true 通了 / false 没通 / null 还没试过
+ *
+ * 为什么要拆：密钥明明存着、只是那一次没连上，界面却写「还没配 AI」，
+ * 用户会以为白填了、跑去重新配一遍；而「我的」页同一个时刻又说「已开启」，
+ * 两页各说一套（评估里被点出来的那条）。
+ */
 export async function aiStatus() {
   const local = currentAiConfig();
-  if (local.configured && local.mode === 'direct') {
-    return { configured: true, mode: 'direct', model: local.model, presetName: local.presetName };
-  }
   if (local.mode === 'relay') {
     const relay = await relayStatus();
-    return relay.configured
-      ? { configured: true, mode: 'relay', model: relay.model }
-      : { configured: false, mode: 'relay', model: local.model || null, reason: '设置成「走中转服务」，但电脑上的服务没开或没配密钥' };
+    if (relay.configured) {
+      return { saved: true, ok: true, mode: 'relay', model: relay.model || local.model, presetName: local.presetName };
+    }
+    return {
+      saved: Boolean(local.baseUrl || local.model),
+      ok: false,
+      mode: 'relay',
+      model: local.model || null,
+      presetName: local.presetName,
+      reason: '设置成「走中转服务」，但电脑上的服务没开或没配密钥',
+    };
   }
-  return { configured: false, mode: local.mode || null, reason: '还没配置 AI' };
+  if (local.configured) {
+    // 直连配好了，但启动时不花一次请求去测 —— ok 留 null 表示「还没试过」，
+    // 界面就写「已开启」而不是假装知道通不通。
+    return { saved: true, ok: null, mode: 'direct', model: local.model, presetName: local.presetName };
+  }
+  return { saved: false, ok: null, mode: local.mode || null, presetName: local.presetName, reason: '还没配置 AI' };
+}
+
+/**
+ * AI 状态 → 一句人话。记录页那个小胶囊、我的页、设置页共用这一份判断，
+ * 免得同一个时刻三处各说一套（以前「还没配 AI」和「已开启」会同时出现在两页）。
+ *
+ * @param {{saved?:boolean, ok?:boolean|null}} state
+ * @returns {{text:string, short:string, tone:'idle'|'ok'|'bad'}}
+ */
+export function aiLabelOf(state = {}) {
+  if (!state.saved) return { text: '还没配 AI', short: '去配置', tone: 'idle' };
+  if (state.ok === false) return { text: 'AI 连不上', short: '连不上', tone: 'bad' };
+  return { text: 'AI 已开启', short: '已开启', tone: 'ok' };
 }
 
 /**

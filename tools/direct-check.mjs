@@ -923,6 +923,42 @@ async function main() {
   if (conflict.面板开着) problems.push('行内「记下」又弹出了第二个体重窗（一次点击不该有两套行为）');
   if (!/没记上/.test(conflict.提示)) problems.push('保存被另一个窗口的数据挡住时，没有说清「这一笔没记上」');
 
+  console.log('\n=== 六·三、密钥存着但连不上：三处文案要一致（v52） ===');
+  // 以前这里的状态只有一个 configured：连通测试失败后它变成 false，
+  // 记录页胶囊写「还没配 AI」，而「我的 → 设置」同一时刻写着已配置 —— 两页各说一套，
+  // 用户会以为自己白填了，跑去重新配一遍。现在拆成 saved（存没存）+ ok（上次通没通）。
+  await evaluate(`window.scrollTo(0, 0); document.querySelector('#profileBtn')?.click()`);
+  await sleep(600);
+  await evaluate(`document.querySelector('[data-set="ai"]')?.click()`);
+  await sleep(900);
+  await evaluate(`(() => {
+    document.querySelector('#presetChips [data-preset="custom"]').click();
+    document.querySelector('#aiBaseUrl').value = 'http://127.0.0.1:9/v1';
+    document.querySelector('#aiModel').value = 'mock-chat';
+    document.querySelector('#aiKey').value = 'sk-fails-on-purpose' /* secret-scan:allow 自检用的假密钥 */;
+    document.querySelector('#aiSave').click();
+  })()`);
+  await sleep(6000);
+  const failedState = await evaluate(`(() => ({
+    状态卡: document.querySelector('#aiStatusCard')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+    状态卡配色: document.querySelector('#aiStatusCard')?.className || '',
+    已保存: window.__appState?.aiSaved,
+    上次通: window.__appState?.aiOk,
+    标签: window.__appState?.aiLabel,
+  }))()`);
+  await evaluate(`document.querySelector('#sheetClose')?.click()`);
+  await sleep(400);
+  await evaluate(`document.querySelector('.tab[data-view="log"]')?.click()`);
+  await sleep(600);
+  const pillText = await evaluate(`document.querySelector('#usageModeBtn')?.textContent.replace(/\\s+/g, ' ').trim() || ''`);
+  console.log(`   失败后 → 状态卡「${failedState.状态卡.slice(0, 60)}」｜胶囊「${pillText}」｜aiSaved=${failedState.已保存} / aiOk=${failedState.上次通} / aiLabel=${failedState.标签}`);
+  if (failedState.已保存 !== true) problems.push('连通失败后配置被当成「没配」—— 密钥其实已经存进去了');
+  if (failedState.上次通 !== false) problems.push(`连通失败后 aiOk 应为 false，实际 ${failedState.上次通}`);
+  if (!/连不上/.test(failedState.状态卡)) problems.push('连通失败后设置页没写「连不上」');
+  if (!failedState.状态卡配色.includes('bad')) problems.push('连通失败时状态卡没有单独的配色（用户看不出这是异常）');
+  if (!/连不上/.test(pillText)) problems.push(`记录页胶囊没说「连不上」，实际「${pillText}」`);
+  if (/还没配/.test(pillText)) problems.push('密钥存着却说「还没配 AI」—— 用户会跑去重配一遍');
+
   console.log('\n=== 结论 ===');
   console.log(`假服务商收到的请求：模型列表 ${hits.models} 次、对话 ${hits.chat} 次`);
   console.log(`带上的鉴权头：${[...new Set(hits.authSeen)].join(', ') || '（无）'}`);

@@ -990,6 +990,9 @@ details[open] summary { margin-bottom: 4px; }
   font-size: 12px; font-weight: 650;
 }
 .mode-pill:active { transform: scale(.97); }
+/* 三种口径：未配置 / 已开启 / 连不上（三种状态都由 js/ai.js#aiLabelOf 判定） */
+.mode-pill.idle { background: #F3EFEA; color: var(--ink-2); }
+.mode-pill.bad { background: #FBEAE2; color: #A8503A; }
 .mode-pill-go { font-size: 13px; opacity: .55; }
 
 /* 通用的「先藏起来」：说一句 / 搜食物 两个面板切换用 */
@@ -1050,17 +1053,49 @@ details[open] summary { margin-bottom: 4px; }
   color: var(--ink-2);
   background: #F2F0EA;
 }
+/* 图标色只用来分区，不当装饰：rose = 与「你」相关的设置，green = 成长，
+   gray = 数据与帮助，red 只留给「从头开始」这条危险操作。
+   v52 之前这里一行一个颜色（7 种），颜色多到不表达任何含义。 */
 .set-ico[data-tone="rose"] { background: #FDECF0; color: #D9677F; }
-.set-ico[data-tone="gold"] { background: #FDF3E2; color: #B98432; }
 .set-ico[data-tone="green"] { background: #EEF6F0; color: #4F8368; }
-.set-ico[data-tone="blue"] { background: #EDF2F4; color: #5C7D8A; }
-.set-ico[data-tone="red"] { background: #FBEAE2; color: #C2694B; }
-.set-ico[data-tone="mauve"] { background: #F6EFF5; color: #96648A; }
 .set-ico[data-tone="gray"] { background: #F2F0EA; color: #7A7264; }
+.set-ico[data-tone="red"] { background: #FBEAE2; color: #C2694B; }
 .set-main { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .set-main b { font-size: 14px; font-weight: 650; }
 .set-main em { font-style: normal; font-size: 11.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-go { color: var(--ink-3); font-size: 18px; }
+/* ── 设置分组（v52）──────────────────────
+   7 张同权白卡 → 2 组 + 1 条危险操作。
+   一组一个外壳、组内细分隔线：组与组之间才有间距，组内是一张表。 */
+.set-group { margin-bottom: 16px; }
+.set-group-title {
+  margin: 0 0 6px 4px;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.set-group-body {
+  background: #FFFCFC;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.set-group-body .set-row {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  min-height: 58px;
+}
+.set-group-body .set-row + .set-row { border-top: 1px solid var(--line); }
+.set-group-body .set-row:active { background: var(--rose-soft); }
+/* 危险操作单独沉底，不跟「关于」混在一组里 */
+.set-row.danger { margin-bottom: 0; }
+.set-row.danger .set-main b { color: #A8503A; }
+.set-row.danger .set-go { color: #D9A08D; }
+.set-row.danger:active { background: #FCF1EC; }
+
 .set-note {
   background: #FFFCFC;
   border: 1px solid var(--line);
@@ -1072,6 +1107,62 @@ details[open] summary { margin-bottom: 4px; }
   margin-bottom: 10px;
 }
 .set-note b { color: var(--ink); }
+
+/* ── AI 设置顶部状态卡（v52）──────────────
+   把「配置在不在」和「上次通没通」分开说：密钥存着但这次没连上时，
+   以前这里什么都不显示，用户分不清是填错了还是网断了。 */
+.ai-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid transparent;
+}
+.ai-state b { font-size: 13px; }
+.ai-state span { color: var(--ink-2); word-break: break-word; }
+.ai-state.idle { background: #F5F1EC; border-color: #E7DFD6; }
+.ai-state.ok { background: #F1F7F2; border-color: #DCEBE0; }
+.ai-state.ok b { color: #3F7355; }
+.ai-state.bad { background: #FCF0E8; border-color: #F2DDD0; }
+.ai-state.bad b { color: #A8503A; }
+
+/* 高级设置：默认折叠，摘要写清里面有什么（第一次用的人只需要服务商 + 密钥） */
+details.adv {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #FFFCFC;
+  margin: 2px 0 14px;
+}
+details.adv > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 11px 14px;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+details.adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary b { font-size: 13.5px; }
+details.adv > summary span { font-size: 11.5px; color: var(--ink-3); }
+details.adv > summary::after {
+  content: '›';
+  margin-left: auto;
+  transform: rotate(90deg);
+  transition: transform .18s ease;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1;
+}
+details.adv[open] > summary::after { transform: rotate(-90deg); }
+details.adv[open] > summary { border-bottom: 1px solid var(--line); }
+.adv-body { padding: 12px 14px 2px; }
 
 /* 更新说明（v28）：一条版本一块，条目用列表，别堆成一大段 */
 .update-entry {

@@ -15,6 +15,7 @@ import {
 } from '../js/ai-core.js';
 import { readAiConfig, writeAiConfig, clearAiConfig, AI_CONFIG_KEY } from '../js/ai-config.js';
 import { modelsUrl, parseModelsResponse, normalizeAiConfigInput, publicAiConfig, PRESETS } from '../js/providers.js';
+import { aiLabelOf } from '../js/ai.js';
 
 /** 假的 localStorage，用来隔离测试 */
 function fakeStorage() {
@@ -426,4 +427,22 @@ test('DeepSeek 请求显式关掉思考模式；别家不带这个参数', async
     },
   });
   assert.equal(other[0].thinking, undefined, '别家服务商不认识 thinking，不能乱加');
+});
+
+test('AI 状态的三种说法：没配 / 已开启 / 连不上（v52）', () => {
+  // 一次都没配过
+  assert.deepEqual(aiLabelOf({ saved: false, ok: null }), { text: '还没配 AI', short: '去配置', tone: 'idle' });
+
+  // 配好了但还没测过 —— 不能说「连不上」。启动时不花请求去测，ok 就是 null，
+  // 这里如果判错，用户每次打开都会看到「AI 连不上」而其实好好的。
+  assert.equal(aiLabelOf({ saved: true, ok: null }).text, 'AI 已开启');
+  assert.equal(aiLabelOf({ saved: true, ok: true }).text, 'AI 已开启');
+
+  // 密钥存着、这次没连上：不许说「还没配」（用户会以为白填了，跑去重配一遍）
+  const bad = aiLabelOf({ saved: true, ok: false });
+  assert.equal(bad.text, 'AI 连不上');
+  assert.equal(bad.tone, 'bad');
+
+  // 参数缺失也不能抛错（启动早期可能还没问完服务端）
+  assert.equal(aiLabelOf().text, '还没配 AI');
 });

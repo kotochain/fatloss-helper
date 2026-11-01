@@ -126,6 +126,8 @@ const MUTATIONS = [
   { file: 'js/cardio.js', from: "  return Object.prototype.hasOwnProperty.call(GOALS, key) ? key : 'fat_burn';", to: '  return key;', why: '训练目标认不出来要回「燃脂」（否则推荐拿不到目标）' },
   // ── 第十一轮：AI 设置留空密钥 + 「只填热量」──
   { file: 'js/providers.js', from: "const apiKey = askedKey || (presetChanged ? '' : (existing?.apiKey || ''));", to: 'const apiKey = askedKey;', why: '输入框留空（空字符串）必须沿用已保存的密钥，不能报「密钥没填」' },
+  // v52：AI 状态把「还没测过」当成「连不上」（配好但没测过的人，每次打开都被说连不上）
+  { file: 'js/ai.js', from: "if (state.ok === false) return { text: 'AI 连不上'", to: "if (state.ok !== true) return { text: 'AI 连不上'", why: '没测过 ≠ 连不上' },
   // v51：补记历史体重却改了当前目标 / 改餐次只改字段没搬桶 / 「全部清除」漏掉密钥
   { file: 'js/store.js', from: 'return dateKey === today;', to: 'return true;', why: '只有记的是今天，才更新当前体重' },
   { file: 'js/store.js', from: 'if (nextMeal !== k) {', to: 'if (false) {', why: '改餐次要真的把条目搬到那一餐' },

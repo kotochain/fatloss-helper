@@ -627,7 +627,7 @@ async function main() {
     await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
     await sleep(300);
 
-    // 设置页（一排图标）
+    // 设置页（一排图标）。v52：设置页分组 —— 7 张同权卡片收成 2 组 + 1 条危险操作
     await evaluate(client, `document.querySelector('#profileBtn')?.click()`);
     await sleep(400);
     const settings = await evaluate(client, `(() => {
@@ -639,9 +639,58 @@ async function main() {
         图标尺寸: svgs.length ? Math.min(...svgs.map((s) => Number(s.getAttribute('width')) || 0)) : 0,
         图标块最小: tiles.length ? Math.round(Math.min(...tiles.map((t) => t.getBoundingClientRect().width))) : 0,
         兜底: [...document.querySelectorAll('#sheetBody svg.icon[data-kind="fallback"]')].length,
+        // v52：7 张同权卡片 → 2 组 + 1 条危险操作
+        分组: document.querySelectorAll('#sheetBody .set-group').length,
+        危险行: document.querySelectorAll('#sheetBody .set-row.danger').length,
       };
     })()`);
     await screenshot(client, path.join(outDir, `shot-${size.name}-7-settings.png`));
+
+    // 第七步四分之一（v52）：AI 设置分「基础 / 高级」——
+    // 第一次用的人只该看到「选服务商 + 贴密钥」，接口地址/模型名不该摊在首屏。
+    await evaluate(client, `document.querySelector('#sheetBody [data-set="ai"]')?.click()`);
+    await sleep(800);
+    const aiLayers = await evaluate(client, `(() => {
+      const adv = document.querySelector('#aiAdvanced');
+      const status = document.querySelector('#aiStatusCard');
+      // 折叠起来的 <details> 内容在 Chrome 里 layout 还在（rect 不是 0），
+      // 只有 checkVisibility() 认得出「它没显示」—— 用 rect 判断会永远为真。
+      const visible = (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return false;
+        if (typeof el.checkVisibility === 'function') return el.checkVisibility();
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      const openBefore = adv ? adv.open : null;
+      const folded = { 地址: visible('#aiBaseUrl'), 模型: visible('#aiModel'), 看图模型: visible('#aiVisionModel') };
+      adv?.querySelector('summary')?.click();
+      const opened = { 地址: visible('#aiBaseUrl'), 模型: visible('#aiModel'), 看图模型: visible('#aiVisionModel') };
+      return {
+        状态卡: status ? status.textContent.replace(/\s+/g, ' ').trim() : '',
+        有教程: Boolean(document.querySelector('#aiKeyGuide')),
+        高级默认展开: openBefore,
+        折叠时: folded,
+        展开后: opened,
+      };
+    })()`);
+    await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+    await evaluate(client, `document.querySelector('#profileBtn')?.click()`);
+    await sleep(400);
+
+    // 第七步三分之一（v52）：备份页要说清「不含 AI 密钥」——
+    // 换手机导入后「说一句」突然不能用了，是最容易让人以为「备份没导全」的一处。
+    await evaluate(client, `document.querySelector('#sheetBody [data-set="backup"]')?.click()`);
+    await sleep(500);
+    const backupNote = await evaluate(client, `(() => ({
+      正文: (document.querySelector('#sheetBody')?.innerText || '').replace(/\s+/g, ' ').trim(),
+      有导出: Boolean(document.querySelector('#doExport')),
+    }))()`);
+    await evaluate(client, `document.querySelector('#sheetClose')?.click()`);
+    await sleep(300);
+    await evaluate(client, `document.querySelector('#profileBtn')?.click()`);
+    await sleep(400);
 
     // 第七步半：设置 → 关于 →「检查更新」（v29）——没新版时应明确说「已经是最新版本」，
     // 不能点了没反应（用户手动点的按钮必须给反馈）。
@@ -788,7 +837,7 @@ async function main() {
       await sleep(900);
     }
 
-    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest, midnight, ringStart, ringAfter, dayCtx, editEntry };
+    entry.results = { sheetOpen, searchWorks, amountPreview, afterAdd, aiFallback, aiFallbackAfterDel, aiFallbackSaved, leftover, deadEnd, deadEndAfter, nudgeToday, nudgeTodayAfter, nudgeYesterday, skipYesterday, tabs, iconAudit, growth, settings, aboutCheck, update, refresh, profilePreview, manifest, midnight, ringStart, ringAfter, dayCtx, editEntry, aiLayers, backupNote };
     entry.consoleErrors = ERROR_BUCKET.slice(0, 10);
     report.sizes.push(entry);
     client.close();
@@ -839,7 +888,9 @@ function printReport(report) {
     if (r.iconAudit.emoji行.length) for (const l of r.iconAudit.emoji行) console.log(`       ↳ 还有 emoji：${l}`);
     console.log(`  成长弹层：植物插画 ${r.growth.植物} 个｜徽章图标 ${r.growth.徽章图标} 个（最小 ${r.growth.徽章尺寸}px）｜徽章名 ${r.growth.标签数} 个（空 ${r.growth.空标签} 个）｜未解锁 ${r.growth.未解锁} 个 / 锁标 ${r.growth.锁标} 个｜兜底 ${r.growth.兜底} 个`);
     if (r.growth.空标签) console.log(`       ↳ 有 ${r.growth.空标签} 个徽章没有名字（badgeLabel 少传了参数就会这样）`);
-    console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜图标 ${r.settings.图标尺寸}px / 图标块 ${r.settings.图标块最小}px（要求 ≥22 / ≥34）｜兜底 ${r.settings.兜底} 个`);
+    console.log(`  设置页：图标 ${r.settings.图标} 个 / ${r.settings.行数} 行｜分成 ${r.settings.分组} 组 + 危险行 ${r.settings.危险行} 条｜图标 ${r.settings.图标尺寸}px / 图标块 ${r.settings.图标块最小}px（要求 ≥22 / ≥34）｜兜底 ${r.settings.兜底} 个`);
+    console.log(`  备份页说明：${r.backupNote?.有导出 ? '有导出按钮' : '缺导出按钮'}｜${/不含 AI 密钥/.test(r.backupNote?.正文 || '') ? '写清了不含 AI 密钥' : '没说清备份里有没有密钥'}`);
+    console.log(`  AI 设置分层：状态卡「${r.aiLayers?.状态卡 || '缺'}」｜高级默认${r.aiLayers?.高级默认展开 ? '展开（不该）' : '折叠'}｜折叠时露出的输入框 ${JSON.stringify(r.aiLayers?.折叠时)}｜展开后 ${JSON.stringify(r.aiLayers?.展开后)}`);
     console.log(`  关于页检查更新：按钮 ${r.aboutCheck.有按钮 ? '有' : '缺'}｜版本行 ${r.aboutCheck.版本行 || '（空）'}｜提示「${r.aboutCheck.提示}」`);
     console.log(`  更新弹窗：标题「${r.update.标题}」｜${r.update.版本}｜条目 ${r.update.条目数} 条｜按钮 ${r.update.有按钮 ? '有' : '缺'}`);
     console.log(`  刷新弹窗：标题「${r.refresh.标题}」｜假版本 ${r.refresh.假版本}｜按钮 ${JSON.stringify(r.refresh.按钮)}｜横幅「${r.refresh.横幅.文字}」`);
@@ -882,6 +933,12 @@ function printReport(report) {
       || r.growth.徽章图标 > 0 && r.growth.徽章尺寸 < 48
       || r.growth.锁标 !== r.growth.未解锁
       || r.settings.图标 < 5 || r.settings.兜底 > 0
+      || !/还没配|已经配好|连不上/.test(r.aiLayers?.状态卡 || '')
+      || r.aiLayers?.高级默认展开 === true
+      || r.aiLayers?.折叠时?.地址 || r.aiLayers?.折叠时?.模型
+      || !r.aiLayers?.展开后?.地址 || !r.aiLayers?.有教程
+      || !r.backupNote?.有导出 || !/不含 AI 密钥/.test(r.backupNote?.正文 || '')
+      || r.settings.分组 < 2 || r.settings.危险行 < 1
       || r.settings.图标 > 0 && (r.settings.图标尺寸 < 22 || r.settings.图标块最小 < 34)
       || r.update.标题 !== '更新了什么' || r.update.条目数 < 1 || !r.update.有按钮
       || !String(r.searchWorks.排序[0] || '').includes('熟重')
