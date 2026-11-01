@@ -447,7 +447,7 @@ function renderCrash(err, which) {
   app.innerHTML = `
     <div class="card">
       <div class="card-title">这一页出了点问题</div>
-      <p class="small muted" style="margin:0 0 12px">
+      <p class="small muted mb-3">
         「${esc(where)}」这一页没能显示出来。你的记录还在，不用怕 —— 先试试下面第一个按钮。
       </p>
       <button class="btn block" data-act="crash-retry">重新打开这一页</button>
@@ -455,7 +455,7 @@ function renderCrash(err, which) {
         <button class="btn ghost grow" data-act="crash-other">回到今天</button>
         <button class="btn ghost grow" data-act="crash-export">先导出备份</button>
       </div>
-      <details style="margin-top:14px">
+      <details class="mt-3">
         <summary class="tiny muted" style="cursor:pointer">技术信息（可以截图发给我）</summary>
         <p class="tiny muted" style="word-break:break-all;margin:8px 0 0">${esc(String(err && err.message || err))}</p>
       </details>
@@ -802,7 +802,7 @@ function onboardFirst(review = false) {
         练了什么也能记 —— 记录页切到「练的」。</p>
       </div>`,
     foot: `<button class="btn block" id="obGo">去记一笔</button>
-      <button class="btn ghost block" id="obLater" style="margin-top:8px">我先随便看看</button>`,
+      <button class="btn ghost block mt-2" id="obLater">我先随便看看</button>`,
     onMount: (_b, foot) => {
       $('#obGo', foot).addEventListener('click', () => {
         finishOnboarding(review);
@@ -849,8 +849,8 @@ function renderWelcome() {
     ? `
     <div class="card warn danger">
       <div class="card-title">${icon('alert', { size: 16 })} 有一份记录没读出来</div>
-      <p class="small" style="margin:0 0 8px">${esc(startupNotice.text)}</p>
-      <p class="tiny muted" style="margin:0 0 12px">
+      <p class="small mb-2">${esc(startupNotice.text)}</p>
+      <p class="tiny muted mb-3">
         原始内容我已经原样留在这台手机里了，没有删。你可以先导出一份发我，或者重新开始 —— 原来的记录不会因为重新开始就被抹掉。
       </p>
       <div class="btn-row">
@@ -876,7 +876,7 @@ function renderWelcome() {
       <div class="btn-row">
         <button class="btn ghost grow" data-act="recover">已经用过？点这里找回记录</button>
       </div>
-      <p class="tiny muted" style="margin:12px 0 0">
+      <p class="tiny muted mt-3">
         它只做估算和记录，不是医疗建议。如果你怀孕/哺乳、有甲状腺或肾脏问题、在吃影响体重的药，
         或者年龄未满 18 岁，请先问医生，不要照这里的数字吃。
       </p>
@@ -1065,13 +1065,13 @@ function renderToday() {
               <p>${esc(x.detail)}</p>
             </div>
           </div>`).join('')}
-        ${insightHint(state) ? `<p class="tiny muted" style="margin:8px 0 0">${esc(insightHint(state).text)}</p>` : ''}
-        ${myInsights(3).length ? `<button class="btn ghost block" style="margin-top:10px" data-act="insights">看全部规律</button>` : ''}
+        ${insightHint(state) ? `<p class="tiny muted mt-2">${esc(insightHint(state).text)}</p>` : ''}
+        ${myInsights(3).length ? `<button class="btn ghost block mt-3" data-act="insights">看全部规律</button>` : ''}
       </div>` : ''}
 
     <div class="card flat coach-card">
       <div class="card-title">接下来怎么吃</div>
-      <p class="tiny muted" style="margin:0 0 10px">用你今天的记录算的，不猜、不编。</p>
+      <p class="tiny muted mb-3">用你今天的记录算的，不猜、不编。</p>
       <button class="btn ghost block" data-act="coach">问教练</button>
     </div>
 
@@ -1121,8 +1121,8 @@ function renderToday() {
           </div>`;
         }).join('') || '<div class="tiny muted">还没记</div>'}
         <div class="row" style="gap:6px;margin-top:8px">
-          <button class="add-line grow" data-act="add-food" data-meal="${slot.key}" style="margin-top:0">＋ 加食物</button>
-          <button class="add-line grow" data-act="quick-fill" data-meal="${slot.key}" style="margin-top:0">${icon('chat', { size: 15 })} 说一句</button>
+          <button class="add-line grow mt-0" data-act="add-food" data-meal="${slot.key}">＋ 加食物</button>
+          <button class="add-line grow mt-0" data-act="quick-fill" data-meal="${slot.key}">${icon('chat', { size: 15 })} 说一句</button>
         </div>
       </div>`;
     }).join('')}
@@ -1138,7 +1138,7 @@ function renderToday() {
         </div>`;
       }).join('') || '<div class="tiny muted">还没记（走路也算，记上会更准）</div>'}
       <button class="add-line" data-act="add-exercise">＋ 加运动</button>
-      <p class="tiny muted" style="margin:8px 0 0">消耗是按体重和时长估的（手环通常偏高）。这部分不会加进你能吃的额度 —— 动了就多吃，缺口就白练了。</p>
+      <p class="tiny muted mt-2">消耗是按体重和时长估的（手环通常偏高）。这部分不会加进你能吃的额度 —— 动了就多吃，缺口就白练了。</p>
     </div>
 
 `;
@@ -1196,7 +1196,7 @@ function renderFoodPane() {
         </button>
       </div>
       <textarea id="quickText" rows="3" placeholder="今天吃了什么？例如：中午吃了碗牛肉面，加了个蛋"></textarea>
-      <div class="btn-row" style="margin-top:8px">
+      <div class="btn-row mt-2">
         <button class="btn grow" id="quickParse">解析这一句</button>
       </div>
       <div id="quickResult"></div>
@@ -1204,8 +1204,8 @@ function renderFoodPane() {
 
     <div class="card">
       <div class="card-title">手动记一笔</div>
-      <p class="small muted" style="margin:0 0 10px">支持输入「150克」「2个」「一小碗」「半斤」这类写法。包装食品照背面标签填最准。</p>
-      <div class="btn-row" style="margin-top:0">
+      <p class="small muted mb-3">支持输入「150克」「2个」「一小碗」「半斤」这类写法。包装食品照背面标签填最准。</p>
+      <div class="btn-row mt-0">
         ${MEAL_SLOTS.map((s) => `<button class="btn ghost grow" data-act="add-food" data-meal="${s.key}">${s.label}</button>`).join('')}
       </div>
     </div>
@@ -1222,13 +1222,13 @@ function renderFoodPane() {
     <div class="card">
       <div class="card-title">全部食物 <span class="tiny muted">共 ${FOODS.length} 种</span></div>
       <input type="text" id="logSearch" placeholder="搜索食物，例如：鸡胸 / 米饭 / 奶茶" autocomplete="off">
-      <div id="logResults" style="margin-top:8px"></div>
+      <div id="logResults" class="mt-2"></div>
     </div>
 
     <div class="card">
       <div class="card-title">找不到？自己加</div>
       <button class="btn block" id="customFoodBtn">＋ 新增自定义食物</button>
-      ${state.customFoods.length ? `<div style="margin-top:10px">${state.customFoods.map((f) => `
+      ${state.customFoods.length ? `<div class="mt-3">${state.customFoods.map((f) => `
         <div class="search-hit" data-act="quick-add" data-id="${f.id}" data-grams="${f.servings[0][1]}">
           <span class="nm">${esc(f.name)}<em>每 100 克 ${f.kcal} kcal · 自定义</em></span>
           <span class="kk">＋</span>
@@ -1325,7 +1325,7 @@ function drawTrainingEstimate() {
     <div class="tiny muted">
       ${action ? `${esc(action.name)} · ${minutes} 分钟 · METs ${action.mets} × 体重 ${weightKg} kg × ${round(minutes / 60, 2)} 小时` : '先挑一个动作，这里会算出大概消耗'}
     </div>
-    <div class="tiny muted" style="margin-top:4px">
+    <div class="tiny muted mt-1">
       这部分消耗不会加回「今天还可以吃」的额度 —— 它直接变成当天的缺口，所以不用、也不该吃回来。
       手环给的数字通常比这里高，这里只是粗略估算。
     </div>`;
@@ -1364,22 +1364,22 @@ function renderTrainingPane() {
         <div class="chips" id="trainEquip">
           ${listEquipment().map((eq) => `<button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-train-eq="${eq.key}">${icon(eq.icon, { size: 15 })} ${eq.name}</button>`).join('')}
         </div>
-        <p class="tiny muted" style="margin:8px 0 0">勾了哪些，下面就只列哪些做得了的动作（和「计划」页共用同一份勾选）。</p>
+        <p class="tiny muted mt-2">勾了哪些，下面就只列哪些做得了的动作（和「计划」页共用同一份勾选）。</p>
       </details>
 
-      <div class="tiny muted" style="margin:12px 0 6px">练了什么？<span class="muted">（只列出现在勾的器械做得了的动作）</span></div>
+      <div class="tiny muted mt-3 mb-1">练了什么？<span class="muted">（只列出现在勾的器械做得了的动作）</span></div>
       <div class="chips" id="trainCardio">
         ${actions.cardio.map((e, i) => `<button class="chip ${trainingPick.cardioId === e.id ? 'on' : ''}${i >= 6 ? ' extra' : ''}" data-train-cardio="${e.id}">${esc(e.name)}</button>`).join('')
           || '<span class="tiny muted">按现在勾的器械没有能做的动作。勾上「徒手/地面」—— 徒手循环和 HIIT 都不需要器械。</span>'}
         ${actions.cardio.length > 6 ? `<button class="chip more" data-act="more-cardio">还有 ${actions.cardio.length - 6} 个动作</button>` : ''}
       </div>
 
-      <div class="tiny muted" style="margin:12px 0 6px">力量训练<span class="muted">（不用器械也能做）</span></div>
+      <div class="tiny muted mt-3 mb-1">力量训练<span class="muted">（不用器械也能做）</span></div>
       <div class="chips" id="trainStrength">
         ${actions.strength.map((s) => `<button class="chip ${trainingPick.exerciseKey === s.key ? 'on' : ''}" data-train-strength="${s.key}">${esc(s.name)}</button>`).join('')}
       </div>
 
-      <label class="field" style="margin-top:12px"><span>练了多久</span>
+      <label class="field mt-3"><span>练了多久</span>
         <div class="chips" id="trainMinutes">
           ${[15, 20, 30, 45, 60].map((m) => `<button class="chip ${minutes === m ? 'on' : ''}" data-train-min="${m}">${m} 分钟</button>`).join('')}
         </div>
@@ -1403,8 +1403,8 @@ function renderTrainingPane() {
       </label>
 
       <div class="train-estimate" id="trainEstimate"></div>
-      ${dateKey !== today ? `<div class="warn info" style="margin-top:10px">这些数字按「今天」算；你上面选的是${dayLabel(dateKey)}，记完会写到那一天。</div>` : ''}
-      <button class="btn block" id="trainSave" style="margin-top:10px">记上这次运动</button>
+      ${dateKey !== today ? `<div class="warn info mt-3">这些数字按「今天」算；你上面选的是${dayLabel(dateKey)}，记完会写到那一天。</div>` : ''}
+      <button class="btn block mt-3" id="trainSave">记上这次运动</button>
     </div>
 
     <div class="card">
@@ -1419,7 +1419,7 @@ function renderTrainingPane() {
       </p>
       <hr class="sep">
       ${rows.length ? rows.map((r) => trainingRow(r, { showDate: true })).join('') : '<div class="tiny muted">还没有运动记录。走路也算 —— 记上比不记准。</div>'}
-      <p class="tiny muted" style="margin:10px 0 0">
+      <p class="tiny muted mt-3">
         消耗按「动作强度 × 体重 × 时长」估算，和手环对不上很正常。记运动是为了看清自己动了多少，不是给「多吃一点」找理由。
       </p>
     </div>`;
@@ -1540,7 +1540,7 @@ function openDraftSheet() {
     // 一条都没认出来时，标题不能还问「这样记对吗？」
     title: draft.items.length ? '这样记对吗？' : '这句没能解析',
     body: `${draft.dateKey && draft.dateKey !== todayKey()
-      ? `<div class="warn info" style="margin:0 0 10px">这一段会记到<b>${dayLabel(draft.dateKey)}</b>，不是今天。</div>`
+      ? `<div class="warn info mb-3">这一段会记到<b>${dayLabel(draft.dateKey)}</b>，不是今天。</div>`
       : ''}<div id="draftHost"></div>`,
     onMount: () => {
       drawDraft();
@@ -1718,21 +1718,21 @@ function drawDraft() {
     const examples = ['一碗牛肉面加了个蛋', '半碗米饭、一份红烧肉', '一杯奶茶、一份鸡排'];
     const canRetry = aiOn();
     box.innerHTML = `
-      <div class="warn" style="margin-top:10px">
+      <div class="warn mt-3">
         ${draft.noAi
           ? '还没配置 AI，所以这句话还没解析。配好后说一句话就能记；也可以先手动记一笔。'
           : (draft.aiError
             ? `这句没能记上：AI 没连上（${esc(draft.aiError)}）。检查网络或密钥后再试一次。`
             : '这句没能记上：AI 这次没解析出食物。可以换个说法再试，或者手动记一笔。')}
       </div>
-      <p class="tiny muted" style="margin:0 0 8px">
+      <p class="tiny muted mb-2">
         ${canRetry
           ? '用 AI 重新解析这一句，它会按最接近的常见食物估一条。'
           : '在「我的 → 设置 → AI 设置」配好 AI，任何食物都能估。'}
       </p>
-      <button class="btn block" style="margin-top:12px" id="draftRetryAi">${canRetry ? '用 AI 重新解析这一句' : '去配 AI'}</button>
-      <button class="btn ghost block" style="margin-top:8px" id="draftManual">手动搜食物记一笔</button>
-      <button class="btn ghost block" style="margin-top:8px" id="draftAgain">回到输入框改一改</button>
+      <button class="btn block mt-3" id="draftRetryAi">${canRetry ? '用 AI 重新解析这一句' : '去配 AI'}</button>
+      <button class="btn ghost block mt-2" id="draftManual">手动搜食物记一笔</button>
+      <button class="btn ghost block mt-2" id="draftAgain">回到输入框改一改</button>
       <p class="tiny muted" style="margin:12px 0 8px">或者换成下面这种说法再试：</p>
       <div class="chips" id="draftExamples">
         ${examples.map((e) => `<button class="chip" type="button" data-example="${esc(e)}">${esc(e)}</button>`).join('')}
@@ -1769,33 +1769,33 @@ function drawDraft() {
   const totals = sumItems(draft.items);
   const needsCheck = draft.items.some((it) => it.needsConfirm);
   box.innerHTML = `
-    <div class="warn ${draft.source === 'ai' ? 'info' : ''}" style="margin-top:10px">
+    <div class="warn ${draft.source === 'ai' ? 'info' : ''} mt-3">
       这次是：${draft.source === 'ai'
         ? 'AI 认出来的'
         : (draft.source === 'cache' ? '用的是你之前存过的食物（没花 AI 请求）' : '本地记的')}
       ${draft.aiError ? `｜AI 这次没成功：${esc(draft.aiError)}` : ''}
       ${draft.note ? `<br>${esc(draft.note)}` : ''}
     </div>
-    ${(draft.aiEstimated || []).length ? `<div class="warn" style="margin-bottom:6px">
+    ${(draft.aiEstimated || []).length ? `<div class="warn mb-1">
       有 ${draft.aiEstimated.length} 样食物库里没有，这份营养是 <b>AI 估的</b>（本地按 4/9/4 核对过）：
       <b>${draft.aiEstimated.map((x) => esc(x)).join('、')}</b>。记上后会存进「我的食物」，下次直接认得；
       不准就点右边的 × 删掉，或者直接改克数。
     </div>` : ''}
-    ${(draft.estimated || []).length ? `<div class="warn" style="margin-bottom:6px">
+    ${(draft.estimated || []).length ? `<div class="warn mb-1">
       有 ${draft.estimated.length} 样食物库里没有，先按<b>同类食物的平均值</b>估了（标签「估算」）：
       <b>${draft.estimated.map((x) => esc(x)).join('、')}</b>。不准就点右边的 × 删掉，或者直接改克数。
     </div>` : ''}
     ${(draft.aiQuestions || []).map((q, i) => `
-      <div class="warn info" style="margin-bottom:6px" data-ai-question="${i}">
+      <div class="warn info mb-1" data-ai-question="${i}">
         <div>AI 想确认一下：${esc(q)}</div>
-        <input type="text" data-aiq-input="${i}" maxlength="60" placeholder="知道就补一句；不知道就点下面" style="margin-top:6px">
-        <div class="chips" style="margin-top:6px">
+        <input type="text" data-aiq-input="${i}" maxlength="60" placeholder="知道就补一句；不知道就点下面" class="mt-1">
+        <div class="chips mt-1">
           <button class="chip" type="button" data-aiq-send="${i}">按这个重新估</button>
           <button class="chip" type="button" data-aiq-skip="${i}">我也不知道，你按常见的估</button>
         </div>
       </div>`).join('')}
-    ${draft.questions.map((q) => `<div class="warn" style="margin-bottom:6px">想确认一下：${esc(q)}</div>`).join('')}
-    <div style="margin-top:8px">
+    ${draft.questions.map((q) => `<div class="warn mb-1">想确认一下：${esc(q)}</div>`).join('')}
+    <div class="mt-2">
       ${draft.items.map((it, i) => `
         <div class="entry draft-entry">
           <div class="draft-line">
@@ -1821,10 +1821,10 @@ function drawDraft() {
             </div>
           </div>` : ''}`).join('')}
     </div>
-    <div class="row between small" style="margin-top:8px">
+    <div class="row between small mt-2">
       <span>这一餐合计约 <b>${Math.round(totals.kcal)}</b> kcal · 蛋白 ${Math.round(totals.protein)} g</span>
     </div>
-    <label class="field" style="margin-top:10px"><span>记到哪一餐</span>
+    <label class="field mt-3"><span>记到哪一餐</span>
       <div class="chips" id="draftMeal">
         ${MEAL_SLOTS.map((sl) => `<button class="chip ${sl.key === draft.meal ? 'on' : ''}" data-meal="${sl.key}">${sl.label}</button>`).join('')}
       </div>
@@ -1833,7 +1833,7 @@ function drawDraft() {
       <button class="btn grow" id="draftSave">就这样，记上</button>
       <button class="btn ghost" id="draftCancel">重写</button>
     </div>
-    ${needsCheck ? '<p class="tiny muted" style="margin:8px 0 0">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
+    ${needsCheck ? '<p class="tiny muted mt-2">有「待确认」的条目也可以直接记 —— 记录本来就有误差，先记上比不记强，之后可以随时改份量。</p>' : ''}`;
 
   // AI 追问：补一句就带着原句重新估；点「不知道」就按现有估算记，问题当场消失。
   // 「不知道」只有用户有资格说 —— 点了之后 AI 不再追问，数字用它已经估好的那份。
@@ -1981,27 +1981,28 @@ function renderPlan() {
   app.innerHTML = `
     <div class="card">
       <div class="card-title">一天怎么吃 <span class="tiny muted">按约 ${Math.round(t.targetCalories / 10) * 10} kcal / 蛋白 ${Math.round(t.proteinG)} g 配</span></div>
-      <div class="row between small" style="margin-bottom:6px">
+      <div class="row between small mb-1">
         <span>这份餐单合计约 <b>${Math.round(plan.planKcalWithOil / 10) * 10}</b> kcal、蛋白约 <b>${Math.round(plan.planProteinG)}</b> g</span>
         <span class="tag ${Math.abs(plan.deviation) <= 10 ? 'green' : 'amber'}">${plan.deviation > 0 ? '+' : ''}${Math.round(plan.deviation)}%</span>
       </div>
-      ${plan.cookingOilG > 0 ? `<details class="why" style="margin-bottom:10px">
+      <!-- 主操作放在摘要正下方：不能让用户滚完整张餐单才看到「采用」（总账 UX 评估第 3 组） -->
+      <div class="btn-row mt-3">
+        <button class="btn grow" data-act="use-plan">按这个餐单记到${dayLabel(dateKey)}</button>
+        <button class="btn ghost" data-act="next-plan">换一套</button>
+      </div>
+      ${plan.cookingOilG > 0 ? `<details class="why mb-3">
         <summary>烹调油也算进去了（全天 ${plan.cookingOilG} 克，约 ${plan.cookingOilKcal} kcal）</summary>
         <p>这份餐单里的菜按这个油量做的：${plan.meals.filter((m) => m.oilG > 0).map((m) => `${m.name} ${m.oilG} 克`).join('、')}。
         已经算进上面的总数，不用另外再加。</p>
       </details>` : ''}
-      <p class="tiny muted" style="margin:0 0 10px">${esc(plan.deviationNote)}</p>
+      <p class="tiny muted mb-3">${esc(plan.deviationNote)}</p>
       ${plan.meals.map((m) => `
         <div class="session">
           <h4>${m.name} <span class="tiny muted">${m.kcal} kcal / 蛋白 ${m.proteinG} g${m.oilG ? ` / 油 ${m.oilG} g` : ''}</span></h4>
-          <div class="small muted" style="margin-bottom:4px">${esc(m.dishName)}</div>
+          <div class="small muted mb-1">${esc(m.dishName)}</div>
           <ul>${m.items.map((it) => `<li>${esc(it.food.name)} ${esc(it.desc)}${it.clampedBy ? ' <span class="tag amber">已按热量封顶</span>' : ''}</li>`).join('')}</ul>
         </div>`).join('')}
-      <div class="btn-row">
-        <button class="btn grow" data-act="use-plan">按这个餐单记到${dayLabel(dateKey)}</button>
-        <button class="btn ghost" data-act="next-plan">换一套</button>
-      </div>
-      <p class="tiny muted" style="margin:8px 0 0">只是把食物写进${dayLabel(dateKey)}的记录里，之后可以点条目改份量或删掉。</p>
+      <p class="tiny muted mt-2">只是把食物写进${dayLabel(dateKey)}的记录里，之后可以点条目改份量或删掉。想换一套？回上面的摘要处点「换一套」。</p>
     </div>
 
     ${renderCardioCard()}
@@ -2009,8 +2010,8 @@ function renderPlan() {
     <div class="card">
       <div class="card-title">每天的固定提醒</div>
       <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
-        ${myInsights(2).map((x) => `<li style="margin-bottom:4px">${icon(x.icon, { size: 16 })} <b>${esc(x.title)}</b><br><span class="muted">${esc(x.detail)}</span></li>`).join('')
-          || buildDailyTips(t, plan.cookingOilG).map((x) => `<li style="margin-bottom:4px">${esc(x)}</li>`).join('')}
+        ${myInsights(2).map((x) => `<li class="mb-1">${icon(x.icon, { size: 16 })} <b>${esc(x.title)}</b><br><span class="muted">${esc(x.detail)}</span></li>`).join('')
+          || buildDailyTips(t, plan.cookingOilG).map((x) => `<li class="mb-1">${esc(x)}</li>`).join('')}
       </ul>
     </div>
 
@@ -2031,11 +2032,11 @@ function renderPlan() {
           <h4>${esc(s.title)} <span class="badge ${s.type}">${s.type === 'strength' ? '力量' : '有氧'} · ${s.minutes} 分钟</span></h4>
           <ul>${s.blocks.map((b) => `<li>${esc(b.name)} — ${esc(b.sets)}</li>`).join('')}</ul>
         </div>`).join('')}
-      <div class="warn info" style="margin-top:10px">每天走路目标 <b>${week.stepTarget}</b> 步。${esc(week.stepHint)}</div>
+      <div class="warn info mt-3">每天走路目标 <b>${week.stepTarget}</b> 步。${esc(week.stepHint)}</div>
       <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
-        ${week.notes.map((n) => `<li style="margin-bottom:4px">${esc(n)}</li>`).join('')}
+        ${week.notes.map((n) => `<li class="mb-1">${esc(n)}</li>`).join('')}
       </ul>
-      <p class="tiny muted" style="margin:8px 0 0">
+      <p class="tiny muted mt-2">
         这些动作都是在家能做的徒手或哑铃动作。做不动就先减次数、加组间休息；膝盖、腰、肩有旧伤就别做相应动作，先问医生或教练。
       </p>
     </div>`;
@@ -2096,7 +2097,7 @@ function renderCardioCard() {
       </div>
 
       ${rec.picks.length ? `
-        <div class="small muted" style="margin-bottom:8px">${esc(rec.advice)}</div>
+        <div class="small muted mb-2">${esc(rec.advice)}</div>
         ${rec.picks.map((p, i) => `
           <div class="session cardio-session">
             <h4>${i === 0 ? '首选：' : '也可以：'}${esc(p.name)} <span class="badge cardio">约 ${p.kcal} kcal / ${cardioPick.minutes} 分钟</span></h4>
@@ -2107,9 +2108,9 @@ function renderCardioCard() {
             </ul>
             <button class="add-line" data-log-cardio="${p.id}">${dateKey === todayKey() ? '今天就做这个' : `记到${dayLabel(dateKey)}`}（写入记录）</button>
           </div>`).join('')}
-        <details style="margin-top:6px">
+        <details class="mt-1">
           <summary class="small" style="cursor:pointer">想做的机器没空？点这里看替代方案</summary>
-          <div style="margin-top:8px">
+          <div class="mt-2">
             ${CARDIO.filter((e) => e.equipment.some((q) => cardioPick.equipment.includes(q))).slice(0, 8).map((e) => `
               <div class="search-hit" data-subs="${e.id}">
                 <span class="nm">${esc(e.name)}<em>METs ${e.mets} · ${e.tags?.join('/') || ''}</em></span>
@@ -2189,7 +2190,7 @@ function openSubstituteSheet(originalId) {
   openSheet({
     title: `${original.name} 做不了？`,
     body: `
-      <p class="small muted" style="margin:0 0 10px">
+      <p class="small muted mb-3">
         原动作需要：${original.equipment.map((q) => EQUIPMENT[q]?.name || q).join('、')}。
         按你勾选的可用器械，下面几个效果最接近：
       </p>
@@ -2308,7 +2309,7 @@ function renderProgress() {
         <input type="number" id="weightInput" inputmode="decimal" step="0.1" placeholder="例如 57.8" class="grow">
         <button class="btn" data-act="log-weight">记下</button>
       </div>
-      <p class="tiny muted" style="margin:10px 0 0">
+      <p class="tiny muted mt-3">
         早上空腹、上完厕所、穿同样的衣服称最可比。一天内的浮动 1 公斤很正常，看一周的平均值才有意义。
       </p>
     </div>
@@ -2327,14 +2328,14 @@ function renderProgress() {
           从 ${prog.fromKg} kg 到 ${prog.toKg} kg，${prog.days} 天变化 <b>${prog.deltaKg > 0 ? '+' : ''}${prog.deltaKg} kg</b>，
           平均每周 <b>${prog.perWeek > 0 ? '+' : ''}${prog.perWeek} kg</b>。
         </div>
-        <div class="warn info" style="margin-top:10px">${esc(prog.verdict)}</div>
-      ` : `<div class="tiny muted" style="margin-top:8px">${esc(prog.reason)}</div>`}
+        <div class="warn info mt-3">${esc(prog.verdict)}</div>
+      ` : `<div class="tiny muted mt-2">${esc(prog.reason)}</div>`}
     </div>
 
     <div class="card">
       <div class="card-title">数据与备份</div>
-      <p class="small muted" style="margin:0 0 10px">所有记录只在这台设备上。换手机或清浏览器缓存前，先导出一次存档。</p>
-      <div class="btn-row" style="margin-top:0">
+      <p class="small muted mb-3">所有记录只在这台设备上。换手机或清浏览器缓存前，先导出一次存档。</p>
+      <div class="btn-row mt-0">
         <button class="btn ghost grow" data-act="export">导出存档</button>
         <button class="btn ghost grow" data-act="import">导入存档</button>
       </div>
@@ -2371,19 +2372,19 @@ function openFoodSheet(mealKey, initialSay = '') {
       </div>
 
       <div id="paneSearch">
-        <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off" style="margin-top:10px">
+        <input type="text" id="foodSearch" placeholder="搜食物，例如：鸡胸 / 米饭 / 奶茶 / 苹果" autocomplete="off" class="mt-3">
         <details class="why" style="margin:4px 0 0">
           <summary>称的是生重还是熟重？</summary>
           <p>肉和鱼默认按「熟重」算；如果你称的是生重，选名字里带「生」的那条。</p>
         </details>
-        <div id="foodResults" style="margin-top:6px"></div>
-        <button class="btn ghost block" id="foodLabelBtn" style="margin-top:12px">${icon('clipboard', { size: 16 })} 照包装营养成分表填（更准）</button>
+        <div id="foodResults" class="mt-1"></div>
+        <button class="btn ghost block mt-3" id="foodLabelBtn">${icon('clipboard', { size: 16 })} 照包装营养成分表填（更准）</button>
       </div>
 
       <div id="paneSay" class="hidden">
-        <textarea id="foodSayText" rows="3" style="margin-top:10px" placeholder="例如：一碗牛肉面，加了个蛋">${esc(initialSay)}</textarea>
-        <button class="btn block" id="foodSayParse" style="margin-top:8px">解析并记到${slot.label}</button>
-        <p class="tiny muted" style="margin:8px 0 0">
+        <textarea id="foodSayText" rows="3" class="mt-3" placeholder="例如：一碗牛肉面，加了个蛋">${esc(initialSay)}</textarea>
+        <button class="btn block mt-2" id="foodSayParse">解析并记到${slot.label}</button>
+        <p class="tiny muted mt-2">
           解析完先给你看清单，克数能改，确认了才记上。连着说几样也行（「米饭一碗、青菜一份」）。
         </p>
       </div>
@@ -2402,7 +2403,7 @@ function openFoodSheet(mealKey, initialSay = '') {
           <input type="number" id="kcalProtein" inputmode="decimal" min="0" max="300" placeholder="不填就按 0 算">
         </label>
         <button class="btn block" id="kcalSave">记到${slot.label}</button>
-        <p class="tiny muted" style="margin:8px 0 0">
+        <p class="tiny muted mt-2">
           只填热量时，蛋白质和碳水那两栏会少算；「今天还能吃多少」不受影响。
         </p>
       </div>`,
@@ -2495,14 +2496,14 @@ function openAmountSheet(food, mealKey, editing = null) {
   openSheet({
     title: editing ? `改「${food.name}」` : `${food.name} → ${slot.label}`,
     body: `
-      <p class="small muted" style="margin:0 0 10px">每 100 克：${food.kcal} kcal · 蛋白 ${food.protein} g · 脂肪 ${food.fat} g · 碳水 ${food.carb} g</p>
+      <p class="small muted mb-3">每 100 克：${food.kcal} kcal · 蛋白 ${food.protein} g · 脂肪 ${food.fat} g · 碳水 ${food.carb} g</p>
       <label class="field"><span>吃了多少？（可写「150克」「2个」「一小碗」）</span>
         <input type="text" id="amountInput" inputmode="text" value="${editing ? editing.grams : servings[0][1]}" autocomplete="off">
       </label>
       <div class="chips" id="amountChips">
         ${servings.map(([label, g]) => `<button class="chip" data-grams="${g}">${label}（${g}g）</button>`).join('')}
       </div>
-      <label class="field" style="margin-top:12px"><span>记到哪一餐</span>
+      <label class="field mt-3"><span>记到哪一餐</span>
         <div class="chips" id="mealChips">
           ${MEAL_SLOTS.map((s) => `<button class="chip ${s.key === mealKey ? 'on' : ''}" data-meal="${s.key}">${s.label}</button>`).join('')}
         </div>
@@ -2572,7 +2573,7 @@ function openExerciseSheet() {
       <div class="chips" id="exChips">
         ${list.map((e) => `<button class="chip" data-ex="${e.key}">${esc(e.name)}</button>`).join('')}
       </div>
-      <label class="field" style="margin-top:14px"><span>练了多久（分钟）</span>
+      <label class="field mt-3"><span>练了多久（分钟）</span>
         <input type="number" id="exMinutes" inputmode="numeric" value="30" min="1" max="1440">
       </label>
       <div id="exPreview" class="warn info"></div>`,
@@ -2666,14 +2667,14 @@ function openLabelSheet(mealKey = null) {
   openSheet({
     title: slot ? `照包装记 → ${slot.label}` : '照包装营养成分表记',
     body: `
-      <p class="small muted" style="margin:0 0 12px">
+      <p class="small muted mb-3">
         照包装背面的「营养成分表」填，以后按克数记就是准的。
         <b>国内包装的能量大多写千焦</b>，选「千焦」直接抄数字，我帮你换成 kcal。
       </p>
       ${canPhoto ? `
         <input type="file" id="labelFile" accept="image/*" style="display:none">
         <button class="btn ghost block" id="labelShot">${icon('camera', { size: 16 })} 拍营养成分表，自动读出来</button>
-        <p class="tiny muted" id="labelShotHint" style="margin:8px 0 0">照片只会发给你在设置里配置的 AI 服务商。读出来先核对，再保存。</p>
+        <p class="tiny muted mt-2" id="labelShotHint">照片只会发给你在设置里配置的 AI 服务商。读出来先核对，再保存。</p>
       ` : `
         <p class="tiny" style="margin:0 0 12px;color:var(--ink-3)">
           拍照自动读要先在「我的 → 设置 → AI 设置」配一个<b>能看图的模型</b>（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
@@ -2690,12 +2691,12 @@ function openLabelSheet(mealKey = null) {
         <button class="chip on" data-unit="kJ">千焦 kJ（国内最常见）</button>
         <button class="chip" data-unit="kcal">千卡 kcal</button>
       </div>
-      <div class="grid2" style="margin-top:10px">
+      <div class="grid2 mt-3">
         <label class="field"><span>蛋白质 g</span><input type="number" id="labelProtein" inputmode="decimal"></label>
         <label class="field"><span>脂肪 g</span><input type="number" id="labelFat" inputmode="decimal"></label>
         <label class="field"><span>碳水 g</span><input type="number" id="labelCarb" inputmode="decimal"></label>
       </div>
-      <div id="labelPreview" class="warn info" style="margin-top:10px">填完会自动算成每 100 克，并帮你核对一遍。</div>`,
+      <div id="labelPreview" class="warn info mt-3">填完会自动算成每 100 克，并帮你核对一遍。</div>`,
     foot: '<button class="btn block" id="labelSave">保存并记一笔</button>',
     onMount: (body, foot) => {
       const el = (id) => $(id, body);
@@ -3038,7 +3039,7 @@ function openRecoverSheet() {
         <p class="tiny muted" style="margin:6px 0 12px">${esc(backup.note || '')}</p>` : ''}
 
       <button class="btn block" data-recover="reload">重新读一次存档</button>
-      <button class="btn ghost block" style="margin-top:8px" data-recover="import">从备份文件导入</button>
+      <button class="btn ghost block mt-2" data-recover="import">从备份文件导入</button>
 
       <hr class="sep">
       <p class="tiny muted">
@@ -3139,7 +3140,7 @@ function openWipeSheet() {
       </label>`,
     foot: `
       <button class="btn ghost block" id="wipeKeepAi" disabled>只清记录，保留 AI 设置</button>
-      <button class="btn block" id="wipeGo" disabled style="margin-top:8px">彻底清除记录与 AI 密钥</button>`,
+      <button class="btn block mt-2" id="wipeGo" disabled>彻底清除记录与 AI 密钥</button>`,
     onMount: (body, foot) => {
       const input = $('#wipeConfirm', body);
       const go = $('#wipeGo', foot);
@@ -3190,7 +3191,7 @@ function openInsightsSheet() {
           <b>还没有足够的记录</b><br>
           ${esc(hint ? hint.text : '再记几天就能看出规律了。')}
         </div>`}
-      <p class="tiny muted" style="margin-top:12px">
+      <p class="tiny muted mt-3">
         这些数字是从你自己的记录里数出来的，不联网、不上传、不调用 AI。
         少于 4 天记录时我不会给结论 —— 数据不够编出来的「规律」是害人的。
       </p>
@@ -3335,14 +3336,14 @@ function openBackupSheet() {
         <p>换手机、清浏览器缓存、卸载重装都会把本地记录清掉。导出一份存到微信收藏或网盘里最稳妥。</p>
       </details>
       ${readUnreadable(localStorage) ? `
-        <div class="warn info" style="margin-top:10px">
+        <div class="warn info mt-3">
           这台设备上还留着一份「读不出来的记录」的原文，导出备份时会一起带上，换设备也不会丢。
         </div>` : ''}
       <button class="btn block" id="doExport">导出备份文件</button>
-      <p class="tiny muted" style="margin:8px 0 0">
+      <p class="tiny muted mt-2">
         备份里<b>不含 AI 密钥</b>：换手机后在新手机上重新填一次（约 1 分钟），记录本身不受影响。
       </p>
-      <div class="btn-row" style="margin-top:10px">
+      <div class="btn-row mt-3">
         <button class="btn ghost grow" id="doImport">从文件导入</button>
         <button class="btn ghost grow" id="doSnapshot">现在留一份快照</button>
       </div>
@@ -3357,7 +3358,7 @@ function openBackupSheet() {
         <div class="btn-row">
           <button class="btn ghost grow" id="doRestore">回滚到这份快照</button>
           <button class="btn ghost" id="doForget">删除快照</button>
-        </div>` : '<p class="tiny muted" style="margin-top:10px">还没有快照。存档升级、导入、看演示之前都会自动留一份。</p>'}
+        </div>` : '<p class="tiny muted mt-3">还没有快照。存档升级、导入、看演示之前都会自动留一份。</p>'}
     `,
     onMount: (body) => {
       $('#doExport', body).addEventListener('click', exportData);
@@ -3428,8 +3429,8 @@ function openAboutSheet() {
         <button class="btn ghost grow" id="openWhatsNew">更新说明</button>
         <button class="btn ghost grow" id="checkUpdate">检查更新</button>
       </div>
-      <button class="btn ghost block" id="forceUpdate" style="margin-top:8px">强制更新到最新版</button>
-      <p class="tiny muted" style="margin:6px 0 0">
+      <button class="btn ghost block mt-2" id="forceUpdate">强制更新到最新版</button>
+      <p class="tiny muted mt-1">
         如果手机上显示的版本和更新说明对不上（卡在旧版本），点「强制更新」：只清临时缓存再重新加载，
         记录、资料、AI 密钥都在这台手机里，不会丢。强制更新后还是旧版，把上面这行版本号截图发我。
       </p>`,
@@ -3592,12 +3593,12 @@ function openRefreshSheet(latest) {
         <b>新版本 ${esc(latest)} 已经准备好了</b><br>
         刷新一下就能用上。已经记下的记录都在这台手机里，刷新不会丢。
       </div>
-      <p class="small muted" style="margin:8px 0 0">
+      <p class="small muted mt-2">
         不刷新也能继续用，只是新功能和修复要等下次打开才生效。
       </p>`,
     foot: `<button class="btn block" id="reloadNow">刷新，用上新版</button>
-      <button class="btn ghost block" id="reloadForce" style="margin-top:8px">刷新后还是旧的？点这里强制更新</button>
-      <button class="btn ghost block" id="reloadLater" style="margin-top:8px">先不刷新</button>`,
+      <button class="btn ghost block mt-2" id="reloadForce">刷新后还是旧的？点这里强制更新</button>
+      <button class="btn ghost block mt-2" id="reloadLater">先不刷新</button>`,
     onMount: (_body, foot) => {
       $('#reloadNow', foot).addEventListener('click', () => {
         // 万一有等待中的 Service Worker，让它立刻接管，再刷新（正常情况下会自动接管）
@@ -3694,7 +3695,7 @@ function openGrowthSheet() {
         </div>
       </div>
 
-      <button class="btn block" id="openRecap" style="margin-top:12px">看最近 30 天的回顾</button>
+      <button class="btn block mt-3" id="openRecap">看最近 30 天的回顾</button>
 
       ${showWeekly ? `
         <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFFFF;border:1px solid var(--line)">
@@ -3716,7 +3717,7 @@ function openGrowthSheet() {
               ${x.unlocked ? '' : `<span class="ach-bar"><i style="width:${x.pct}%"></i></span>`}
             </div>`).join('')}
         </div>
-        <p class="tiny muted" style="margin:10px 0 0">
+        <p class="tiny muted mt-3">
           徽章只跟「记录、吃够蛋白、动起来」有关 —— 我们没有"少吃几天"这种徽章，那类目标长期是有害的。
         </p>
       </div>
@@ -3761,14 +3762,14 @@ function openRecapSheet() {
   openSheet({
     title: '最近 30 天的回顾',
     body: `
-      <div class="warn info" style="margin-top:0">${lines.map((l) => `<div style="margin:2px 0">· ${esc(l)}</div>`).join('')}</div>
+      <div class="warn info mt-0">${lines.map((l) => `<div style="margin:2px 0">· ${esc(l)}</div>`).join('')}</div>
       <div class="recap-grid">
         ${tile('记录天数', recap.loggedDays, ' 天')}
         ${tile('最长连续', recap.longestStreak, ' 天')}
         ${tile('蛋白达标', recap.proteinHitDays, ' 天')}
         ${tile('运动', recap.exerciseMinutes, ' 分钟')}
       </div>
-      <div class="set-note" style="margin-top:6px"><b>这 30 天</b><br>
+      <div class="set-note mt-1"><b>这 30 天</b><br>
         <div class="week-dots recap-dots">${dots.join('')}</div>
         <span class="tiny muted">亮起来的是有记录的日子；没亮的不用补，从今天接着记就行。</span>
       </div>
@@ -3777,7 +3778,7 @@ function openRecapSheet() {
         <div class="set-note"><b>最常记的</b><br>
           ${recap.topFoods.map((f, i) => `${i + 1}. ${esc(f.name)} · ${f.times} 次`).join('<br>')}
         </div>` : ''}
-      <p class="tiny muted" style="margin:12px 0 0">
+      <p class="tiny muted mt-3">
         回顾只陈述记录里的事实，不带评价 —— 记录少的时候也不能说明什么，接着记就好。
       </p>`,
   });
@@ -3822,12 +3823,12 @@ function openCalendarSheet() {
     openSheet({
       title: `${y} 年 ${m} 月`,
       body: `
-        <div class="row between" style="margin-bottom:10px">
+        <div class="row between mb-3">
           <button class="btn ghost" id="calPrev">‹ 上个月</button>
           <button class="btn ghost" id="calToday">回到今天</button>
           <button class="btn ghost" id="calNext">下个月 ›</button>
         </div>
-        <div class="warn info" style="margin-bottom:10px">
+        <div class="warn info mb-3">
           本月记了 <b>${logged}</b> 天${streak ? `｜当前连续记录 <b>${streak}</b> 天` : ''}
         </div>
         <div class="cal-week">${['日', '一', '二', '三', '四', '五', '六'].map((w) => `<span>${w}</span>`).join('')}</div>
@@ -3848,7 +3849,7 @@ function openCalendarSheet() {
             </button>`;
           }).join('')}
         </div>
-        <p class="tiny muted" style="margin-top:10px">
+        <p class="tiny muted mt-3">
           格子里的数字是当天记了几条。没记的日子一眼能看出来 —— 漏记比记错更影响判断。
         </p>`,
       onMount: (body) => {
@@ -3934,7 +3935,7 @@ function drawAiSettings(cfg, relay, then = null) {
     <details id="aiKeyGuide" style="margin:-4px 0 12px">
       <summary style="cursor:pointer;color:var(--rose);font-size:13px;min-height:40px;display:flex;align-items:center">手把手教程：从注册到粘贴（5 分钟）</summary>
       <div class="tiny" style="margin-top:8px;line-height:1.75">
-        <div class="warn info" style="margin:0 0 10px">
+        <div class="warn info mb-3">
           <b>先把钱的事说清楚</b>：API 是 <b>DeepSeek 官方按用量收费</b>，钱直接付给 DeepSeek。
           我们<b>不收任何费用</b>，也拿不到你的密钥、看不到你的账单 —— 这笔交易跟我们无关。
           不想花钱就换别家服务商（上面「选一个服务商」里随便换，流程差不多）。
@@ -3978,12 +3979,12 @@ function drawAiSettings(cfg, relay, then = null) {
         <label class="field"><span>模型名 <button class="btn ghost" id="aiFetchModels" style="padding:7px 10px;font-size:12px;float:right">获取模型列表</button></span>
           <input type="text" id="aiModel" value="${esc(cfg.model || preset.model || '')}" placeholder="deepseek-flash" list="aiModelList" autocomplete="off">
           <datalist id="aiModelList">${lastModels.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
-          <div id="modelPick" class="chips" style="margin-top:6px"></div>
+          <div id="modelPick" class="chips mt-1"></div>
         </label>
 
         <label class="field"><span>拍照读表用的模型（可选）</span>
           <input type="text" id="aiVisionModel" value="${esc(cfg.visionModel || '')}" placeholder="不填就跟上面那个模型一样" list="aiModelList" autocomplete="off">
-          <div class="tiny muted" style="margin-top:4px">
+          <div class="tiny muted mt-1">
             拍营养成分表要「能看图」的模型（例如 qwen-vl-plus、glm-4v、gpt-4o-mini）。
             <b>留空就用上面那个</b>；上面那个看不了图、又不想换掉它时，才需要在这里单独填一个。
           </div>
@@ -4270,7 +4271,7 @@ function openProfileSheet({ firstTime = false, onSaved = null } = {}) {
       <p class="tiny muted">
         这些数字只用来算基础代谢（Mifflin-St Jeor 公式），误差一般 ±10%。数据只存在这台设备上。
       </p>`,
-    foot: `<button class="btn block" id="pSave">${firstTime ? '算算我每天该吃多少' : '保存'}</button>${hasProfile && !firstTime ? '<button class="btn ghost block" id="pCancel" style="margin-top:8px">取消</button>' : ''}`,
+    foot: `<button class="btn block" id="pSave">${firstTime ? '算算我每天该吃多少' : '保存'}</button>${hasProfile && !firstTime ? '<button class="btn ghost block mt-2" id="pCancel">取消</button>' : ''}`,
     onMount: (body, foot) => {
       // 取值一律走这里：字段可能因为界面变动暂时不在，
       // 直接解引用会抛异常，把整个表单（包括实时预览）打挂 —— 表单要能容忍缺字段。
