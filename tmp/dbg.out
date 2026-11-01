@@ -1,5 +1,0 @@
-Error: TypeError: Failed to resolve module specifier '/js/store.js'
-    at <anonymous>:2:19
-    at <anonymous>:16:5
-    at evaluate (file:///Users/javian/Desktop/%E5%87%8F%E8%84%82%E5%B7%A5%E5%85%B7/tools/dbg-summary.mjs:37:33)
-    at async file:///Users/javian/Desktop/%E5%87%8F%E8%84%82%E5%B7%A5%E5%85%B7/tools/dbg-summary.mjs:63:5
