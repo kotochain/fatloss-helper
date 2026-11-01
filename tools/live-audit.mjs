@@ -701,14 +701,16 @@ async function main() {
       };
     })()`);
     const rgb = manifest.图标颜色 || [0, 0, 0];
-    const looksGreen = rgb[1] > rgb[0] + 20 && rgb[1] > rgb[2] + 20;
+    // v53 起图标有意用品牌青苔绿（跟界面 --brand 一个色），守的是「图标和品牌色一致」
+    const BRAND = [94, 156, 98]; // #5E9B62
+    const colorOk = rgb.every((v, i) => Math.abs(v - BRAND[i]) <= 6);
     console.log(`   manifest：主题色 ${manifest.主题色}｜背景色 ${manifest.背景色}｜页面 theme-color ${manifest.页面主题色}`);
     console.log(`   图标：${manifest.图标.map((i) => `${i.src} HTTP ${i.status}`).join('，')}`);
-    console.log(`   桌面图标底色 rgb(${rgb.join(',')})${looksGreen ? '（偏绿）' : ''}｜start_url HTTP ${manifest.start_url状态}`);
+    console.log(`   桌面图标底色 rgb(${rgb.join(',')})｜start_url HTTP ${manifest.start_url状态}`);
     if (manifest.图标.some((i) => i.status !== 200)) fail('manifest 里有图标取不到（装到桌面会没有图标）');
     if (manifest.start_url状态 !== 200) fail('manifest 的 start_url 打不开（从桌面启动会 404）');
     if (!manifest.可安装) fail('页面没有引用 manifest');
-    if (looksGreen) fail(`桌面图标还是绿色 rgb(${rgb.join(',')}) —— 界面是温暖米粉配色，图标没跟上`);
+    if (!colorOk) fail(`桌面图标底色 rgb(${rgb.join(',')}) 不等于品牌色 #5E9B62 —— 图标和界面配色脱节了（icons/icon.svg 改色后要重新生成 PNG`);
     if (manifest.页面主题色 !== manifest.主题色) fail(`页面 theme-color(${manifest.页面主题色}) 与 manifest(${manifest.主题色}) 不一致`);
 
     console.log('\n=== 六、启动失败兜底（模块加载不起来时，用户还能看到什么） ===');
