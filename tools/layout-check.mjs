@@ -231,6 +231,22 @@ const PROBE_EXPR = String.raw`(() => {
   };
   const rect = (el) => { const r = el.getBoundingClientRect(); return { top: round1(r.top), bottom: round1(r.bottom), left: round1(r.left), right: round1(r.right), w: round1(r.width), h: round1(r.height) }; };
 
+  /**
+   * 元素本身矮，但 ::after 把可点区域撑大了（头像那种圆形按钮：36px 的圆 + 四周 6px 透明热区）。
+   *
+   * 为什么需要这个：getBoundingClientRect() 只量元素盒子，量不到伪元素。
+   * 于是「36px 圆、48px 可点」被报成「触摸目标偏小」，每次跑 5 个尺寸 × 多个界面刷出十几条假问题。
+   * 判断依据是伪元素绝对定位且有负 inset —— 那正是「往外扩一圈热区」的写法。
+   */
+  const hitBoosted = (el) => {
+    try {
+      const after = getComputedStyle(el, '::after');
+      if (after.content === 'none' || after.position !== 'absolute') return false;
+      return parseFloat(after.top) < 0 || parseFloat(after.bottom) < 0
+        || parseFloat(after.left) < 0 || parseFloat(after.right) < 0;
+    } catch { return false; }
+  };
+
   const startScrollY = window.scrollY;
   window.scrollTo(0, 0);
 
@@ -264,6 +280,12 @@ const PROBE_EXPR = String.raw`(() => {
     else if (el.matches('.chip, [data-grams], [data-min], [data-train-min], [data-eq], [data-ex]')) cat = 'chip';
     else if (el.matches('.icon-btn, .avatar, .del, #sheetClose')) cat = 'icon-button';
     else if (el.matches('.tab, .btn:not(.ghost), .big-log, .seg-btn, .mode-chip, .add-line, [data-pick]')) cat = 'primary-control';
+    // 元素小但热区被伪元素扩到 ≥40px：不算「点不到」，单独归一类（报告里按「建议」提示）
+    if (cat !== 'inline-link' && hitBoosted(el)) {
+      const after = getComputedStyle(el, '::after');
+      const extra = Math.abs(parseFloat(after.top) || 0) + Math.abs(parseFloat(after.bottom) || 0);
+      if (r.height + extra >= 40 - 0.5) cat = 'hit-area';
+    }
     const k = label(el) + '|' + Math.round(r.height);
     const prev = smallMap.get(k);
     if (prev) prev.count += 1;
@@ -277,6 +299,8 @@ const PROBE_EXPR = String.raw`(() => {
   let clippedTotal = 0;
   for (const el of document.querySelectorAll('#app *, .topbar *, .tabbar *, #sheetRoot *')) {
     if (ignored(el) || !inScope(el) || !visible(el)) continue;
+    // 热区伪元素（见 hitBoosted）会把 scrollWidth 撑大，看起来像「内容超出容器」，其实是透明的一圈
+    if (hitBoosted(el)) continue;
     const hasOwnText = Array.prototype.some.call(el.childNodes, (n) => n.nodeType === 3 && norm(n.textContent));
     if (!hasOwnText) continue;
     const cs = getComputedStyle(el);
@@ -699,11 +723,14 @@ function judge(probe, step) {
   const small = (probe.small || []).filter((s) => !(step.kind === 'sheet' && s.what.indexOf('#sheetClose') >= 0));
   const isSev = (s) => s.h < 32 && s.cat === 'primary-control';
   const sev = small.filter(isSev);
-  const minor = small.filter((s) => !isSev(s) && s.cat !== 'inline-link');
+  const minor = small.filter((s) => !isSev(s) && s.cat !== 'inline-link' && s.cat !== 'hit-area');
   const inlineLinks = small.filter((s) => s.cat === 'inline-link');
+  const hitAreas = small.filter((s) => s.cat === 'hit-area');
   if (sev.length) add('严重', '触摸目标过小（主要操作）', `${probe.smallTotal} 个可点元素里，${sev.length} 个主要操作 <32px：${sev.slice(0, 6).map((s) => `${s.what} 高 ${s.h}px`).join('；')}`);
   if (minor.length) add('一般', '触摸目标偏小（<40px）', `共 ${probe.smallTotal} 个可点元素偏小：${minor.slice(0, 6).map((s) => `${s.what} 高 ${s.h}px`).join('；')}`);
   if (inlineLinks.length) add('建议', '行内小链接（可能是设计如此）', inlineLinks.slice(0, 4).map((s) => `${s.what} 高 ${s.h}px`).join('；'));
+  // 伪元素热区已把可点范围撑到 ≥40px（头像那种圆形按钮）：只提示，不算问题
+  if (hitAreas.length) add('建议', '元素本身偏小、热区已由 ::after 扩大', hitAreas.slice(0, 4).map((s) => `${s.what} 高 ${s.h}px`).join('；'));
 
   // 4) 底栏遮挡最后一条内容（仅页面）
   if (step.kind === 'page' && probe.bottomBar && !probe.bottomBar.skipped) {

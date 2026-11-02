@@ -529,7 +529,10 @@ details.why summary {
   display: block; /* flex 在 150% 大字号下横向溢出，改为块级自然换行（layout-check 修复） */
   font-size: var(--text-caption);
   color: var(--ink-3);
-  min-height: 28px;
+  /* v54：可点区域补到 40px。靠上下 padding 撑，不用 flex（上面那条坑）也不用负 margin
+     （负 margin 会让热区盖住相邻内容，容易误点）。这一行是次要入口，但手指点不到等于没有。 */
+  padding: 10px 0;
+  min-height: 40px;
 }
 details.why summary::after { float: right; }
 details.why summary::-webkit-details-marker { display: none; }
@@ -651,12 +654,15 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .macro-row.f .mbar > i { background: var(--butter); }
 .macro-row.c .mbar > i { background: var(--sage); }
 .macro-row .mval {
-  width: 74px;
+  /* 宽度用 ch 而不是固定 px（v54）：固定 74px 时「105/104 g」会溢出 6px，
+     而系统字号调到 130%/150% 只会更糟。ch 随字号同比放大，四行仍然等宽。 */
+  min-width: 11ch;
   text-align: right;
   font-size: var(--text-footnote);
   color: var(--ink-2);
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .macro-row .mval b { color: var(--ink); font-weight: 600; }
 .macro-row.over .mval b { color: var(--red); }
@@ -692,8 +698,8 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
   color: var(--ink-3);
   letter-spacing: 0;
 }
-.stat b { font-size: var(--text-small); font-weight: 600; color: var(--ink); white-space: nowrap; }
-.stat b { color: var(--ink); font-weight: 600; }
+/* 数字用等宽数字，切换记录时不会左右跳（v54 把重复的第二条并进来） */
+.stat b { font-size: var(--text-small); font-weight: var(--weight-semibold); color: var(--ink); white-space: nowrap; }
 .stat .ic { width: 13px; height: 13px; stroke-width: 2; color: var(--brand); }
 
 /* 计划页「目标」卡里的四个数字（基础代谢 / 消耗 / 每天吃 / BMI）。
@@ -850,15 +856,11 @@ input:focus, select:focus, textarea:focus {
    13 个胶囊铺满两屏，选一个动作要滚半天） */
 #trainCardio:not(.all) .chip.extra { display: none; }
 .chip.more { color: var(--brand-strong); border-style: dashed; border-color: rgba(66, 122, 71, 0.30); background: #fff; }
-/* 动作胶囊默认只露 6 个，其余点「还有 N 个动作」再展开（v50 预览：
-   13 个胶囊铺满两屏，选一个动作要滚半天） */
-#trainCardio:not(.all) .chip.extra { display: none; }
-.chip.more { color: var(--brand-strong); border-style: dashed; border-color: rgba(66, 122, 71, 0.30); background: #fff; }
 .chip {
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 99px;
-  /* 选项按钮是最常点的东西之一，给到 36px 高（原来是 34px，拇指容易点偏） */
+  /* 选项按钮是最常点的东西之一，给到 40px 高（v50 起从 34px 提到 36px，v54 再补到 40px） */
   min-height: 40px;
   display: inline-flex;
   align-items: center;
@@ -1092,6 +1094,8 @@ details[open] summary { margin-bottom: 4px; }
 /* 模式胶囊：一眼看出现在用的是哪种模式，点一下就能换（不用进设置） */
 .mode-pill {
   display: inline-flex; align-items: center; gap: 3px;
+  /* v54：29.6px 太矮，手指点不准；补到 40px 的触控下限 */
+  min-height: 40px;
   border: 0; cursor: pointer; font: inherit; white-space: nowrap;
   padding: 5px 10px 5px 12px; border-radius: var(--radius-pill);
   background: var(--brand-soft); color: var(--brand-strong);
@@ -1456,6 +1460,9 @@ details.adv[open] > summary { border-bottom: 1px solid var(--line); }
 .cal-cell {
   position: relative;
   aspect-ratio: 1 / 1;
+  /* v54：7 列挤在 320 宽时格子只有 38px，差 2px 到触控下限。
+     加 min-height 让它变成 38×40 —— 肉眼几乎看不出不是正方形，但手指点得准。 */
+  min-height: 40px;
   border: 1px solid transparent;
   background: var(--surface-soft);
   border-radius: var(--radius-control);
@@ -1596,6 +1603,8 @@ details.adv[open] > summary { border-bottom: 1px solid var(--line); }
   background: transparent;
   border-radius: var(--radius-control);
   padding: 9px 6px;
+  /* 40px 是触控下限：原来靠 padding 撑到 39px，差 1px 就会在自检里报「点着偏小」 */
+  min-height: 40px;
   font-size: var(--text-body);
   font-weight: 600;
   color: var(--ink-2);
@@ -1636,8 +1645,10 @@ details.adv[open] > summary { border-bottom: 1px solid var(--line); }
 .train-equip { border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
 .train-equip > summary {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
+  /* v54：整行可点，高度补到 40px（原来只有文字高 20.8px，手指很难点中） */
+  min-height: 40px;
   cursor: pointer;
   list-style: none;
   font-size: var(--text-footnote);
