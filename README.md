@@ -452,6 +452,94 @@ v28 起已修（`sw.js` 不走缓存），但已经卡住的手机会一直卡�
 
 ---
 
+## 〇·三十、计划页拆分、训练页重排、样式守卫（2026-11-02，v54）
+
+### 为什么做
+
+v53 之后用户连给两张训练计划页截图，一句「一眼看过去很乱」。截图里能数出四件事：
+
+- **器械二十个 chip 铺满四行**，把真正的选择（目标、时长）挤到看不见的地方；
+- **目标和时长挤成一团**，同一行的东西宽度不一，视线没有落点；
+- **三张同权重方案卡连着堆**，每张都带同样的说明和同样的按钮 —— 看完不知道点哪个；
+- **计划页把吃和练混在一起**，划半天还找不到「今天该练什么」。
+
+另外用户指出「今天还空着」「昨天没记」这类小卡和页面背景融成一片，看不出是卡片。
+
+### 怎么做
+
+- **分段**：`currentPlanTab()` / `setPlanTab()`，选择写进 `settings.planTab`；两半各自渲染，
+  互不穿插（`browser-check` 断言「饮食段里不出现训练按钮」）。
+- **器械收进 `<details>`**：标题行摘要显示已选器械名；展开状态存在 `cardioEquipmentOpen`，
+  改目标/时长触发重绘时不会自己合上（只有用户手动点才变）。
+- **目标三列、时长四列网格**；`@media (max-width:360px)` 时长转两列，320px 不折行。
+- **首选独立成卡**：`.card.cardio-result` 与选择区 `.card.cardio-card` 同级（不是卡片套卡片），
+  标题 `.cardio-result-title`、强度/要点/注意分行、「记录这个训练」紧跟其后；
+  其余方案进 `<details class="cardio-options">`。
+- **层次**：`.card.flat` / `.card.nested` 改白底 + 1px 线 + 极轻阴影，跟 `--bg` 的暖米白分开。
+
+### 样式守卫（补 v53 的债）
+
+v53 把颜色字号收进变量，但规则只写在文档里。这次开工先做了个扫描，结果 `js/app.js` 里还留着：
+
+- 圆环渐变的 4 个色值（`#D98B5F` / `#6FA973` / `#C0553F` / `#427A47`）写死在模板字符串里；
+- 9 处内联 `font-size:14px` / `12px` / `18px`；
+- 2 处内联 `background:#FFFFFF`（其实就是 `.card.nested` 该干的事）。
+
+改配色的人看 `css/style.css` 永远找不到它们 —— 页面会半新半旧。所以：
+
+- 圆环渐变搬进 `:root`（`--ring-calm-a/b`、`--ring-low-a/b`），JS 用 `var()` 引用，**色值一个没改**；
+- 内联字号抽成 `.goal-figure` / `.btn.sm` / `.fold-link` / `.draft-grams` / `.minutes-input`；
+- 白底内联抽成 `.card.nested`；
+- 新增 `tools/style-guard.mjs`：字号裸 px、`#fff` 之外的颜色、JS 里的 hex 一律拦下，
+  接进 `npm run check`。`js/icons.js` 整份豁免（图标插画自带的叶子/花瓣调色板，不跟主题走），
+  `index.html` 两行按行豁免（`theme-color` 的 meta 不能写变量；`verBar` 要在 CSS 加载前就能显示）。
+
+### 验证
+
+- `npm test` **381/381**。
+- `style-guard` 通过；**并做过反向验证**：往 CSS 临时追加 `font-size:13px; color:#123456`，
+  确认报 2 处、退出码 1，再恢复 —— 没红过的守位等于没有。
+- `quicklog-check`：器械/目标/45 分钟重开后仍是 `bodyweight, elliptical / low_impact / 45`，
+  首选能直接记录，替代弹层给 4 个方案；**额度不随运动变化**的红线仍守住。
+- `browser-check`、`sweep-check --state=b`：202 次交互，死按钮 0、报错 0。
+- 排版 320×568 / 390×844 各 29 个界面，**事故级 0 / 严重 0**，问题数与改动前完全一致（16/2 与 17/4）。
+
+**踩到的坑**：`--text-*` 的注释写的是更早方案的档位（caption 11 / footnote 12 / small 13），
+和实际值（12 / 13 / 14）差一档 —— 改代码时只改变量没改注释，看注释的人会按错的档位选字号。
+这次把注释和实际值对齐，并补 `--text-micro: 11px`（日历角标原来写死 10px）和 `--text-stat: 18px`。
+
+**发布记录（v54）**：提交 `da35e7f`（功能）+ `28e7c88`（样式守卫）；
+`check-live` 线上 v54 / 缓存名 `fatloss-v54`、34 个文件逐字节一致；
+`live-audit` 线上 0 个阻断；`check:full` 14/14（12 分 44 秒）。
+
+---
+
+## 〇·二十九、视觉系统第一步：新图标、配色收敛、层次（2026-11-01，v53）
+
+### 为什么做
+
+用户对前一版配色不满意：「这个颜色还不如原来的，太没感情」，并明确要「苹果那种高级简约感」，
+以及「不要 AI 感」。玫瑰粉被否掉之后，方向定为**青苔绿 + 降饱和 + 去渐变 + 减装饰**。
+
+### 怎么做
+
+- 品牌色换青苔绿 `#5E9B62`（`--brand`），深一档 `#427A47`（`--brand-strong`）用于文字和描边；
+- 状态色统一成一组变量：success / warning / danger / info，各带一个 soft 底色，全站一个口径；
+- 所有彩色降饱和半度；字重只留 400 / 600 / 700，中间档（550 / 650 / 680）逐步归并；
+- 背景从近白改成暖米白 `#F6F3EE`，卡片纯白 + 极轻阴影，靠明度差分层而不是靠描边；
+- 应用图标重画：青苔绿底 + 「还剩热量」圆环，和今天页那个环同一个语言；
+  `manifest` 的 theme / background 同步（`live-audit` 守「图标底色 = `--brand`」这条）。
+
+### 验证
+
+- `npm test`、`check:full` 全过；排版 440 组合事故级 0 / 严重 0；
+- `check-live` 34 文件一致、线上 v53；`live-audit` 图标底色 `rgb(94,156,98)` = `#5E9B62`。
+
+**踩到的坑**：只改 `icons/icon.svg` 不改 PNG 等于没改 —— 桌面装的是 192/512 那几张位图。
+改完 SVG 必须 `qlmanage` 渲染 + `sips` 缩放重新导出三张 PNG（已写成 R77）。
+
+---
+
 ## 〇·二十八、AI 设置分层、AI 状态统一、设置页分组（2026-11-01，v52）
 
 ### 为什么做
@@ -1105,12 +1193,12 @@ git push -u origin main
 
 
 ```bash
-npm run check           # 懒人版：一条命令跑完 8 项本地检查（自动起停服务，约 4 分钟）
-npm run check:full      # 全套 12 项（含全按钮清扫、AI 失败注入、五种屏排版，约 10 分钟）
+npm run check           # 懒人版：一条命令跑完 10 项本地检查（自动起停服务，约 5 分钟）
+npm run check:full      # 全套 14 项（含全按钮清扫、AI 失败注入、五种屏排版，约 12 分钟）
 npm run check:live      # 只测线上：文件逐字节一致 + 真打开线上网址跑一遍（需联网）
 
 node tools/serve.mjs           # 本地预览（会打印手机可访问的局域网地址）；也兼任可选的 AI 中转
-npm test                       # 387 个自动化测试
+npm test                       # 381 个自动化测试
 node tools/mutate-check.mjs    # 反向验证：故意改坏 123 处代码，确认测试符合预期（在临时副本里做）
 node tools/browser-check.mjs   # 无头 Chrome 真机尺寸自检（需先启动 serve）
 node tools/quicklog-check.mjs  # 自检「说一句记录」与「按器械换动作」两条新流程
@@ -1128,6 +1216,7 @@ node tools/direct-check.mjs    # 浏览器直连 AI + 日历的端到端自检�
 node tools/key-audit.mjs       # 密钥安全审计（在真实网址里填假密钥，看它去了哪）
 node tools/ai-e2e-check.mjs    # 「电脑中转」路径的端到端自检（用假上游，零费用）
 node tools/check-secrets.mjs --self-test   # 提交前扫密钥（带自查，确认扫描器本身有效）
+node tools/style-guard.mjs     # 样式守卫：字号/颜色只许用 CSS 变量，JS 里不许有 hex（拦硬编码）
 node tools/check-live.mjs      # 上线后：线上文件与本地逐字节比对 + 关键修复是否已部署
 ```
 
