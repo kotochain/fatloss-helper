@@ -290,7 +290,14 @@ async function main() {
       const overflow = box ? box.scrollWidth > box.clientWidth + 1 : false;
       // 计划页的写入按钮也必须说真实日期（以前固定写「今天」，实际写进选中的那一天）
       document.querySelector('.tab[data-view="plan"]')?.click();
+      const foodPaneVisible = Boolean(document.querySelector('[data-plan-pane="food"]'));
+      const foodHasTrainingControls = Boolean(document.querySelector('#trainDays, #equipChips'));
       const planBtn = document.querySelector('[data-act="use-plan"]')?.textContent || '';
+      document.querySelector('[data-plan-tab="training"]')?.click();
+      const trainingPaneVisible = Boolean(document.querySelector('[data-plan-pane="training"]'));
+      const trainingHasFoodAction = Boolean(document.querySelector('[data-act="use-plan"]'));
+      const savedPlanTab = JSON.parse(localStorage.getItem('fatloss.state.v2') || '{}')?.settings?.planTab || '';
+      document.querySelector('[data-plan-tab="food"]')?.click();
       document.querySelector('#backToToday')?.click();
       const after = document.querySelector('#dayContext');
       const backDate = document.querySelector('#dateText')?.textContent || '';
@@ -299,6 +306,11 @@ async function main() {
         翻到昨天时显示: shown,
         文案: text,
         计划按钮: planBtn,
+        饮食分区可见: foodPaneVisible,
+        饮食页误带训练内容: foodHasTrainingControls,
+        训练分区可见: trainingPaneVisible,
+        训练页误带饮食按钮: trainingHasFoodAction,
+        分段已保存: savedPlanTab === 'training',
         顶部条横向溢出: overflow,
         回到今天后隐藏: after ? after.hidden : false,
         日期标签: backDate,
@@ -916,6 +928,11 @@ function printReport(report) {
       || !/正在看/.test(r.dayCtx.文案)
       || !r.dayCtx.回到今天后隐藏
       || /今天/.test(r.dayCtx.计划按钮 || '');   // 在看昨天时按钮不许再写「今天」
+    const planSplitBad = !r.dayCtx?.饮食分区可见
+      || r.dayCtx.饮食页误带训练内容
+      || !r.dayCtx.训练分区可见
+      || r.dayCtx.训练页误带饮食按钮
+      || !r.dayCtx.分段已保存;
     const editBad = !r.editEntry?.有改按钮
       || !/改/.test(r.editEntry.标题)
       || !r.editEntry.预填
@@ -924,6 +941,7 @@ function printReport(report) {
       ? `画到 ${(x.环比例 * 100).toFixed(0)}% / 应 ${x.应为 == null ? '?' : `${(x.应为 * 100).toFixed(0)}%`}（中间「${x.中间数字} ${x.说明}」，已吃 ${x.已吃}/${x.目标}）`
       : '没找到圆环';
     console.log(`  历史日期提示：翻到昨天时 ${r.dayCtx?.翻到昨天时显示 ? '出现' : '没出现'}「${r.dayCtx?.文案 || ''}」｜计划按钮「${r.dayCtx?.计划按钮 || ''}」｜回到今天后 ${r.dayCtx?.回到今天后隐藏 ? '隐藏' : '还挂着'}｜日期「${r.dayCtx?.日期标签 || ''}」`);
+    console.log(`  计划分区：饮食 ${r.dayCtx?.饮食分区可见 ? '有' : '无'} / 混入训练 ${r.dayCtx?.饮食页误带训练内容 ? '有' : '无'}｜训练 ${r.dayCtx?.训练分区可见 ? '有' : '无'} / 混入饮食按钮 ${r.dayCtx?.训练页误带饮食按钮 ? '有' : '无'}｜已记住分段 ${r.dayCtx?.分段已保存 ? '是' : '否'}`);
     console.log(`  改份量入口：${r.editEntry?.有改按钮 ? '有' : '缺'}｜弹层标题「${r.editEntry?.标题 || ''}」｜预填 ${r.editEntry?.预填 ?? '—'}｜按钮「${r.editEntry?.按钮 || ''}」`);
     console.log(`  圆环·示例数据：${fmtRing(r.ringStart)}`);
     console.log(`  圆环·加完一条：${fmtRing(r.ringAfter)}`);
@@ -964,7 +982,7 @@ function printReport(report) {
       || !r.refresh.横幅.有横幅 || !r.refresh.横幅.文字.includes(r.refresh.假版本);
     if (!r.sheetOpen || !r.afterAdd.弹层已关闭 || r.searchWorks.结果数 === 0 || !r.afterAdd.最近一条
       || s.consoleErrors.length || !r.manifest.icons.length || iconBad || r.manifest.display !== 'standalone'
-      || uiIconBad || midnightBad || ringBad || dateBad || editBad) problems += 1;
+      || uiIconBad || midnightBad || ringBad || dateBad || planSplitBad || editBad) problems += 1;
   }
   console.log(`\n${problems === 0 ? '✅ 浏览器自检全部通过' : `❌ 浏览器自检有 ${problems} 处问题`}`);
   console.log(`截图与报告在 ${outDir}`);

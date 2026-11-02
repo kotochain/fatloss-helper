@@ -866,21 +866,34 @@ async function main() {
 
   console.log('\n=== 二、按器械换有氧动作 ===');
   await evaluate(`document.querySelector('.tab[data-view="plan"]').click()`);
-  await sleep(500);
+  await sleep(350);
+  await evaluate(`document.querySelector('[data-plan-tab="training"]')?.click()`);
+  await sleep(350);
   const cardio = await evaluate(`(() => {
     const chips = [...document.querySelectorAll('#equipChips .chip')];
-    const picks = [...document.querySelectorAll('.cardio-session h4')].map((h) => h.textContent.replace(/\\s+/g, ' ').trim());
+    const picks = [
+      document.querySelector('.cardio-result-title')?.textContent.trim(),
+      ...[...document.querySelectorAll('.cardio-option h4')].map((h) => h.textContent.trim()),
+    ].filter(Boolean);
     return {
       器械数: chips.length,
       默认选中: chips.filter((c) => c.classList.contains('on')).map((c) => c.textContent.trim()),
       推荐: picks.slice(0, 3),
-      有替代入口: !!document.querySelector('[data-subs]'),
+      有替代入口: !!document.querySelector('.cardio-substitutes summary'),
+      备选默认收起: !document.querySelector('.cardio-options')?.open,
+      主推荐可直接记录: !!document.querySelector('.cardio-result [data-log-cardio]'),
+      器械默认收起: !document.querySelector('#cardioEquipment')?.open,
     };
   })()`);
   console.log(`✅ 器械选项 ${cardio.器械数} 个，默认勾选：${cardio.默认选中.join('、')}`);
   console.log(`✅ 推荐：${cardio.推荐.join(' / ')}`);
   if (!cardio.器械数) problems.push('没有器械选项');
   if (!cardio.推荐.length) problems.push('没有推荐出有氧方案');
+  if (!cardio.器械默认收起) problems.push('计划页的可用器械默认应收起，避免挤占推荐内容');
+  if (!cardio.备选默认收起) problems.push('备选方案默认应收起，避免与首选方案争夺视觉重点');
+  if (!cardio.主推荐可直接记录) problems.push('首选训练缺少直接记录入口');
+  await evaluate(`document.querySelector('#cardioEquipment summary')?.click()`);
+  await sleep(150);
 
   // 只勾椭圆机（模拟「跑步机没了，只有椭圆机」）
   await evaluate(`(() => {
@@ -889,11 +902,15 @@ async function main() {
   await sleep(300);
   await evaluate(`document.querySelector('#equipChips [data-eq="elliptical"]').click()`);
   await sleep(400);
-  const ellipticalOnly = await evaluate(`[...document.querySelectorAll('.cardio-session h4')].map((h) => h.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 2)`);
+  const ellipticalOnly = await evaluate(`(() => [
+    document.querySelector('.cardio-result-title')?.textContent.trim(),
+    ...[...document.querySelectorAll('.cardio-option h4')].map((h) => h.textContent.trim()),
+  ].filter(Boolean).slice(0, 2))()`);
   console.log(`✅ 只勾「椭圆机」后的推荐：${ellipticalOnly.join(' / ')}`);
   if (!ellipticalOnly.some((t) => t.includes('椭圆机'))) problems.push('只勾椭圆机却没有推荐椭圆机');
 
   // 目标/时长也要存住：用户固定练 45 分钟、想练低冲击，不该每次重选
+  await evaluate(`document.querySelector('#cardioEquipment summary')?.click()`);
   await evaluate(`document.querySelector('#goalChips [data-goal="low_impact"]')?.click()`);
   await sleep(250);
   await evaluate(`document.querySelector('#minuteChips [data-min="45"]')?.click()`);
@@ -904,14 +921,20 @@ async function main() {
   await sleep(1200);
   await evaluate(`document.querySelector('.tab[data-view="plan"]')?.click()`);
   await sleep(500);
+  const planTabAfterReload = await evaluate(`document.querySelector('.seg-btn.on[data-plan-tab]')?.dataset.planTab || ''`);
+  await evaluate(`document.querySelector('[data-plan-tab="training"]')?.click()`);
+  await sleep(350);
+  await evaluate(`document.querySelector('#cardioEquipment summary')?.click()`);
   const planAfterReload = await evaluate(`(() => ({
     器械: [...document.querySelectorAll('#equipChips .chip.on')].map((c) => c.dataset.eq).sort(),
     目标: document.querySelector('#goalChips .chip.on')?.dataset.goal || null,
     时长: document.querySelector('#minuteChips .chip.on')?.dataset.min || null,
-    文案: document.querySelector('.cardio-session h4')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+    文案: document.querySelector('.cardio-result-title')?.textContent.replace(/\\s+/g, ' ').trim() || '',
+    kcal: document.querySelector('.cardio-result .badge')?.textContent || '',
   }))()`);
-  console.log(`✅ 重新打开应用后的勾选：${planAfterReload.器械.join('、') || '（一个都没有）'}｜目标 ${planAfterReload.目标}｜时长 ${planAfterReload.时长}`);
+  console.log(`✅ 重新打开应用后停在「${planTabAfterReload === 'training' ? '训练计划' : planTabAfterReload || '未知'}」｜器械 ${planAfterReload.器械.join('、') || '（一个都没有）'}｜目标 ${planAfterReload.目标}｜时长 ${planAfterReload.时长}`);
   console.log(`   推荐文案：${planAfterReload.文案}`);
+  if (planTabAfterReload !== 'training') problems.push(`计划页分段没有记住，重新打开后是「${planTabAfterReload || '未知'}」`);
   await evaluate(`document.querySelector('#goalChips')?.scrollIntoView({ block: 'center' })`);
   await sleep(350);
   const shotPlanPersist = await client.send('Page.captureScreenshot', { format: 'png' });
@@ -922,7 +945,7 @@ async function main() {
   }
   if (planAfterReload.目标 !== 'low_impact') problems.push(`训练目标没存住：重开后是 ${planAfterReload.目标}`);
   if (planAfterReload.时长 !== '45') problems.push(`训练时长没存住：重开后是 ${planAfterReload.时长}`);
-  if (!planAfterReload.文案.includes('45 分钟')) problems.push(`重开后推荐文案没按 45 分钟算：${planAfterReload.文案}`);
+  if (!planAfterReload.kcal.includes('45 分钟')) problems.push(`重开后热量估算没按 45 分钟算：${planAfterReload.kcal}`);
 
   // 试着把「爬坡走」换成可用器械的动作
   const subSheet = await evaluate(`(async () => {

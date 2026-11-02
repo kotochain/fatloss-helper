@@ -455,15 +455,13 @@ main { padding: 14px; }
   .card { animation: none; }
   * { transition: none !important; }
 }
-/* 次级区块：去掉卡片外壳（v50 预览）
- * 一屏里 4~5 个白卡长得一模一样，眼睛就没有落点了。
- * 现在只有「主数据卡 / 有列表的卡」保留外壳，说明型区块变轻。 */
+/* 辅助内容保留轻卡片边界，避免白底文字直接落在页面底色上。 */
 .card.flat {
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  padding: 2px 2px 12px;
-  margin-bottom: 4px;
+  background: var(--surface-soft);
+  border-color: var(--line);
+  box-shadow: 0 1px 3px rgba(60, 40, 45, 0.04);
+  padding: 14px;
+  margin-bottom: 12px;
 }
 .card.flat .card-title { margin-bottom: 6px; }
 .card.flat .card-title::before { background: var(--line); }
@@ -1449,6 +1447,87 @@ details.adv[open] > summary { border-bottom: 1px solid var(--line); }
 .session h4 { margin: 0 0 6px; font-size: var(--text-body); }
 .session ul { margin: 0; padding-left: 18px; font-size: var(--text-small); color: var(--ink-2); }
 .session li { margin-bottom: 2px; }
+
+.cardio-card .card-title { margin-bottom: 12px; }
+.cardio-equipment {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.cardio-equipment > summary,
+.cardio-options > summary,
+.cardio-substitutes > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  list-style: none;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: var(--text-footnote);
+}
+.cardio-equipment > summary::-webkit-details-marker,
+.cardio-options > summary::-webkit-details-marker,
+.cardio-substitutes > summary::-webkit-details-marker { display: none; }
+.cardio-equipment > summary span,
+.cardio-options > summary span { color: var(--ink); font-weight: 600; }
+.cardio-equipment > summary em,
+.cardio-options > summary em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: var(--text-caption);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cardio-equipment > summary::after,
+.cardio-options > summary::after,
+.cardio-substitutes > summary::after {
+  content: '›';
+  margin-left: auto;
+  color: var(--brand-strong);
+  font-size: var(--text-body);
+  flex: none;
+}
+.cardio-equipment[open] > summary::after,
+.cardio-options[open] > summary::after,
+.cardio-substitutes[open] > summary::after { transform: rotate(90deg); }
+.cardio-equipment .chips { padding-top: 8px; }
+.cardio-setup { display: grid; gap: 2px; }
+.cardio-setup .field { margin-bottom: 10px; }
+.cardio-setup .field > span { margin-bottom: 6px; font-weight: 600; }
+.cardio-goals .chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cardio-goals .chip,
+.cardio-minutes .chip { min-width: 0; padding: 7px 9px; }
+.cardio-goals .chip { width: 100%; white-space: nowrap; }
+.cardio-minutes .chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.cardio-minutes .chip { width: 100%; white-space: nowrap; }
+@media (max-width: 360px) {
+  .cardio-minutes .chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.cardio-result > .card-title { margin-bottom: 12px; }
+.cardio-recommendation-head,
+.cardio-option-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cardio-kicker { color: var(--brand-strong); font-size: var(--text-caption); font-weight: 700; }
+.cardio-result-title { margin: 5px 0 12px; font-size: var(--text-headline); line-height: 1.4; }
+.cardio-details { display: grid; gap: 9px; margin: 0; }
+.cardio-details > div { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cardio-details dt { color: var(--ink-3); font-size: var(--text-caption); }
+.cardio-details dd { margin: 0; color: var(--ink-2); font-size: var(--text-small); line-height: 1.55; }
+.cardio-log { margin-top: 14px; }
+.cardio-options { margin-top: 8px; border-bottom: 1px solid var(--line); }
+.cardio-options > summary { justify-content: flex-start; }
+.cardio-options > summary em { margin-left: auto; }
+.cardio-option-list { padding: 2px 0 10px; }
+.cardio-option { padding: 10px 0; border-top: 1px solid var(--line); }
+.cardio-option-head h4 { min-width: 0; margin: 0; font-size: var(--text-small); }
+.cardio-option p { margin: 5px 0 4px; color: var(--ink-2); font-size: var(--text-footnote); line-height: 1.5; }
+.text-action { min-height: 40px; border: 0; padding: 8px 0; background: transparent; color: var(--brand-strong); font: inherit; font-size: var(--text-footnote); font-weight: 600; cursor: pointer; }
+.cardio-context { margin: 10px 0 4px; line-height: 1.5; }
+.cardio-substitutes { margin-top: 2px; }
+.cardio-substitutes > summary { justify-content: flex-start; }
+.cardio-substitutes .search-hit:first-child { margin-top: 6px; }
 
 .badge { font-size: var(--text-caption); padding: 3px 9px; border-radius: var(--radius-pill); background: var(--surface-muted); color: var(--ink-2); font-weight: 600; }
 .badge.strength { background: var(--lilac-soft); color: var(--lilac); }

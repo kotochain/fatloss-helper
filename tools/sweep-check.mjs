@@ -356,7 +356,7 @@ const PAGE_PRELUDE = String.raw`
      动态枚举：不维护按钮清单，而是从 DOM 里按「可点元素」的通用特征收集。
      这样新加的按钮自动被覆盖，不会出现清单跟界面脱节。 */
   var CAND_ATTRS = [
-    'data-act', 'data-pick', 'data-meal', 'data-method', 'data-record-tab',
+    'data-act', 'data-pick', 'data-meal', 'data-method', 'data-record-tab', 'data-plan-tab',
     'data-train-eq', 'data-train-cardio', 'data-train-strength', 'data-train-min', 'data-train-intensity',
     'data-preset', 'data-model', 'data-set', 'data-mode', 'data-recover', 'data-wipe',
     'data-sex', 'data-act-key', 'data-goal', 'data-pace', 'data-days', 'data-key',
@@ -367,7 +367,7 @@ const PAGE_PRELUDE = String.raw`
     'button', '[role="tab"]', '[role="button"]', 'summary',
     'input[type="button"]', 'input[type="submit"]', 'a[href]',
     '[data-act]', '[data-pick]', '[data-meal]', '[data-method]',
-    '[data-record-tab]', '[data-train-eq]', '[data-train-cardio]', '[data-train-strength]',
+    '[data-record-tab]', '[data-plan-tab]', '[data-train-eq]', '[data-train-cardio]', '[data-train-strength]',
     '[data-train-min]', '[data-train-intensity]', '[data-preset]', '[data-model]',
     '[data-set]', '[data-mode]', '[data-recover]', '[data-wipe]', '[data-sex]',
     '[data-act-key]', '[data-goal]', '[data-pace]', '[data-days]', '[data-key]',
@@ -906,11 +906,17 @@ const ROOT_SCENES = {
       prelude: `(function(){var d=document.getElementById('trainEquipBox'); if (d) d.open = true;})()`,
     },
     {
-      id: 'plan', label: '计划页',
-      path: ['.tab[data-view="plan"]'],
-      expect: { tab: 'plan', sheetKind: null, mustHave: ['#trainDays'] },
-      // 「替代方案」在折叠的 details 里，展开才能覆盖 data-subs 按钮
-      prelude: `(function(){var ds=document.querySelectorAll('#app details'); for (var i=0;i<ds.length;i++){ if ((ds[i].textContent||'').indexOf('替代方案')>=0) ds[i].open = true; }})()`,
+      id: 'plan-food', label: '计划页 › 饮食计划',
+      path: ['.tab[data-view="plan"]', '[data-plan-tab="food"]'],
+      expect: { tab: 'plan', sheetKind: null, mustHave: ['[data-plan-pane="food"]', '[data-act="use-plan"]'], mustNotHave: ['#trainDays', '#equipChips'] },
+    },
+    {
+      id: 'plan-training', label: '计划页 › 训练计划',
+      path: ['.tab[data-view="plan"]', '[data-plan-tab="training"]'],
+      expect: { tab: 'plan', sheetKind: null, mustHave: ['[data-plan-pane="training"]', '#trainDays', '#equipChips'], mustNotHave: ['[data-plan-pane="food"]', '[data-act="use-plan"]'] },
+      // 器械、备选动作和替代方案默认折叠，展开后才能覆盖其中的操作按钮
+      prelude: `(function(){var e=document.getElementById('cardioEquipment'); if(e) e.open=true; var ds=document.querySelectorAll('#app details'); for (var i=0;i<ds.length;i++){ var t=ds[i].textContent||''; if (t.indexOf('其他可行方案')>=0 || t.indexOf('替代方案')>=0) ds[i].open = true; }})()`,
+
     },
     {
       id: 'progress', label: '我的页',

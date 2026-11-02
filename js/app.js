@@ -118,11 +118,17 @@ let cardioPick = {
   goal: normalizeCardioGoal(state?.settings?.cardioGoal),
   minutes: normalizeCardioMinutes(state?.settings?.cardioMinutes),
 };
+let cardioEquipmentOpen = false;
+function rememberCardioEquipmentOpen() {
+  const details = $('#cardioEquipment');
+  if (details) cardioEquipmentOpen = details.open;
+}
 /**
  * 勾/取消一个器械：界面上的两处（计划页、记录→练的）共用这一份，勾完立刻存盘。
  * 全部取消时留「徒手」—— 一个都没有的话推荐不出任何动作（跟以前的行为一致）。
  */
 function toggleEquipment(key) {
+  rememberCardioEquipmentOpen();
   const cur = normalizeEquipment(cardioPick.equipment);
   const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
   cardioPick.equipment = next.length ? next : ['bodyweight'];
@@ -136,6 +142,7 @@ function toggleEquipment(key) {
 
 /** 目标/时长的选择也存进 settings（跟器械一样，重开还在） */
 function setCardioGoal(key) {
+  rememberCardioEquipmentOpen();
   cardioPick.goal = normalizeCardioGoal(key);
   if (state) {
     state.settings = state.settings || {};
@@ -146,6 +153,7 @@ function setCardioGoal(key) {
 }
 
 function setCardioMinutes(minutes) {
+  rememberCardioEquipmentOpen();
   cardioPick.minutes = normalizeCardioMinutes(minutes);
   if (state) {
     state.settings = state.settings || {};
@@ -1973,73 +1981,101 @@ function guessMeal() {
 
 /* ── 推荐页 ──────────────────────────────── */
 
+function currentPlanTab() {
+  return state.settings?.planTab === 'training' ? 'training' : 'food';
+}
+
+function setPlanTab(tab) {
+  const next = tab === 'training' ? 'training' : 'food';
+  if (next === currentPlanTab()) return;
+  state.settings.planTab = next;
+  save();
+  render();
+  window.scrollTo({ top: 0 });
+}
+
 function renderPlan() {
   const t = targets();
+  const tab = currentPlanTab();
   const plan = buildMealPlan(t, { seed: planSeed });
-  const week = buildWeekPlan(state.settings.trainDays, { stepsKey: state.settings.stepsKey });
+  const content = tab === 'food' ? `
+    <section data-plan-pane="food">
+      <div class="card">
+        <div class="card-title">一天怎么吃 <span class="tiny muted">按约 ${Math.round(t.targetCalories / 10) * 10} kcal / 蛋白 ${Math.round(t.proteinG)} g 配</span></div>
+        <div class="row between small mb-1">
+          <span>这份餐单合计约 <b>${Math.round(plan.planKcalWithOil / 10) * 10}</b> kcal、蛋白约 <b>${Math.round(plan.planProteinG)}</b> g</span>
+          <span class="tag ${Math.abs(plan.deviation) <= 10 ? 'green' : 'amber'}">${plan.deviation > 0 ? '+' : ''}${Math.round(plan.deviation)}%</span>
+        </div>
+        <div class="btn-row mt-3">
+          <button class="btn grow" data-act="use-plan">按这个餐单记到${dayLabel(dateKey)}</button>
+          <button class="btn ghost" data-act="next-plan">换一套</button>
+        </div>
+        ${plan.cookingOilG > 0 ? `<details class="why mb-3">
+          <summary>烹调油也算进去了（全天 ${plan.cookingOilG} 克，约 ${plan.cookingOilKcal} kcal）</summary>
+          <p>这份餐单里的菜按这个油量做的：${plan.meals.filter((m) => m.oilG > 0).map((m) => `${m.name} ${m.oilG} 克`).join('、')}。
+          已经算进上面的总数，不用另外再加。</p>
+        </details>` : ''}
+        <p class="tiny muted mb-3">${esc(plan.deviationNote)}</p>
+        ${plan.meals.map((m) => `
+          <div class="session">
+            <h4>${m.name} <span class="tiny muted">${m.kcal} kcal / 蛋白 ${m.proteinG} g${m.oilG ? ` / 油 ${m.oilG} g` : ''}</span></h4>
+            <div class="small muted mb-1">${esc(m.dishName)}</div>
+            <ul>${m.items.map((it) => `<li>${esc(it.food.name)} ${esc(it.desc)}${it.clampedBy ? ' <span class="tag amber">已按热量封顶</span>' : ''}</li>`).join('')}</ul>
+          </div>`).join('')}
+        <p class="tiny muted mt-2">只是把食物写进${dayLabel(dateKey)}的记录里，之后可以点条目改份量或删掉。想换一套？回上面的摘要处点「换一套」。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">每天的固定提醒</div>
+        <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
+          ${myInsights(2).map((x) => `<li class="mb-1">${icon(x.icon, { size: 16 })} <b>${esc(x.title)}</b><br><span class="muted">${esc(x.detail)}</span></li>`).join('')
+            || buildDailyTips(t, plan.cookingOilG).map((x) => `<li class="mb-1">${esc(x)}</li>`).join('')}
+        </ul>
+      </div>
+    </section>` : `
+    <section data-plan-pane="training">
+      ${renderCardioCard()}
+      ${(() => {
+        const week = buildWeekPlan(state.settings.trainDays, { stepsKey: state.settings.stepsKey });
+        return `<div class="card">
+          <div class="card-title">一周练什么</div>
+          <label class="field"><span>你每周能练几天？</span>
+            <div class="chips" id="trainDays">
+              ${[2, 3, 4].map((d) => `<button class="chip ${state.settings.trainDays === d ? 'on' : ''}" data-days="${d}">${d} 天</button>`).join('')}
+            </div>
+          </label>
+          <label class="field"><span>平时走路多吗？</span>
+            <div class="chips" id="stepKey">
+              ${[['low', '基本不动'], ['mid', '有走一点'], ['high', '走得比较多']].map(([k, label]) => `<button class="chip ${state.settings.stepsKey === k ? 'on' : ''}" data-key="${k}">${label}</button>`).join('')}
+            </div>
+          </label>
+          ${week.sessions.map((s) => `
+            <div class="session">
+              <h4>${esc(s.title)} <span class="badge ${s.type}">${s.type === 'strength' ? '力量' : '有氧'} · ${s.minutes} 分钟</span></h4>
+              <ul>${s.blocks.map((b) => `<li>${esc(b.name)} — ${esc(b.sets)}</li>`).join('')}</ul>
+            </div>`).join('')}
+          <div class="warn info mt-3">每天走路目标 <b>${week.stepTarget}</b> 步。${esc(week.stepHint)}</div>
+          <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
+            ${week.notes.map((n) => `<li class="mb-1">${esc(n)}</li>`).join('')}
+          </ul>
+          <p class="tiny muted mt-2">
+            这些动作都是在家能做的徒手或哑铃动作。做不动就先减次数、加组间休息；膝盖、腰、肩有旧伤就别做相应动作，先问医生或教练。
+          </p>
+        </div>`;
+      })()}
+    </section>`;
 
   app.innerHTML = `
-    <div class="card">
-      <div class="card-title">一天怎么吃 <span class="tiny muted">按约 ${Math.round(t.targetCalories / 10) * 10} kcal / 蛋白 ${Math.round(t.proteinG)} g 配</span></div>
-      <div class="row between small mb-1">
-        <span>这份餐单合计约 <b>${Math.round(plan.planKcalWithOil / 10) * 10}</b> kcal、蛋白约 <b>${Math.round(plan.planProteinG)}</b> g</span>
-        <span class="tag ${Math.abs(plan.deviation) <= 10 ? 'green' : 'amber'}">${plan.deviation > 0 ? '+' : ''}${Math.round(plan.deviation)}%</span>
-      </div>
-      <!-- 主操作放在摘要正下方：不能让用户滚完整张餐单才看到「采用」（总账 UX 评估第 3 组） -->
-      <div class="btn-row mt-3">
-        <button class="btn grow" data-act="use-plan">按这个餐单记到${dayLabel(dateKey)}</button>
-        <button class="btn ghost" data-act="next-plan">换一套</button>
-      </div>
-      ${plan.cookingOilG > 0 ? `<details class="why mb-3">
-        <summary>烹调油也算进去了（全天 ${plan.cookingOilG} 克，约 ${plan.cookingOilKcal} kcal）</summary>
-        <p>这份餐单里的菜按这个油量做的：${plan.meals.filter((m) => m.oilG > 0).map((m) => `${m.name} ${m.oilG} 克`).join('、')}。
-        已经算进上面的总数，不用另外再加。</p>
-      </details>` : ''}
-      <p class="tiny muted mb-3">${esc(plan.deviationNote)}</p>
-      ${plan.meals.map((m) => `
-        <div class="session">
-          <h4>${m.name} <span class="tiny muted">${m.kcal} kcal / 蛋白 ${m.proteinG} g${m.oilG ? ` / 油 ${m.oilG} g` : ''}</span></h4>
-          <div class="small muted mb-1">${esc(m.dishName)}</div>
-          <ul>${m.items.map((it) => `<li>${esc(it.food.name)} ${esc(it.desc)}${it.clampedBy ? ' <span class="tag amber">已按热量封顶</span>' : ''}</li>`).join('')}</ul>
-        </div>`).join('')}
-      <p class="tiny muted mt-2">只是把食物写进${dayLabel(dateKey)}的记录里，之后可以点条目改份量或删掉。想换一套？回上面的摘要处点「换一套」。</p>
+    <div class="segments" id="planTabs" role="tablist" aria-label="计划内容">
+      <button class="seg-btn ${tab === 'food' ? 'on' : ''}" data-plan-tab="food" role="tab" aria-selected="${tab === 'food'}">${icon('bowl', { size: 16 })} 饮食计划</button>
+      <button class="seg-btn ${tab === 'training' ? 'on' : ''}" data-plan-tab="training" role="tab" aria-selected="${tab === 'training'}">${icon('run', { size: 16 })} 训练计划</button>
     </div>
+    ${content}`;
 
-    ${renderCardioCard()}
-
-    <div class="card">
-      <div class="card-title">每天的固定提醒</div>
-      <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
-        ${myInsights(2).map((x) => `<li class="mb-1">${icon(x.icon, { size: 16 })} <b>${esc(x.title)}</b><br><span class="muted">${esc(x.detail)}</span></li>`).join('')
-          || buildDailyTips(t, plan.cookingOilG).map((x) => `<li class="mb-1">${esc(x)}</li>`).join('')}
-      </ul>
-    </div>
-
-    <div class="card">
-      <div class="card-title">一周练什么</div>
-      <label class="field"><span>你每周能练几天？</span>
-        <div class="chips" id="trainDays">
-          ${[2, 3, 4].map((d) => `<button class="chip ${state.settings.trainDays === d ? 'on' : ''}" data-days="${d}">${d} 天</button>`).join('')}
-        </div>
-      </label>
-      <label class="field"><span>平时走路多吗？</span>
-        <div class="chips" id="stepKey">
-          ${[['low', '基本不动'], ['mid', '有走一点'], ['high', '走得比较多']].map(([k, label]) => `<button class="chip ${state.settings.stepsKey === k ? 'on' : ''}" data-key="${k}">${label}</button>`).join('')}
-        </div>
-      </label>
-      ${week.sessions.map((s) => `
-        <div class="session">
-          <h4>${esc(s.title)} <span class="badge ${s.type}">${s.type === 'strength' ? '力量' : '有氧'} · ${s.minutes} 分钟</span></h4>
-          <ul>${s.blocks.map((b) => `<li>${esc(b.name)} — ${esc(b.sets)}</li>`).join('')}</ul>
-        </div>`).join('')}
-      <div class="warn info mt-3">每天走路目标 <b>${week.stepTarget}</b> 步。${esc(week.stepHint)}</div>
-      <ul class="small" style="margin:0;padding-left:18px;color:var(--ink-2)">
-        ${week.notes.map((n) => `<li class="mb-1">${esc(n)}</li>`).join('')}
-      </ul>
-      <p class="tiny muted mt-2">
-        这些动作都是在家能做的徒手或哑铃动作。做不动就先减次数、加组间休息；膝盖、腰、肩有旧伤就别做相应动作，先问医生或教练。
-      </p>
-    </div>`;
+  app.querySelectorAll('[data-plan-tab]').forEach((button) => {
+    button.addEventListener('click', () => setPlanTab(button.dataset.planTab));
+  });
+  if (tab !== 'training') return;
 
   $('#trainDays').addEventListener('click', (e) => {
     const b = e.target.closest('[data-days]');
@@ -2064,6 +2100,12 @@ function renderPlan() {
  */
 function renderCardioCard() {
   const weightKg = state.profile?.weightKg ?? 60;
+  const pickedEquipment = cardioPick.equipment
+    .map((key) => EQUIPMENT[key]?.name)
+    .filter(Boolean);
+  const equipmentSummary = pickedEquipment.length <= 2
+    ? pickedEquipment.join('、')
+    : `${pickedEquipment.slice(0, 2).join('、')}等 ${pickedEquipment.length} 项`;
   const rec = recommendCardio({
     equipment: cardioPick.equipment,
     goal: cardioPick.goal,
@@ -2071,45 +2113,64 @@ function renderCardioCard() {
     weightKg,
   });
   const today = getDay(state, dateKey);
+  const primaryPick = rec.picks[0];
+  const otherPicks = rec.picks.slice(1);
   return `
-    <div class="card">
-      <div class="card-title">今天练什么 <span class="tiny muted">按你今天能用的器械排</span></div>
-
-      <label class="field"><span>今天有哪些器械？（可多选）</span>
+    <div class="card cardio-card">
+      <div class="card-title">今天练什么</div>
+      <details class="cardio-equipment" id="cardioEquipment" ${cardioEquipmentOpen ? 'open' : ''}>
+        <summary><span>可用器械</span><em>${esc(equipmentSummary)}</em></summary>
         <div class="chips" id="equipChips">
           ${listEquipment().map((eq) => `
             <button class="chip ${cardioPick.equipment.includes(eq.key) ? 'on' : ''}" data-eq="${eq.key}">${icon(eq.icon, { size: 15 })} ${eq.name}</button>
           `).join('')}
         </div>
-      </label>
+      </details>
 
-      <div class="grid2">
-        <label class="field"><span>今天想练什么</span>
+      <div class="cardio-setup">
+        <label class="field cardio-goals"><span>训练目标</span>
           <div class="chips" id="goalChips">
-            ${Object.entries(GOALS).map(([k, g]) => `<button class="chip ${cardioPick.goal === k ? 'on' : ''}" data-goal="${k}">${g.name}</button>`).join('')}
+            ${Object.entries(GOALS).map(([k, g]) => `<button class="chip ${cardioPick.goal === k ? 'on' : ''}" data-goal="${k}" aria-label="${g.name}">${g.short}</button>`).join('')}
           </div>
         </label>
-        <label class="field"><span>有多少时间</span>
+        <label class="field cardio-minutes"><span>训练时长</span>
           <div class="chips" id="minuteChips">
             ${[20, 30, 45, 60].map((m) => `<button class="chip ${cardioPick.minutes === m ? 'on' : ''}" data-min="${m}">${m} 分钟</button>`).join('')}
           </div>
         </label>
       </div>
-
-      ${rec.picks.length ? `
-        <div class="small muted mb-2">${esc(rec.advice)}</div>
-        ${rec.picks.map((p, i) => `
-          <div class="session cardio-session">
-            <h4>${i === 0 ? '首选：' : '也可以：'}${esc(p.name)} <span class="badge cardio">约 ${p.kcal} kcal / ${cardioPick.minutes} 分钟</span></h4>
-            <ul>
-              <li>怎么做：${esc(p.intensity)}</li>
-              <li>要点：${esc(p.cue)}</li>
-              <li>注意：${esc(p.note)}</li>
-            </ul>
-            <button class="add-line" data-log-cardio="${p.id}">${dateKey === todayKey() ? '今天就做这个' : `记到${dayLabel(dateKey)}`}（写入记录）</button>
-          </div>`).join('')}
-        <details class="mt-1">
-          <summary class="small" style="cursor:pointer">想做的机器没空？点这里看替代方案</summary>
+    </div>
+    ${primaryPick ? `
+      <div class="card cardio-result">
+        <div class="card-title">推荐训练</div>
+        <div class="cardio-recommendation-head">
+          <span class="cardio-kicker">首选方案</span>
+          <span class="badge cardio">约 ${primaryPick.kcal} kcal · ${cardioPick.minutes} 分钟</span>
+        </div>
+        <h3 class="cardio-result-title">${esc(primaryPick.name)}</h3>
+          <dl class="cardio-details">
+            <div><dt>强度</dt><dd>${esc(primaryPick.intensity)}</dd></div>
+            <div><dt>要点</dt><dd>${esc(primaryPick.cue)}</dd></div>
+            <div><dt>注意</dt><dd>${esc(primaryPick.note)}</dd></div>
+          </dl>
+        <button class="btn block cardio-log" data-log-cardio="${primaryPick.id}">${dateKey === todayKey() ? '记录这个训练' : `记到${dayLabel(dateKey)}`}</button>
+        ${otherPicks.length ? `
+          <details class="cardio-options">
+            <summary><span>其他可行方案</span><em>${otherPicks.length} 个备选</em></summary>
+            <div class="cardio-option-list">
+              ${otherPicks.map((p) => `
+                <article class="cardio-option">
+                  <div class="cardio-option-head">
+                    <h4>${esc(p.name)}</h4>
+                    <span class="badge cardio">约 ${p.kcal} kcal</span>
+                  </div>
+                  <p>${esc(p.intensity)}</p>
+                  <button class="text-action" data-log-cardio="${p.id}">记录这个</button>
+                </article>`).join('')}
+            </div>
+          </details>` : ''}
+        <details class="cardio-substitutes">
+          <summary>想做的机器没空？查看替代方案</summary>
           <div class="mt-2">
             ${CARDIO.filter((e) => e.equipment.some((q) => cardioPick.equipment.includes(q))).slice(0, 8).map((e) => `
               <div class="search-hit" data-subs="${e.id}">
@@ -2118,14 +2179,12 @@ function renderCardioCard() {
               </div>`).join('')}
           </div>
         </details>
-      ` : `<div class="warn">${esc(rec.advice)}</div>`}
-
-      ${today.exercises.length ? `
-        <hr class="sep">
-        <div class="small muted">今天已经记了：</div>
+      </div>` : `<div class="card cardio-result"><div class="warn">${esc(rec.advice)}</div></div>`}
+    ${today.exercises.length ? `
+      <div class="card cardio-today">
+        <div class="card-title">今天已经记了</div>
         ${today.exercises.map((x) => trainingRow(describeTraining(x, weightKg))).join('')}
-      ` : ''}
-    </div>`;
+      </div>` : ''}`;
 }
 
 /**
@@ -2148,11 +2207,16 @@ function logRecommendCardio(cardioId, minutes) {
 
 /** 有氧卡片的交互：选器械/目标/时长，以及「记入记录」和「看替代」 */
 function bindCardioCard() {
+  const equipmentDetails = $('#cardioEquipment');
+  equipmentDetails?.addEventListener('toggle', () => {
+    cardioEquipmentOpen = equipmentDetails.open;
+  });
   const eqBox = $('#equipChips');
   if (eqBox) {
     eqBox.addEventListener('click', (e) => {
       const b = e.target.closest('[data-eq]');
       if (!b) return;
+      cardioEquipmentOpen = true;
       toggleEquipment(b.dataset.eq);
     });
   }

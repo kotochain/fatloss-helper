@@ -77,7 +77,8 @@ const INTERFACE_ORDER = [
   ['tab-today', '标签·今天'],
   ['tab-log-food', '标签·记录（吃的）'],
   ['tab-log-training', '标签·记录（练的）'],
-  ['tab-plan', '标签·计划'],
+  ['tab-plan-food', '标签·计划（饮食）'],
+  ['tab-plan-training', '标签·计划（训练）'],
   ['tab-progress', '标签·我的'],
   ['sheet-food-search', '弹层·加食物搜索'],
   ['sheet-food-amount', '弹层·份量'],
@@ -771,7 +772,7 @@ function shotName(id, suffix = '') {
 
 // 大字号模式下固定留几张截图，方便人眼确认「文字有没有挤在一起」（断言抓不到这类主观问题）
 const FONT_WATCH = new Set([
-  'welcome', 'tab-today', 'tab-log-food', 'tab-log-training', 'tab-plan', 'tab-progress',
+  'welcome', 'tab-today', 'tab-log-food', 'tab-log-training', 'tab-plan-food', 'tab-plan-training', 'tab-progress',
   'sheet-calendar', 'sheet-settings', 'sheet-quick-draft', 'sheet-growth',
 ]);
 
@@ -914,7 +915,15 @@ async function runPass(size, { passId, passLabel, scale, captureAll }) {
     await click('[data-record-tab="training"]');
     await waitForNode(`document.querySelector('#trainCardio') || document.querySelector('#trainStrength')`, '记录页·练的面板');
   });
-  await runStep('tab-plan', '标签·计划', 'page', () => goView('plan'));
+  await runStep('tab-plan-food', '标签·计划（饮食）', 'page', async () => {
+    await goView('plan');
+    await waitForNode(`document.querySelector('[data-plan-pane="food"]')`, '计划页·饮食分区');
+  });
+  await runStep('tab-plan-training', '标签·计划（训练）', 'page', async () => {
+    await goView('plan');
+    await click('[data-plan-tab="training"]');
+    await waitForNode(`document.querySelector('[data-plan-pane="training"]')`, '计划页·训练分区');
+  });
   await runStep('tab-progress', '标签·我的', 'page', () => goView('progress'));
 
   // ── 弹层 1：加食物搜索 → 份量 ──
@@ -979,9 +988,10 @@ async function runPass(size, { passId, passLabel, scale, captureAll }) {
   });
   await closeSheetNow();
 
-  // ── 弹层 7：替代动作（计划页折叠区里）──
+  // ── 弹层 7：替代动作（训练计划页折叠区里）──
   await runStep('sheet-plan-sub', '弹层·替代动作', 'sheet', async () => {
     await goView('plan');
+    await click('[data-plan-tab="training"]');
     const ok = await evaluate(`(() => {
       const d = Array.prototype.find.call(document.querySelectorAll('#app details'), (x) => x.textContent.indexOf('替代方案') >= 0);
       if (!d) return false;
