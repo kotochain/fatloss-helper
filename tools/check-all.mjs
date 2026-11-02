@@ -1,8 +1,8 @@
 /**
  * 一条命令跑完本地检查。
  *
- *   npm run check        快：单元测试 + 反向验证 + 密钥扫描 + 界面自检 + 直连 AI + 更新提示 + 照包装（9 步，约 5 分钟）
- *   npm run check:full   全：快的那套 + 线上流程(本地地址) + AI 失败/存档异常 + 全按钮清扫 + 排版（13 步，约 12 分钟）
+ *   npm run check        快：单元测试 + 反向验证 + 密钥扫描 + 样式守卫 + 界面自检 + 直连 AI + 更新提示 + 照包装（10 步，约 5 分钟）
+ *   npm run check:full   全：快的那套 + 线上流程(本地地址) + AI 失败/存档异常 + 全按钮清扫 + 排版（14 步，约 12 分钟）
  *   npm run check:live   只测线上：文件逐字节一致 + 真打开线上网址跑一遍（约 2 分钟，需要联网）
  *
  * 为什么要有这个文件：
@@ -101,6 +101,9 @@ async function main() {
   await runNpm('单元测试', 'test');
   await run('反向验证（故意改坏代码，确认测试会红）', 'tools/mutate-check.mjs');
   await run('密钥扫描', 'tools/check-secrets.mjs', ['--self-test']);
+  // 样式守卫：拦「硬编码颜色 / 字号」。放在这里是因为它不碰浏览器，几百毫秒就完，
+  // 却是最容易被绕过的一条 —— 改配色时谁都可能顺手写个 #fff 之外的颜色。
+  await run('样式守卫（字号与颜色只用 token）', 'tools/style-guard.mjs');
 
   const needServer = [
     ['一句话记录流程', 'tools/quicklog-check.mjs'],

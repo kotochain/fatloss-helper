@@ -27,6 +27,13 @@
   --info: #5B8CB8;
   --info-soft: #EBF2F8;
 
+  /* 今天页圆环的渐变两端（v54 从 js/app.js 里搬进来）：
+     额度还够用品牌绿，快超了转珊瑚色。色值保持不变，只是不再写死在 JS 里。 */
+  --ring-calm-a: #6FA973;
+  --ring-calm-b: #427A47;
+  --ring-low-a: #D98B5F;
+  --ring-low-b: #C0553F;
+
   --ink: #1C1C1E;          /* iOS label */
   --ink-2: #56565C;        /* secondaryLabel */
   --ink-3: #8E8E93;        /* tertiaryLabel */
@@ -58,15 +65,18 @@
   --space-5: 20px;
   --space-6: 24px;
 
-  /* ── 字阶 v53.2 ──
-     全站字号收敛到 7 档，禁止 0.5px 中间档：
-     caption 11 · footnote 12 · small 13 · body 15 · title 17 · headline 21 · display 44
-     原则：正文一律 body；辅助说明一律 small；时间戳/角标才用 footnote 以下。 */
+  /* ── 字阶 v54 ──
+     全站字号收敛到 8 档（含极小角标），禁止 0.5px 中间档：
+     micro 11 · caption 12 · footnote 13 · small 14 · body 15 · title 17 · stat 18 · headline 21 · display 44
+     原则：正文一律 body；辅助说明一律 small；时间戳/角标才用 footnote 以下。
+     守卫：tools/style-guard.mjs 禁止在别处再写 font-size 裸 px。 */
+  --text-micro: 11px;
   --text-caption: 12px;
   --text-footnote: 13px;
   --text-small: 14px;
   --text-body: 15px;
   --text-title: 17px;
+  --text-stat: 18px;
   --text-headline: 21px;
   --text-display: 44px;
   --radius-mini: 8px;
@@ -467,6 +477,15 @@ main { padding: 14px; }
 .card.flat .card-title::before { background: var(--line); }
 .card.flat .btn.ghost { background: var(--surface-muted); }
 
+/* 卡片里套的次级卡（成长页的「这周的小结」「徽章墙」）：不上阴影，只靠细边框分层。
+   v54 从内联 style 抽出来，两处共用。 */
+.card.nested {
+  margin-top: 12px;
+  box-shadow: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+
 /* 主数据卡：整屏唯一一块有渐变和高光的（v50 预览） */
 .card.hero {
   background: #fff;
@@ -676,6 +695,26 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .stat b { font-size: var(--text-small); font-weight: 600; color: var(--ink); white-space: nowrap; }
 .stat b { color: var(--ink); font-weight: 600; }
 .stat .ic { width: 13px; height: 13px; stroke-width: 2; color: var(--brand); }
+
+/* 计划页「目标」卡里的四个数字（基础代谢 / 消耗 / 每天吃 / BMI）。
+   v54 从内联 style 抽出来：同一段样式写四遍，改字号时最容易漏掉一处。 */
+.goal-figure { font-size: var(--text-stat); font-weight: var(--weight-semibold); }
+.goal-figure.brand { color: var(--green-dark); }
+
+/* 卡片标题里的小号次要按钮（「修改资料」「获取模型列表」）。
+   v54 从内联 style 抽出来；min-height 仍由 .btn 的 44px 决定，触控面积不变。 */
+.btn.sm { padding: 4px 10px; font-size: var(--text-caption); }
+.btn.sm.push-right { padding: 7px 10px; float: right; }
+
+/* 折叠区的标题行（AI 教程入口）：整行可点，高度够手指。 */
+.fold-link {
+  cursor: pointer;
+  color: var(--rose);
+  font-size: var(--text-footnote);
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
 
 /* 比例条（保留旧类名，颜色换成新配色） */
 .split { display: flex; height: 8px; border-radius: 99px; overflow: hidden; margin-top: 14px; background: var(--surface-muted); }
@@ -930,7 +969,8 @@ input:focus, select:focus, textarea:focus {
 .search-hit .nm em { font-style: normal; display: block; font-size: var(--text-caption); color: var(--ink-3); }
 .search-hit .kk { font-size: var(--text-footnote); color: var(--ink-2); }
 
-.draft-grams { text-align: center; }
+.draft-grams { text-align: center; width: 80px; padding: 4px 6px; font-size: var(--text-small); }
+.minutes-input { width: 86px; padding: 6px 8px; font-size: var(--text-small); }
 .entry .name em { font-style: normal; display: block; }
 
 /* 「这个份量我是猜的」：份量不确定的条目在下面挂一条反问 + 档位按钮。
@@ -1435,7 +1475,7 @@ details.adv[open] > summary { border-bottom: 1px solid var(--line); }
 .cal-cell .mark {
   position: absolute;
   top: 2px; right: 3px;
-  font-size: 10px; line-height: 1;
+  font-size: var(--text-micro); line-height: 1;
   background: var(--brand-soft);
   color: var(--brand-strong);
   border-radius: var(--radius-pill);

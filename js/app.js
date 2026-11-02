@@ -1023,8 +1023,8 @@ function renderToday() {
         <svg class="ring" viewBox="0 0 190 190" aria-hidden="true">
           <defs>
             <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="${low ? '#D98B5F' : '#6FA973'}"/>
-              <stop offset="100%" stop-color="${low ? '#C0553F' : '#427A47'}"/>
+              <stop offset="0%" stop-color="var(${low ? '--ring-low-a' : '--ring-calm-a'})"/>
+              <stop offset="100%" stop-color="var(${low ? '--ring-low-b' : '--ring-calm-b'})"/>
             </linearGradient>
           </defs>
           <circle class="track" cx="95" cy="95" r="${R}"/>
@@ -1394,8 +1394,8 @@ function renderTrainingPane() {
       </label>
       <div class="row" style="gap:8px;align-items:center;margin:2px 0 4px">
         <span class="tiny muted">也可以自己填</span>
-        <input type="number" id="trainMinutesInput" inputmode="numeric" min="1" max="1440"
-          value="${minutes > 0 ? minutes : ''}" style="width:86px;padding:6px 8px;font-size:14px">
+        <input type="number" id="trainMinutesInput" class="minutes-input" inputmode="numeric" min="1" max="1440"
+          value="${minutes > 0 ? minutes : ''}">
         <span class="tiny muted">分钟</span>
       </div>
 
@@ -1812,7 +1812,7 @@ function drawDraft() {
               ${it.source === 'my-food' ? '<span class="tag">我的食物</span>' : (it.source === 'ai-estimate' ? '<span class="tag amber">AI 估的</span>' : (it.estimated ? '<span class="tag amber">估算</span>' : ''))}
               ${!it.estimated && needsPortionPick(it) ? '<span class="tag amber">份量是猜的</span>' : ''}
             </span>
-            <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams" style="width:80px;padding:4px 6px;font-size:14px">
+            <input type="number" value="${it.grams}" data-grams="${i}" class="draft-grams">
             <span class="kcal">克</span>
             <span class="kcal" data-kcal="${i}">${Math.round(it.kcal)} kcal</span>
             <button class="del" type="button" data-del="${i}" aria-label="删掉这条" title="删掉这条">×</button>
@@ -2348,12 +2348,12 @@ function renderProgress() {
 
     ${t ? `
     <div class="card">
-      <div class="card-title">目标 <button class="btn ghost" data-act="edit-profile" style="padding:4px 10px;font-size:12px">修改资料</button></div>
+      <div class="card-title">目标 <button class="btn ghost sm" data-act="edit-profile">修改资料</button></div>
       <div class="grid2">
-        <div><div class="tiny muted">基础代谢</div><div style="font-size:18px;font-weight:600">${t.bmr} <small class="muted">kcal</small></div></div>
-        <div><div class="tiny muted">每天消耗</div><div style="font-size:18px;font-weight:600">${t.tdee} <small class="muted">kcal</small></div></div>
-        <div><div class="tiny muted">每天吃</div><div style="font-size:18px;font-weight:600;color:var(--green-dark)">${t.targetCalories} <small class="muted">kcal</small></div></div>
-        <div><div class="tiny muted">BMI</div><div style="font-size:18px;font-weight:600">${t.bmi} <small class="muted">${t.bmiClass.label}</small></div></div>
+        <div><div class="tiny muted">基础代谢</div><div class="goal-figure">${t.bmr} <small class="muted">kcal</small></div></div>
+        <div><div class="tiny muted">每天消耗</div><div class="goal-figure">${t.tdee} <small class="muted">kcal</small></div></div>
+        <div><div class="tiny muted">每天吃</div><div class="goal-figure brand">${t.targetCalories} <small class="muted">kcal</small></div></div>
+        <div><div class="tiny muted">BMI</div><div class="goal-figure">${t.bmi} <small class="muted">${t.bmiClass.label}</small></div></div>
       </div>
       <hr class="sep">
       <div class="small">
@@ -3762,7 +3762,7 @@ function openGrowthSheet() {
       <button class="btn block mt-3" id="openRecap">看最近 30 天的回顾</button>
 
       ${showWeekly ? `
-        <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFFFF;border:1px solid var(--line)">
+        <div class="card nested">
           <div class="card-title">这周的小结</div>
           <div class="hl">${icon(hl.icon, { size: 16 })} <b>${esc(hl.text)}</b></div>
           ${review.lines.map((l) => `<div class="small muted" style="margin:4px 0">· ${esc(l)}</div>`).join('')}
@@ -3771,7 +3771,7 @@ function openGrowthSheet() {
           </div>
         </div>` : ''}
 
-      <div class="card" style="margin-top:12px;box-shadow:none;background:#FFFFFF;border:1px solid var(--line)">
+      <div class="card nested">
         <div class="card-title">徽章墙 <span class="tiny muted">${a.unlocked.length} / ${a.list.length}</span></div>
         <div class="badge-grid">
           ${a.list.map((x) => `
@@ -3997,7 +3997,7 @@ function drawAiSettings(cfg, relay, then = null) {
       <input type="text" id="aiKey" placeholder="${cfg.keyMasked ? `已保存：${esc(cfg.keyMasked)}（留空则不改）` : '粘贴服务商的 API Key'}" autocomplete="off" autocapitalize="off" spellcheck="false">
     </label>
     <details id="aiKeyGuide" style="margin:-4px 0 12px">
-      <summary style="cursor:pointer;color:var(--rose);font-size:13px;min-height:40px;display:flex;align-items:center">手把手教程：从注册到粘贴（5 分钟）</summary>
+      <summary class="fold-link">手把手教程：从注册到粘贴（5 分钟）</summary>
       <div class="tiny" style="margin-top:8px;line-height:1.75">
         <div class="warn info mb-3">
           <b>先把钱的事说清楚</b>：API 是 <b>DeepSeek 官方按用量收费</b>，钱直接付给 DeepSeek。
@@ -4040,7 +4040,7 @@ function drawAiSettings(cfg, relay, then = null) {
           <input type="text" id="aiBaseUrl" value="${esc(cfg.baseUrl || preset.baseUrl || '')}" placeholder="https://api.deepseek.com">
         </label>
 
-        <label class="field"><span>模型名 <button class="btn ghost" id="aiFetchModels" style="padding:7px 10px;font-size:12px;float:right">获取模型列表</button></span>
+        <label class="field"><span>模型名 <button class="btn ghost sm push-right" id="aiFetchModels">获取模型列表</button></span>
           <input type="text" id="aiModel" value="${esc(cfg.model || preset.model || '')}" placeholder="deepseek-flash" list="aiModelList" autocomplete="off">
           <datalist id="aiModelList">${lastModels.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
           <div id="modelPick" class="chips mt-1"></div>
